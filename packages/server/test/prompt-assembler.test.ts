@@ -1,0 +1,77 @@
+import { describe, expect, it } from "vitest";
+import {
+  assemblePrompt,
+  assembleReply,
+  EmptyMessageError,
+  PromptAssembler,
+} from "../src/services/prompt-assembler";
+
+describe("assemblePrompt", () => {
+  it("with all base prompts blank, sends exactly the message", () => {
+    const { prompt, layers } = assemblePrompt({ globalBase: "", repoBase: "", message: "fix the login redirect" });
+    expect(prompt).toBe("fix the login redirect");
+    expect(layers).toEqual([
+      { name: "global", included: false },
+      { name: "repo", included: false },
+      { name: "message", included: true },
+    ]);
+  });
+
+  it("orders global → repo → message, joined by one blank line", () => {
+    const { prompt } = assemblePrompt({ globalBase: "G", repoBase: "R", message: "M" });
+    expect(prompt).toBe("G\n\nR\n\nM");
+  });
+
+  it("skips an empty middle layer without leaving an extra separator", () => {
+    expect(assemblePrompt({ globalBase: "G", repoBase: "", message: "M" }).prompt).toBe("G\n\nM");
+    expect(assemblePrompt({ globalBase: "", repoBase: "R", message: "M" }).prompt).toBe("R\n\nM");
+  });
+
+  it("treats whitespace-only layers as empty", () => {
+    const { prompt, layers } = assemblePrompt({ globalBase: "  \n\t ", repoBase: "\n\n", message: "M" });
+    expect(prompt).toBe("M");
+    expect(layers.filter((l) => l.included).map((l) => l.name)).toEqual(["message"]);
+  });
+
+  it("passes included layers through byte-for-byte (no trimming, no headings)", () => {
+    const globalBase = "  Use pnpm.\n- keep diffs small\n";
+    const repoBase = "# Repo notes\nNx monorepo ✓ — ünïcödé\n\n";
+    const message = "\tRefactor auth  ";
+    const { prompt } = assemblePrompt({ globalBase, repoBase, message });
+    expect(prompt).toBe(`${globalBase}\n\n${repoBase}\n\n${message}`);
+  });
+
+  it("adds no text of its own: output length is the inputs plus separators", () => {
+    const parts = { globalBase: "a".repeat(10), repoBase: "b".repeat(20), message: "c".repeat(30) };
+    expect(assemblePrompt(parts).prompt).toHaveLength(10 + 20 + 30 + 2 * 2);
+  });
+
+  it("refuses an empty message", () => {
+    expect(() => assemblePrompt({ globalBase: "G", repoBase: "R", message: "   " })).toThrow(EmptyMessageError);
+  });
+});
+
+describe("assembleReply", () => {
+  it("sends only the reply", () => {
+    expect(assembleReply("looks good, now add tests").prompt).toBe("looks good, now add tests");
+  });
+
+  it("refuses an empty reply", () => {
+    expect(() => assembleReply("")).toThrow(EmptyMessageError);
+  });
+});
+
+describe("PromptAssembler", () => {
+  it("reads the base prompts fresh on every call", async () => {
+    let globalBase = "";
+    const assembler = new PromptAssembler({
+      globalBasePrompt: async () => globalBase,
+      repoBasePrompt: async (repo) => (repo === "supertri-web" ? "Repo rules" : ""),
+    });
+
+    expect((await assembler.forTask("supertri-web", "do it")).prompt).toBe("Repo rules\n\ndo it");
+    globalBase = "Global rules";
+    expect((await assembler.forTask("supertri-web", "do it")).prompt).toBe("Global rules\n\nRepo rules\n\ndo it");
+    expect((await assembler.forTask("other-repo", "do it")).prompt).toBe("Global rules\n\ndo it");
+  });
+});

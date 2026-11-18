@@ -1,0 +1,34 @@
+{
+  "name": "@my-ai-slaves/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "NODE_ENV=production tsx src/index.ts",
+    "run-task": "tsx src/scripts/run-task.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json",
+    "data:init": "tsx src/scripts/data-init.ts",
+    "data:demo-activity": "tsx src/scripts/demo-activity.ts",
+    "prompt:preview": "tsx src/scripts/prompt-preview.ts"
+  },
+  "dependencies": {
+    "@fastify/middie": "^9.3.6",
+    "@fastify/static": "^10.1.11",
+    "@fastify/websocket": "^11.3.7",
+    "@my-ai-slaves/shared": "*",
+    "fastify": "^5.12.8",
+    "node-pty": "^1.1.0",
+    "vite": "^8.3.8",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}
