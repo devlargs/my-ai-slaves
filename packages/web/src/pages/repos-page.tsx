@@ -535,13 +535,76 @@ function ChainEditor({ repo, onSave }: { repo: Repo; onSave: (chain: string[]) =
           options={available.map((a) => ({ value: a.id, label: a.label }))}
         />
       )}
-      {accounts.length === 0 && (
-        <p className="text-xs text-muted-foreground">
-          Add accounts on the{" "}
-          <a href="#/settings" className="text-signal-ink hover:underline">
-            Settings
-          </a>{" "}
-          page first.
+      {repo.host ? (
+        <RemoteAccountActions repo={repo} chain={chain} onAdded={(id) => void save([...chain, id])} />
+      ) : (
+        accounts.every((a) => a.host) && (
+          <p className="text-xs text-muted-foreground">
+            Add accounts on the{" "}
+            <a href="#/settings" className="text-signal-ink hover:underline">
+              Settings
+            </a>{" "}
+            page first.
+          </p>
+        )
+      )}
+    </div>
+  );
+}
+
+/**
+ * A remote repo can only use accounts that run on its host. Offer to create them right here:
+ * they use the login that's already on the server, so there's nothing else to set up.
+ */
+function RemoteAccountActions({
+  repo,
+  chain,
+  onAdded,
+}: {
+  repo: Repo;
+  chain: string[];
+  onAdded: (accountId: string) => void;
+}) {
+  const accounts = useStore((s) => s.accounts);
+  const host = repo.host as string;
+  const onHost = accounts.filter((a) => a.host === host);
+  const missing = (["claude-code", "cursor-agent"] as const).filter((p) => !onHost.some((a) => a.provider === p));
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const add = async (provider: "claude-code" | "cursor-agent") => {
+    const base = `${host.split(".")[0]?.toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "remote"}-${provider === "claude-code" ? "claude" : "cursor"}`;
+    let label = base;
+    for (let n = 2; accounts.some((a) => a.id === label); n++) label = `${base}-${n}`;
+    setBusy(provider);
+    const account = await attempt(api.createAccount({ label, provider, host }), `Added ${label}`);
+    setBusy(null);
+    if (account) onAdded(account.id);
+  };
+
+  if (missing.length === 0 && onHost.every((a) => chain.includes(a.id))) return null;
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-dashed border-rule-strong p-2.5">
+      {onHost.length === 0 && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Tasks for this repo run on <code className="font-mono text-ink-2">{host}</code>, so they need an account that
+          runs there. Your accounts on this Mac can&apos;t be used. It uses the Claude / Cursor login that&apos;s already
+          on the server.
+        </p>
+      )}
+      {missing.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {missing.map((provider) => (
+            <Button key={provider} size="sm" variant="outline" disabled={busy !== null} onClick={() => void add(provider)}>
+              {busy === provider ? <Loader2Icon className="animate-spin" /> : <PlusIcon />}
+              {provider === "claude-code" ? "Claude Code" : "Cursor"} on {host}
+            </Button>
+          ))}
+        </div>
+      )}
+      {missing.includes("cursor-agent") && (
+        <p className="text-[11px] text-muted-foreground">
+          Cursor on a server needs a recent <code className="font-mono">cursor-agent</code> (run{" "}
+          <code className="font-mono">cursor-agent update</code> there).
         </p>
       )}
     </div>
