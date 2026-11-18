@@ -231,6 +231,10 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
   app.post("/api/tasks/:id/push", (req) => queue.push(params(req).id));
+  app.post("/api/tasks/:id/finish", async (req) => {
+    await queue.markFinished(params(req).id);
+    return { ok: true };
+  });
   app.post("/api/tasks/:id/discard", async (req) => {
     parseBody(z.object({ confirm: z.literal(true) }), req.body);
     await queue.discard(params(req).id);

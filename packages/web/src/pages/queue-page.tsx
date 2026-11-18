@@ -2,6 +2,7 @@ import type { PromptPreviewResponse, RepoView, TaskView } from "@my-ai-slaves/sh
 import {
   ActivityIcon,
   AlertTriangleIcon,
+  CheckCheckIcon,
   CheckIcon,
   ClockIcon,
   CornerDownRightIcon,
@@ -257,6 +258,21 @@ function QueueList({
                 }}
               >
                 <RotateCcwIcon />
+              </Button>
+            )}
+            {(task.status === "needs-review" || task.status === "interrupted") && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground hover:bg-success-soft hover:text-success-ink"
+                title="Mark as finished: off the queue, into History as done. Its branch stays if it has commits."
+                aria-label={`Mark ${task.title} as finished`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void attempt(api.finishTask(task.id), "Marked as finished");
+                }}
+              >
+                <CheckCheckIcon />
               </Button>
             )}
             <DiscardTaskButton task={task} />

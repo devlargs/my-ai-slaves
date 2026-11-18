@@ -135,6 +135,12 @@ export class BranchService {
     }
   }
 
+  /** How many commits the task branch has on top of its base commit (null if the branch is gone). */
+  async commitCount(repo: Repo, br: TaskBranch): Promise<number | null> {
+    const out = await this.git(repo, ["rev-list", "--count", `${br.baseCommit}..${br.name}`]).catch(() => null);
+    return out === null ? null : Number(out.trim());
+  }
+
   async deleteBranch(repo: Repo, br: TaskBranch): Promise<void> {
     assertAiBranch(br.name);
     if ((await this.currentRef(repo)) === br.name) {

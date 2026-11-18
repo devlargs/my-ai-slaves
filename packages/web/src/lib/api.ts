@@ -137,6 +137,7 @@ export const api = {
   taskHistory: (id: string) => request<ActivityEntry[]>("GET", `/tasks/${enc(id)}/history`),
   taskDiff: (id: string) => request<DiffResponse>("GET", `/tasks/${enc(id)}/diff`),
   keepTask: (id: string) => request<Ok>("POST", `/tasks/${enc(id)}/keep`),
+  finishTask: (id: string) => request<Ok>("POST", `/tasks/${enc(id)}/finish`),
   pushTask: (id: string) => request<PushResponse>("POST", `/tasks/${enc(id)}/push`),
   discardTask: (id: string) => request<Ok>("POST", `/tasks/${enc(id)}/discard`, { confirm: true }),
 

@@ -433,6 +433,31 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     expect((await stores.activity.forTask(running.id)).at(-1)?.detail).toContain("Stopped and discarded");
   });
 
+  it("marks a reviewed task finished: keeps a branch with commits, deletes an empty one", async () => {
+    const { queue, repo, stores } = await setup();
+    const withWork = await queue.create({ repo: repo.id, message: "real work" });
+    const done1 = await waitFor(taskWith(queue, withWork.id, "needs-review"));
+    const elsewhere = await queue.create({ repo: repo.id, message: "pushed to another branch" });
+    const done2 = await waitFor(taskWith(queue, elsewhere.id, "needs-review"));
+    // Its work landed somewhere else: the task branch has nothing on top of its base.
+    sh(repo.path, "branch", "-f", done2.branch!.name, done2.branch!.baseCommit);
+
+    await queue.markFinished(withWork.id);
+    await queue.markFinished(elsewhere.id);
+
+    expect(await queue.list()).toEqual([]);
+    expect(sh(repo.path, "branch", "--list", "ai/*").trim()).toBe(done1.branch!.name);
+    expect(head(repo.path)).toBe("main");
+    const outcomes = Object.fromEntries((await queue.history()).map((h) => [h.taskId, h.outcome]));
+    expect(outcomes).toEqual({ [withWork.id]: "done", [elsewhere.id]: "done" });
+    expect((await stores.activity.forTask(withWork.id)).at(-1)?.detail).toContain("kept (1 commit)");
+    expect((await stores.activity.forTask(elsewhere.id)).at(-1)?.detail).toContain("had no commits, so it was deleted");
+
+    const pending = await queue.create({ repo: repo.id, message: "SLOW still going" });
+    await expect(queue.markFinished(pending.id)).rejects.toThrow("only a task waiting for review");
+    await queue.discard(pending.id);
+  });
+
   it("moves an old worktree task onto its branch in the repo", async () => {
     const { dir, stores, queue, repo } = await setup();
     const wtPath = join(dir, "old-worktree");

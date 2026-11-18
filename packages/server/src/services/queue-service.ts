@@ -400,6 +400,33 @@ export class QueueService {
     return result;
   }
 
+  /**
+   * You're done with it: off the queue, into History as done. A branch with commits stays (with any
+   * AI co-author lines stripped); an empty one (the work landed elsewhere) is deleted, losing nothing.
+   */
+  async markFinished(id: string): Promise<void> {
+    const task = await this.getTask(id);
+    if (task.status !== "needs-review" && task.status !== "interrupted") {
+      throw conflict(`This task is ${task.status}; only a task waiting for review or interrupted can be marked finished.`);
+    }
+    let detail = "Marked finished.";
+    if (task.branch) {
+      const repo = await this.deps.repos.get(task.repo);
+      const commits = await this.deps.branches.commitCount(repo, task.branch);
+      if (commits === 0) {
+        await this.deps.branches.deleteBranch(repo, task.branch);
+        detail = `Marked finished. Branch ${task.branch.name} had no commits, so it was deleted.`;
+      } else if (commits !== null) {
+        await this.deps.branches.stripAiTrailers(repo, task.branch);
+        detail = `Marked finished. Branch ${task.branch.name} kept (${commits} commit${commits === 1 ? "" : "s"}).`;
+      }
+    }
+    await this.removeTask(id);
+    this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "marked-finished", detail, data: { branch: task.branch?.name ?? null } });
+    this.deps.broadcaster.taskStatus(id, "done", detail);
+    await this.publish();
+  }
+
   /** Remove a task from the queue in any state. A running task is stopped first. */
   async discard(id: string): Promise<void> {
     let task = await this.getTask(id);
@@ -456,6 +483,7 @@ export class QueueService {
     const outcomes: Record<string, HistoryItem["outcome"]> = {
       kept: "done",
       pushed: "done",
+      "marked-finished": "done",
       discarded: "discarded",
       failed: "failed",
       cancelled: "cancelled",

@@ -18,6 +18,7 @@ export const ActivityEvent = z.enum([
   "interrupted",
   "kept",
   "pushed",
+  "marked-finished",
   "discarded",
 ]);
 export type ActivityEvent = z.infer<typeof ActivityEvent>;

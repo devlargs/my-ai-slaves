@@ -14,6 +14,7 @@ const eventVariant: Partial<Record<ActivityEntry["event"], BadgeVariant>> = {
   finished: "success",
   kept: "success",
   pushed: "success",
+  "marked-finished": "success",
   failed: "destructive",
   cancelled: "outline",
   interrupted: "destructive",
