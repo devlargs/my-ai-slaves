@@ -28,7 +28,15 @@ import {
 } from "@/components/attachments";
 import { DiffPanel } from "@/components/diff-panel";
 import { LiveOutput } from "@/components/live-output";
-import { BoundPromptChips, PromptPicker, useBoundPrompts, usePromptLibrary } from "@/components/prompt-picker";
+import {
+  BoundPromptChips,
+  librarySection,
+  PromptPicker,
+  repoSection,
+  useBoundPrompts,
+  usePromptLibrary,
+  useRepoPrompts,
+} from "@/components/prompt-picker";
 import { PanelHeader } from "@/components/page-header";
 import { SortableList } from "@/components/sortable-list";
 import { TaskStatusBadge } from "@/components/status";
@@ -177,11 +185,12 @@ function QueueList({
                   <span className="truncate">{task.currentAccount}</span>
                 </>
               )}
-              {task.promptIds.length > 0 && (
+              {task.promptIds.length + (task.repoPromptIds?.length ?? 0) > 0 && (
                 <>
                   <span aria-hidden>·</span>
-                  <span className="shrink-0" title={task.promptIds.join(", ")}>
-                    {task.promptIds.length} prompt{task.promptIds.length === 1 ? "" : "s"}
+                  <span className="shrink-0" title={[...(task.repoPromptIds ?? []), ...task.promptIds].join(", ")}>
+                    {task.promptIds.length + (task.repoPromptIds?.length ?? 0)} prompt
+                    {task.promptIds.length + (task.repoPromptIds?.length ?? 0) === 1 ? "" : "s"}
                   </span>
                 </>
               )}
@@ -271,6 +280,14 @@ function Composer() {
   const files = useAttachments();
   const library = usePromptLibrary();
   const bound = useBoundPrompts();
+  const repoPrompts = useRepoPrompts(repo);
+  const repoBound = useBoundPrompts();
+  const sections = [repoSection(repo, repoPrompts, repoBound), librarySection(library, bound)];
+  const tickDefaults = () => repoBound.setIds(repoPrompts.prompts.filter((p) => p.default).map((p) => p.id));
+
+  // Each repo's default prompts come pre-ticked when you switch to it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only when another repo's list arrives
+  useEffect(tickDefaults, [repoPrompts.loadedFor]);
 
   // Fall back to the first repo when the remembered one is gone.
   useEffect(() => {
@@ -293,6 +310,7 @@ function Composer() {
         accountOverride: account === CHAIN ? null : account,
         attachmentIds: files.ids,
         promptIds: bound.ids,
+        repoPromptIds: repoBound.ids,
       }),
       "Task queued",
     );
@@ -301,6 +319,7 @@ function Composer() {
       setMessage("");
       files.clear();
       bound.setIds([]);
+      tickDefaults();
     }
   };
 
@@ -346,9 +365,9 @@ function Composer() {
               ]}
             />
           </div>
-          {bound.ids.length > 0 && (
+          {bound.ids.length + repoBound.ids.length > 0 && (
             <div className="px-2.5 pt-2">
-              <BoundPromptChips bound={bound} library={library} />
+              <BoundPromptChips sections={sections} />
             </div>
           )}
           <textarea
@@ -372,7 +391,10 @@ function Composer() {
           )}
           <div className="flex items-center gap-1 border-t border-rule px-1.5 py-1.5">
             <AttachButton attachments={files} />
-            <PromptPicker bound={bound} library={library} />
+            <PromptPicker
+              sections={sections}
+              footer="Sent in order: global base prompt, the ticked repo prompts, the ticked saved prompts, then your message."
+            />
             <label className="ml-1 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground select-none">
               <Switch checked={preview} onCheckedChange={setPreview} />
               Preview prompt
@@ -409,7 +431,13 @@ function Composer() {
         </div>
       )}
       {preview && repo && (
-        <PromptPreview repo={repo} message={message} attachmentIds={files.ids} promptIds={bound.ids} />
+        <PromptPreview
+          repo={repo}
+          message={message}
+          attachmentIds={files.ids}
+          promptIds={bound.ids}
+          repoPromptIds={repoBound.ids}
+        />
       )}
     </div>
   );
@@ -420,11 +448,13 @@ function PromptPreview({
   message,
   attachmentIds,
   promptIds,
+  repoPromptIds,
 }: {
   repo: string;
   message: string;
   attachmentIds: string[];
   promptIds: string[];
+  repoPromptIds: string[];
 }) {
   const debounced = useDebounced(message, 300);
   const [result, setResult] = useState<PromptPreviewResponse | null>(null);
@@ -438,7 +468,7 @@ function PromptPreview({
       return;
     }
     api
-      .previewPrompt({ repo, message: debounced, attachmentIds, promptIds })
+      .previewPrompt({ repo, message: debounced, attachmentIds, promptIds, repoPromptIds })
       .then((r) => {
         if (!cancelled) {
           setResult(r);
@@ -451,7 +481,7 @@ function PromptPreview({
     return () => {
       cancelled = true;
     };
-  }, [repo, debounced, attachmentIds.join(","), promptIds.join(",")]);
+  }, [repo, debounced, attachmentIds.join(","), promptIds.join(","), repoPromptIds.join(",")]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-rule bg-surface">
@@ -459,7 +489,7 @@ function PromptPreview({
         <span className="label-mono">Exactly what will be sent</span>
         <span className="ml-auto flex flex-wrap gap-1">
           {result?.layers
-            .filter((l) => (l.name !== "attachments" && l.name !== "prompts") || l.included)
+            .filter((l) => (l.name !== "attachments" && l.name !== "prompts" && l.name !== "repo") || l.included)
             .map((l) => (
               <Badge
                 key={l.name}
@@ -602,7 +632,7 @@ function ReplyBox({ taskId }: { taskId: string }) {
         <div className="rounded-lg border border-rule-strong bg-surface transition-[border-color,box-shadow] duration-150 focus-within:border-signal/60 focus-within:ring-3 focus-within:ring-signal/10">
           {bound.ids.length > 0 && (
             <div className="px-2.5 pt-2">
-              <BoundPromptChips bound={bound} library={library} />
+              <BoundPromptChips sections={[librarySection(library, bound)]} />
             </div>
           )}
           <textarea
@@ -626,9 +656,12 @@ function ReplyBox({ taskId }: { taskId: string }) {
           )}
           <div className="flex items-center gap-1 border-t border-rule px-1.5 py-1.5">
             <AttachButton attachments={files} />
-            <PromptPicker bound={bound} library={library} />
-            <span className="min-w-0 truncate text-[11px] text-muted-foreground" title="The session already has the base prompts from its first run.">
-              Continues the same session. Base prompts aren&apos;t re-sent.
+            <PromptPicker
+              sections={[librarySection(library, bound)]}
+              footer="Sent before your reply. The session already has the base and repo prompts from its first run."
+            />
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground" title="The session already has the base and repo prompts from its first run.">
+              Continues the same session. Base and repo prompts aren&apos;t re-sent.
             </span>
             <Button size="sm" variant="signal" className="ml-auto" disabled={!canSend} onClick={() => void send()}>
               <SendIcon /> {files.uploading ? "Uploading…" : "Reply"}
@@ -716,7 +749,19 @@ function PromptReceived({ taskId, version }: { taskId: string; version: string }
           {fresh.account ?? "The CLI"} received{replies > 0 ? " (first run)" : ""}:
         </span>
         {layer("global", "global base prompt")}
-        {layer("repo", "repo base prompt")}
+        {fresh.data?.repoPrompts === undefined ? (
+          layer("repo", "repo base prompt")
+        ) : has("repo") ? (
+          <span className="inline-flex items-center gap-1 text-success-ink">
+            <CheckIcon className="size-3" />
+            repo: {(fresh.data.repoPrompts as { name: string }[]).map((p) => p.name).join(", ")}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <MinusIcon className="size-3" />
+            repo prompts (none ticked)
+          </span>
+        )}
         {has("prompts") && (
           <span className="inline-flex items-center gap-1 text-success-ink">
             <CheckIcon className="size-3" />

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { timestampNow } from "./common";
+import { SavedPrompt } from "./prompts";
 
 export const RepoSlug = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,99}$/);
 
@@ -26,9 +27,34 @@ export const ReposFile = z.object({
 });
 export type ReposFile = z.infer<typeof ReposFile>;
 
-export const KnowledgeFile = z.object({
-  repo: RepoSlug,
-  basePrompt: z.string().default(""),
-  updatedAt: timestampNow(),
+/**
+ * One of a repo's prompts. You tick which ones a task sends; `default` ones come pre-ticked in the
+ * composer. Sent as written, no heading added.
+ */
+export const RepoPrompt = SavedPrompt.extend({
+  default: z.boolean().default(false),
 });
+export type RepoPrompt = z.infer<typeof RepoPrompt>;
+
+/**
+ * `.data/knowledge/<repo>.json`. Array order is the order bound repo prompts are sent in.
+ * Older files held one `basePrompt` string: it becomes a "Base prompt" entry, ticked by default,
+ * so nothing that used to be sent stops being sent.
+ */
+export const KnowledgeFile = z.preprocess(
+  (raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+    const { basePrompt, ...rest } = raw as Record<string, unknown>;
+    if (Array.isArray(rest.prompts) || typeof basePrompt !== "string") return rest;
+    return {
+      ...rest,
+      prompts: basePrompt.trim() ? [{ id: "base-prompt", name: "Base prompt", body: basePrompt, default: true }] : [],
+    };
+  },
+  z.object({
+    repo: RepoSlug,
+    prompts: z.array(RepoPrompt).default([]),
+    updatedAt: timestampNow(),
+  }),
+);
 export type KnowledgeFile = z.infer<typeof KnowledgeFile>;

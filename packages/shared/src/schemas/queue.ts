@@ -52,6 +52,11 @@ export const Task = z.object({
   attachments: z.array(Attachment).default([]),
   /** Saved prompts bound to the task message (ids from prompts.json), sent in library order. */
   promptIds: z.array(z.string()).default([]),
+  /**
+   * The repo's prompts ticked for this task (ids from knowledge/<repo>.json), sent in the repo's order.
+   * null = queued before repos had several prompts: the repo's default prompts are sent.
+   */
+  repoPromptIds: z.array(z.string()).nullable().default(null),
   accountOverride: z.string().nullable().default(null),
   currentAccount: z.string().nullable().default(null),
   branch: TaskBranch.nullable().default(null),

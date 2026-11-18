@@ -134,10 +134,28 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     await repos.remove(params(req).id);
     return { ok: true };
   });
-  app.get("/api/repos/:id/knowledge", (req) => repos.getKnowledge(params(req).id));
-  app.put("/api/repos/:id/knowledge", async (req) =>
-    repos.setKnowledge(params(req).id, parseBody(z.object({ basePrompt: z.string() }), req.body).basePrompt),
-  );
+  // The repo's prompts: you tick which ones each task sends (default ones come pre-ticked).
+  const RepoPromptBody = z.object({ name: z.string().max(120), body: z.string().max(200_000), default: z.boolean().optional() });
+  const promptParams = (req: { params: unknown }) => req.params as { id: string; promptId: string };
+  app.get("/api/repos/:id/prompts", async (req) => (await repos.prompts(params(req).id)).list());
+  app.post("/api/repos/:id/prompts", async (req, reply) => {
+    const body = parseBody(RepoPromptBody, req.body);
+    const list = await repos.prompts(params(req).id);
+    return reply.code(201).send(await list.create(body.name, body.body, { default: body.default ?? false }));
+  });
+  app.put("/api/repos/:id/prompts/order", async (req) => {
+    await (await repos.prompts(params(req).id)).reorder(parseBody(Ids, req.body).ids);
+    return { ok: true };
+  });
+  app.patch("/api/repos/:id/prompts/:promptId", async (req) => {
+    const { id, promptId } = promptParams(req);
+    return (await repos.prompts(id)).update(promptId, parseBody(RepoPromptBody.partial(), req.body));
+  });
+  app.delete("/api/repos/:id/prompts/:promptId", async (req) => {
+    const { id, promptId } = promptParams(req);
+    await (await repos.prompts(id)).remove(promptId);
+    return { ok: true };
+  });
   app.get("/api/fs/browse", (req) => {
     const q = req.query as { path?: string; host?: string };
     return repos.browse(q.path, q.host || null);
@@ -151,18 +169,22 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         message: z.string(),
         attachmentIds: z.array(z.string()).optional(),
         promptIds: z.array(z.string()).optional(),
+        repoPromptIds: z.array(z.string()).optional(),
       }),
       req.body,
     );
     if (!body.message.trim()) return { prompt: "", layers: [] };
     const files = await attachments.resolve(body.attachmentIds);
     const bound = await prompts.resolve(await prompts.validate(body.promptIds));
-    return assembler.forTask(
-      body.repo,
-      body.message,
-      files.map((a) => attachments.pathOf(a)),
-      bound.prompts.map((p) => p.body),
+    const repoPrompts = await repos.prompts(body.repo);
+    const repoBound = await repoPrompts.resolve(
+      body.repoPromptIds === undefined ? await repoPrompts.defaultIds() : await repoPrompts.validate(body.repoPromptIds),
     );
+    return assembler.forTask(body.message, {
+      repoPrompts: repoBound.prompts.map((p) => p.body),
+      boundPrompts: bound.prompts.map((p) => p.body),
+      attachmentPaths: files.map((a) => attachments.pathOf(a)),
+    });
   });
 
   // ── tasks ─────────────────────────────────────────────────────────────────
@@ -176,6 +198,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
           accountOverride: z.string().nullable().optional(),
           attachmentIds: z.array(z.string()).optional(),
           promptIds: z.array(z.string()).optional(),
+          repoPromptIds: z.array(z.string()).optional(),
         }),
         req.body,
       ),

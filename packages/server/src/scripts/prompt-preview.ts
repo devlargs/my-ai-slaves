@@ -1,5 +1,5 @@
 /**
- * Show exactly what would be sent to a CLI, using the base prompts in your real `.data/`.
+ * Show exactly what would be sent to a CLI, using the base prompt and the repo's default prompts in your real `.data/`.
  *   npm run prompt:preview -- "fix the login redirect"
  *   npm run prompt:preview -- --repo supertri-web "fix the login redirect"
  */
@@ -24,21 +24,21 @@ const { stores } = await openDataStores({ dataDir: resolveDataDir() });
 
 const assembler = new PromptAssembler({
   globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
-  repoBasePrompt: async (repo) => {
-    if (!values.repo) return "";
-    const file = join(stores.paths.knowledgeDir, `${repo}.json`);
-    try {
-      await access(file);
-    } catch {
-      console.log(`\n(no ${file} yet, so the repo layer is treated as blank.`);
-      console.log(` To try it, create it with: { "repo": "${repo}", "basePrompt": "..." })`);
-      return "";
-    }
-    return (await stores.knowledge(repo).read()).basePrompt;
-  },
 });
 
-const { prompt, layers } = await assembler.forTask(values.repo ?? "__none__", message);
+// Like a task queued without picking: the repo's default prompts.
+let repoPrompts: string[] = [];
+if (values.repo) {
+  const file = join(stores.paths.knowledgeDir, `${values.repo}.json`);
+  try {
+    await access(file);
+    repoPrompts = (await stores.knowledge(values.repo).read()).prompts.filter((p) => p.default).map((p) => p.body);
+  } catch {
+    console.log(`\n(no ${file} yet, so the repo layer is treated as blank.)`);
+  }
+}
+
+const { prompt, layers } = await assembler.forTask(message, { repoPrompts });
 
 console.log("\nLayers:");
 for (const { name, included } of layers) {

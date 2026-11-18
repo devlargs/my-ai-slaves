@@ -36,7 +36,6 @@ const attachments = new AttachmentStore(stores.paths.attachmentsDir);
 const prompts = new PromptLibrary(stores);
 const assembler = new PromptAssembler({
   globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
-  repoBasePrompt: (repo) => repos.basePromptOf(repo),
 });
 const queue = new QueueService({ stores, accounts, repos, branches, assembler, adapters, broadcaster: hub, attachments, prompts });
 const logins = new LoginService(stores, accounts, adapters, {

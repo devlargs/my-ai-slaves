@@ -1,6 +1,6 @@
 /**
  * Builds the exact text sent to a CLI: no headings, no role text, no wrapper. The output is the
- * non-empty layers (global base → repo base → bound saved prompts → message → attachments),
+ * non-empty layers (global base → ticked repo prompts → bound saved prompts → message → attachments),
  * unchanged, joined by one blank line. The only app-written text is the list of attached file
  * paths, and only when you attach files.
  */
@@ -10,8 +10,8 @@ export type PromptLayerName = "global" | "repo" | "prompts" | "message" | "attac
 export interface PromptLayers {
   /** `settings.json` → `basePrompt` */
   globalBase: string;
-  /** `.data/knowledge/<repo>.json` → `basePrompt` */
-  repoBase: string;
+  /** The repo's prompts ticked for this task (`.data/knowledge/<repo>.json`), in the repo's order. */
+  repoPrompts?: string[];
   /** Saved prompts bound to this message, in library order: sent as written, joined by a blank line. */
   boundPrompts?: string[];
   /** What you typed for this task. */
@@ -44,12 +44,12 @@ export class EmptyMessageError extends Error {
   }
 }
 
-/** global base → repo base → message. Empty layers are skipped; included ones are passed through verbatim. */
+/** Several prompts in one layer: each sent as written, blank ones skipped, one blank line between. */
 const joinBound = (bound: string[]) => bound.filter((b) => !isBlank(b)).join(LAYER_SEPARATOR);
 
 export function assemblePrompt({
   globalBase,
-  repoBase,
+  repoPrompts = [],
   boundPrompts = [],
   message,
   attachmentPaths = [],
@@ -57,7 +57,7 @@ export function assemblePrompt({
   if (isBlank(message)) throw new EmptyMessageError();
   const ordered: [PromptLayerName, string][] = [
     ["global", globalBase],
-    ["repo", repoBase],
+    ["repo", joinBound(repoPrompts)],
     ["prompts", joinBound(boundPrompts)],
     ["message", message],
     ["attachments", attachmentsLayer(attachmentPaths)],
@@ -93,19 +93,19 @@ export function assembleReply(message: string, attachmentPaths: string[] = [], b
 
 export interface BasePromptSources {
   globalBasePrompt(): Promise<string>;
-  repoBasePrompt(repo: string): Promise<string>;
 }
 
-/** Reads the current base prompts at call time, so edits apply to the next task you queue. */
+/** Reads the global base prompt at call time, so edits apply to the next task you queue. */
 export class PromptAssembler {
   constructor(private readonly sources: BasePromptSources) {}
 
-  async forTask(repo: string, message: string, attachmentPaths: string[] = [], boundPrompts: string[] = []): Promise<AssembledPrompt> {
-    const [globalBase, repoBase] = await Promise.all([
-      this.sources.globalBasePrompt(),
-      this.sources.repoBasePrompt(repo),
-    ]);
-    return assemblePrompt({ globalBase, repoBase, boundPrompts, message, attachmentPaths });
+  /** `repoPrompts` / `boundPrompts`: the current text of the prompts ticked for this task. */
+  async forTask(
+    message: string,
+    { repoPrompts = [], boundPrompts = [], attachmentPaths = [] }: { repoPrompts?: string[]; boundPrompts?: string[]; attachmentPaths?: string[] } = {},
+  ): Promise<AssembledPrompt> {
+    const globalBase = await this.sources.globalBasePrompt();
+    return assemblePrompt({ globalBase, repoPrompts, boundPrompts, message, attachmentPaths });
   }
 
   forReply(message: string, attachmentPaths: string[] = [], boundPrompts: string[] = []): AssembledPrompt {

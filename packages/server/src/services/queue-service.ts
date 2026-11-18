@@ -228,6 +228,9 @@ export class QueueService {
     }
     const attachments = await this.deps.attachments.resolve(req.attachmentIds);
     const promptIds = await this.deps.prompts.validate(req.promptIds);
+    // Not given (API, scripts) = the repo's default prompts, as the composer pre-ticks them.
+    const repoPrompts = await this.deps.repos.prompts(repo.id);
+    const repoPromptIds = req.repoPromptIds === undefined ? await repoPrompts.defaultIds() : await repoPrompts.validate(req.repoPromptIds);
 
     const firstLine = message.trim().split("\n")[0] ?? "";
     const title = firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
@@ -246,6 +249,7 @@ export class QueueService {
         message,
         attachments,
         promptIds,
+        repoPromptIds,
         accountOverride: override,
         currentAccount: null,
         branch: null,
@@ -264,7 +268,7 @@ export class QueueService {
       account: override,
       event: "queued",
       detail: `Queued: ${created.title}`,
-      data: { title: created.title, message, accountOverride: override, attachments, promptIds },
+      data: { title: created.title, message, accountOverride: override, attachments, promptIds, repoPromptIds },
     });
     await this.publish();
     void this.tick();
@@ -619,9 +623,27 @@ export class QueueService {
         });
       }
       const boundBodies = bound.prompts.map((p) => p.body);
+      // The repo's prompts ticked for this task, current text (a reply's session already has them).
+      const repoPromptList = await this.deps.repos.prompts(repo.id);
+      const repoBound = isReply
+        ? { prompts: [], missing: [] }
+        : await repoPromptList.resolve(task.repoPromptIds ?? (await repoPromptList.defaultIds()));
+      if (repoBound.missing.length) {
+        this.log({
+          taskId: task.id,
+          repo: repo.id,
+          account: account.id,
+          event: "warning",
+          detail: `Repo prompt(s) no longer in ${repo.id}'s list, not sent: ${repoBound.missing.join(", ")}`,
+        });
+      }
       const assembled = isReply
         ? this.deps.assembler.forReply(task.pendingReply ?? "", runPaths, boundBodies)
-        : await this.deps.assembler.forTask(repo.id, task.message, runPaths, boundBodies);
+        : await this.deps.assembler.forTask(task.message, {
+            repoPrompts: repoBound.prompts.map((p) => p.body),
+            boundPrompts: boundBodies,
+            attachmentPaths: runPaths,
+          });
 
       let resume: { sessionId: string; fromConfigDir: string | null } | null = null;
       if (isReply && task.session) {
@@ -646,6 +668,7 @@ export class QueueService {
           cwd: repo.path,
           layers: assembled.layers,
           boundPrompts: bound.prompts.map((p) => ({ id: p.id, name: p.name })),
+          repoPrompts: repoBound.prompts.map((p) => ({ id: p.id, name: p.name })),
         },
       });
 

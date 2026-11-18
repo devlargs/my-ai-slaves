@@ -84,7 +84,6 @@ async function setup() {
     branches: new BranchService(),
     assembler: new PromptAssembler({
       globalBasePrompt: async () => "GLOBAL",
-      repoBasePrompt: (r) => repos.basePromptOf(r),
     }),
     adapters,
     broadcaster: nullBroadcaster,
@@ -141,9 +140,7 @@ describe("repos on an SSH host", () => {
     const listing = await repos.browse(join(repoPath, ".."), "testhost");
     expect(listing.dirs).toEqual([{ name: "tinsel-crm-api", path: repoPath, isGitRepo: true }]);
 
-    await stores.knowledge(repo.id).update((k) => {
-      k.basePrompt = "REPO";
-    });
+    await (await repos.prompts(repo.id)).create("Rules", "REPO", { default: true });
     const task = await queue.create({ repo: repo.id, message: "fix the api" });
     const done = await waitFor(async () => (await queue.list()).find((t) => t.id === task.id && t.status === "needs-review"));
     expect(done.currentAccount).toBe("dev-claude");

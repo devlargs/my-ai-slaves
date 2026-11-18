@@ -128,12 +128,18 @@ export interface FsBrowseResponse {
   dirs: { name: string; path: string; isGitRepo: boolean }[];
 }
 
-// ── Knowledge ───────────────────────────────────────────────────────────────
-/** GET /api/repos/:id/knowledge → KnowledgeFile · PUT (body UpdateKnowledgeRequest) → KnowledgeFile */
+// ── Repo prompts ────────────────────────────────────────────────────────────
+/** GET /api/repos/:id/knowledge → KnowledgeFile */
 export type Knowledge = KnowledgeFile;
-export interface UpdateKnowledgeRequest {
-  basePrompt: string;
+/** GET /api/repos/:id/prompts → RepoPrompt[] (send order) · POST (CreateRepoPromptRequest) → RepoPrompt */
+export interface CreateRepoPromptRequest {
+  name: string;
+  body: string;
+  /** Pre-ticked when you queue a task on this repo. */
+  default?: boolean;
 }
+/** PATCH /api/repos/:id/prompts/:promptId → RepoPrompt · DELETE → { ok } · PUT /api/repos/:id/prompts/order (ReorderRequest) */
+export type UpdateRepoPromptRequest = Partial<CreateRepoPromptRequest>;
 
 // ── Prompt preview ──────────────────────────────────────────────────────────
 /** POST /api/prompt/preview */
@@ -142,6 +148,8 @@ export interface PromptPreviewRequest {
   message: string;
   attachmentIds?: string[];
   promptIds?: string[];
+  /** The repo's prompts to send; omitted = the repo's default ones. */
+  repoPromptIds?: string[];
 }
 export interface PromptPreviewResponse {
   prompt: string;
@@ -163,6 +171,8 @@ export interface CreateTaskRequest {
   attachmentIds?: string[];
   /** Saved prompts to bind (ids from GET /api/prompts). */
   promptIds?: string[];
+  /** The repo's prompts to send (ids from GET /api/repos/:id/prompts); omitted = the repo's default ones. */
+  repoPromptIds?: string[];
 }
 /** PUT /api/tasks/order (body ReorderRequest, only pending tasks move) */
 /** POST /api/tasks/:id/cancel — pending: removed from queue; running: stopped → interrupted */

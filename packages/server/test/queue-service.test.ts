@@ -69,10 +69,9 @@ async function setup(chain = ["work_1-claude", "work_2-cursor"]) {
   const repos = new RepoService(stores);
   const repo = await repos.register(await makeRepo(dir));
   await repos.update(repo.id, { accountChain: chain });
-  await repos.setKnowledge(repo.id, "REPO RULES");
+  await (await repos.prompts(repo.id)).create("Repo rules", "REPO RULES", { default: true });
   const assembler = new PromptAssembler({
     globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
-    repoBasePrompt: (r) => repos.basePromptOf(r),
   });
   const attachments = new AttachmentStore(stores.paths.attachmentsDir);
   const prompts = new PromptLibrary(stores);
@@ -223,6 +222,66 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     const history = await stores.activity.forTask(task.id);
     expect(history.some((e) => e.event === "warning" && e.detail.includes("gone-soon"))).toBe(true);
     await expect(queue.create({ repo: repo.id, message: "x", promptIds: ["nope"] })).rejects.toThrow("Unknown saved prompt");
+  });
+
+  it("sends only the repo prompts ticked for the task, in the repo's order; omitted = the default ones", async () => {
+    const { queue, repo, repos, received, stores } = await setup();
+    const list = await repos.prompts(repo.id);
+    const fe = await list.create("Frontend", "FRONTEND NOTES");
+    const be = await list.create("Backend", "BACKEND NOTES");
+
+    // Picked: Backend + the default "Repo rules", in reverse. Frontend not ticked, so not sent.
+    const picked = await queue.create({ repo: repo.id, message: "api work", repoPromptIds: [be.id, "repo-rules"] });
+    expect(picked.repoPromptIds).toEqual(["repo-rules", be.id]);
+    await waitFor(taskWith(queue, picked.id, "needs-review"));
+    // None ticked: no repo layer at all.
+    const none = await queue.create({ repo: repo.id, message: "bare", repoPromptIds: [] });
+    await waitFor(taskWith(queue, none.id, "needs-review"));
+    // Not given (API / scripts): the default ones.
+    const defaults = await queue.create({ repo: repo.id, message: "defaults" });
+    expect(defaults.repoPromptIds).toEqual(["repo-rules"]);
+    await waitFor(taskWith(queue, defaults.id, "needs-review"));
+
+    const calls = await received();
+    expect(calls.map((c) => c.prompt)).toEqual([
+      "GLOBAL RULES\n\nREPO RULES\n\nBACKEND NOTES\n\napi work",
+      "GLOBAL RULES\n\nbare",
+      "GLOBAL RULES\n\nREPO RULES\n\ndefaults",
+    ]);
+    expect(calls.some((c) => c.prompt.includes("FRONTEND"))).toBe(false);
+    const started = (await stores.activity.forTask(picked.id)).find((e) => e.event === "started");
+    expect(started?.data?.repoPrompts).toEqual([
+      { id: "repo-rules", name: "Repo rules" },
+      { id: "backend", name: "Backend" },
+    ]);
+    await expect(queue.create({ repo: repo.id, message: "x", repoPromptIds: [fe.id, "nope"] })).rejects.toThrow("Unknown repo prompt");
+  });
+
+  it("a task queued before repos had several prompts sends the repo's default ones", async () => {
+    const { queue, repo, received, stores } = await setup();
+    await stores.queue.update((q) => {
+      q.tasks.push({
+        id: "task_0099_legacy",
+        title: "legacy",
+        repo: repo.id,
+        status: "pending",
+        message: "old task",
+        attachments: [],
+        promptIds: [],
+        repoPromptIds: null,
+        accountOverride: null,
+        currentAccount: null,
+        branch: null,
+        session: null,
+        replies: [],
+        pendingReply: null,
+        createdAt: "2026-11-18T10:00:00+08:00",
+        updatedAt: "2026-11-18T10:00:00+08:00",
+      });
+    });
+    await queue.init();
+    await waitFor(taskWith(queue, "task_0099_legacy", "needs-review"));
+    expect((await received())[0]?.prompt).toBe("GLOBAL RULES\n\nREPO RULES\n\nold task");
   });
 
   it("replies can bind saved prompts too", async () => {
@@ -389,6 +448,7 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
         message: "old",
         attachments: [],
         promptIds: [],
+        repoPromptIds: null,
         accountOverride: null,
         currentAccount: "work_1-claude",
         branch: null,

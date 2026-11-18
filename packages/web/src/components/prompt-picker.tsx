@@ -1,22 +1,58 @@
-import type { SavedPromptView } from "@my-ai-slaves/shared";
-import { CheckIcon, LibraryBigIcon, XIcon } from "lucide-react";
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from "react";
+import type { RepoPrompt, SavedPromptView } from "@my-ai-slaves/shared";
+import { CheckIcon, FolderGit2Icon, LibraryBigIcon, type LucideIcon, XIcon } from "lucide-react";
+import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+export interface PromptOption {
+  id: string;
+  name: string;
+  body: string;
+  /** Repo prompts: pre-ticked on new tasks. */
+  default?: boolean;
+}
+
+export interface PromptSource {
+  prompts: PromptOption[];
+  /** Which list `prompts` belongs to (the repo id, or "library"); null until the first load. */
+  loadedFor: string | null;
+  reload(): void;
+}
+
 /** The saved prompt library, refetched whenever a picker opens so edits elsewhere show up. */
-export function usePromptLibrary() {
+export function usePromptLibrary(): PromptSource {
   const [prompts, setPrompts] = useState<SavedPromptView[]>([]);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const reload = useCallback(() => {
     api
       .getPrompts()
-      .then(setPrompts)
+      .then((list) => {
+        setPrompts(list);
+        setLoadedFor("library");
+      })
       .catch(() => {});
   }, []);
   useEffect(reload, [reload]);
-  return { prompts, reload };
+  return { prompts, loadedFor, reload };
+}
+
+/** One repo's prompts (from the Repos page). Switching repos clears the list until the new one loads. */
+export function useRepoPrompts(repo: string | undefined): PromptSource {
+  const [state, setState] = useState<{ repo: string | null; prompts: RepoPrompt[] }>({ repo: null, prompts: [] });
+  const reload = useCallback(() => {
+    if (!repo) return;
+    api
+      .getRepoPrompts(repo)
+      .then((prompts) => setState({ repo, prompts }))
+      .catch(() => {});
+  }, [repo]);
+  useEffect(() => {
+    setState({ repo: null, prompts: [] });
+    reload();
+  }, [reload]);
+  return { prompts: state.prompts, loadedFor: state.repo, reload };
 }
 
 export interface BoundPrompts {
@@ -24,15 +60,103 @@ export interface BoundPrompts {
   setIds: Dispatch<SetStateAction<string[]>>;
 }
 
-/** State for prompts bound to one message. Ids are kept in library order. */
+/** State for prompts bound to one message. Ids are kept in list order. */
 export function useBoundPrompts(): BoundPrompts {
   const [ids, setIds] = useState<string[]>([]);
   return { ids, setIds };
 }
 
-/** Toolbar button + popover to bind saved prompts to the message being written. */
-export function PromptPicker({ bound, library }: { bound: BoundPrompts; library: ReturnType<typeof usePromptLibrary> }) {
+/** One group in the picker: a prompt list and what's ticked from it. */
+export interface PromptSection {
+  key: string;
+  title: string;
+  icon: LucideIcon;
+  source: PromptSource;
+  bound: BoundPrompts;
+  manageHref: string;
+  /** Shown when the list is empty. */
+  empty: ReactNode;
+}
+
+export const repoSection = (repo: string | undefined, source: PromptSource, bound: BoundPrompts): PromptSection => ({
+  key: "repo",
+  title: repo ? `${repo} prompts` : "Repo prompts",
+  icon: FolderGit2Icon,
+  source,
+  bound,
+  manageHref: "#/repos",
+  empty: "This repo has no prompts yet. Add some on the Repos page.",
+});
+
+export const librarySection = (source: PromptSource, bound: BoundPrompts): PromptSection => ({
+  key: "library",
+  title: "Saved prompts",
+  icon: LibraryBigIcon,
+  source,
+  bound,
+  manageHref: "#/prompts",
+  empty: "No saved prompts yet. Add some on the Prompts page.",
+});
+
+/** Toolbar button + popover to tick which prompts go with the message being written. */
+export function PromptPicker({ sections, footer }: { sections: PromptSection[]; footer: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const count = sections.reduce((n, s) => n + s.bound.ids.length, 0);
+
+  return (
+    <>
+    {sections.map((s) => (
+      <Prune key={s.key} section={s} />
+    ))}
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) for (const s of sections) s.source.reload();
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={cn("gap-1 px-2", count > 0 && "text-ink")}
+          title="Pick the prompts to send with this message"
+          aria-label="Prompts"
+        >
+          <LibraryBigIcon />
+          Prompts
+          {count > 0 && <span className="num rounded-full bg-ink px-1.5 text-[10px] leading-4 text-paper">{count}</span>}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="top">
+        <div className="scroll-quiet max-h-96 overflow-auto">
+          {sections.map((section, i) => (
+            <PickerSection key={section.key} section={section} first={i === 0} onNavigate={() => setOpen(false)} />
+          ))}
+        </div>
+        <p className="border-t border-rule px-3 py-2 text-[11px] leading-snug text-muted-foreground">{footer}</p>
+      </PopoverContent>
+    </Popover>
+    </>
+  );
+}
+
+/** A prompt deleted elsewhere can't stay ticked (the server would refuse the task). */
+function Prune({ section: { source, bound } }: { section: PromptSection }) {
+  const { prompts, loadedFor } = source;
+  const { setIds } = bound;
+  useEffect(() => {
+    if (loadedFor === null) return;
+    setIds((prev) => {
+      const next = prev.filter((id) => prompts.some((p) => p.id === id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [prompts, loadedFor, setIds]);
+  return null;
+}
+
+function PickerSection({ section, first, onNavigate }: { section: PromptSection; first: boolean; onNavigate: () => void }) {
+  const { source, bound } = section;
   const selected = new Set(bound.ids);
   // Functional update: quick successive clicks each see the latest selection.
   const toggle = (id: string) =>
@@ -40,113 +164,97 @@ export function PromptPicker({ bound, library }: { bound: BoundPrompts; library:
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      return library.prompts.filter((p) => next.has(p.id)).map((p) => p.id);
+      return source.prompts.filter((p) => next.has(p.id)).map((p) => p.id);
     });
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (o) library.reload();
-      }}
-    >
-      <PopoverTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          className={cn("gap-1 px-2", bound.ids.length > 0 && "text-ink")}
-          title="Bind saved prompts to this message"
-          aria-label="Saved prompts"
+    <section className={cn(!first && "border-t border-rule")}>
+      <div className="flex items-center justify-between px-3 pt-2 pb-1">
+        <span className="label-mono truncate">{section.title}</span>
+        <a
+          href={section.manageHref}
+          className="shrink-0 text-xs text-signal-ink underline-offset-4 hover:underline"
+          onClick={onNavigate}
         >
-          <LibraryBigIcon />
-          Prompts
-          {bound.ids.length > 0 && (
-            <span className="num rounded-full bg-ink px-1.5 text-[10px] leading-4 text-paper">{bound.ids.length}</span>
-          )}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent side="top">
-        <div className="flex items-center justify-between border-b border-rule px-3 py-2">
-          <span className="label-mono">Bind saved prompts</span>
-          <a href="#/prompts" className="text-xs text-signal-ink underline-offset-4 hover:underline" onClick={() => setOpen(false)}>
-            Manage
-          </a>
-        </div>
-        {library.prompts.length === 0 ? (
-          <p className="px-3 py-3 text-[13px] leading-relaxed text-muted-foreground">
-            No saved prompts yet. Add some on the{" "}
-            <a href="#/prompts" className="text-signal-ink underline-offset-4 hover:underline" onClick={() => setOpen(false)}>
-              Prompts
-            </a>{" "}
-            page.
-          </p>
-        ) : (
-          <ul className="scroll-quiet max-h-72 overflow-auto p-1" role="listbox" aria-multiselectable>
-            {library.prompts.map((p) => {
-              const on = selected.has(p.id);
-              return (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={on}
-                    onClick={() => toggle(p.id)}
-                    className="flex w-full cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
-                  >
-                    <span
-                      className={cn(
-                        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border",
-                        on ? "border-ink bg-ink text-paper" : "border-rule-strong bg-surface",
-                      )}
-                      aria-hidden
-                    >
-                      {on && <CheckIcon className="size-3" />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] font-medium text-ink">{p.name}</span>
-                      <span className="block truncate text-[11px] text-muted-foreground">
-                        {p.body.trim().split("\n")[0] || "(empty)"}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        <p className="border-t border-rule px-3 py-2 text-[11px] text-muted-foreground">
-          Sent after the base prompts, before your message, in library order.
+          Manage
+        </a>
+      </div>
+      {source.prompts.length === 0 ? (
+        <p className="px-3 pb-3 text-[13px] leading-relaxed text-muted-foreground">
+          {source.loadedFor === null ? "Loading…" : section.empty}
         </p>
-      </PopoverContent>
-    </Popover>
+      ) : (
+        <ul className="p-1 pt-0" role="listbox" aria-multiselectable aria-label={section.title}>
+          {source.prompts.map((p) => {
+            const on = selected.has(p.id);
+            return (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={on}
+                  onClick={() => toggle(p.id)}
+                  className="flex w-full cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+                >
+                  <span
+                    className={cn(
+                      "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border",
+                      on ? "border-ink bg-ink text-paper" : "border-rule-strong bg-surface",
+                    )}
+                    aria-hidden
+                  >
+                    {on && <CheckIcon className="size-3" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className="truncate text-[13px] font-medium text-ink">{p.name}</span>
+                      {p.default && <span className="label-mono shrink-0 text-[10px] text-muted-foreground">default</span>}
+                    </span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {p.body.trim().split("\n")[0] || "(empty)"}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 
-/** Chips for the prompts bound to the message being written. */
-export function BoundPromptChips({ bound, library }: { bound: BoundPrompts; library: ReturnType<typeof usePromptLibrary> }) {
-  if (bound.ids.length === 0) return null;
-  const byId = new Map(library.prompts.map((p) => [p.id, p]));
+/** Chips for the prompts ticked for the message being written. */
+export function BoundPromptChips({ sections }: { sections: PromptSection[] }) {
+  const chips = sections.flatMap((section) => {
+    const byId = new Map(section.source.prompts.map((p) => [p.id, p]));
+    return section.bound.ids.map((id) => ({ section, id, prompt: byId.get(id) }));
+  });
+  if (chips.length === 0) return null;
   return (
-    <ul className="flex flex-wrap gap-1.5" aria-label="Bound prompts">
-      {bound.ids.map((id) => (
-        <li
-          key={id}
-          className="flex h-6 items-center gap-1 rounded-full border border-rule bg-paper-2 pr-0.5 pl-2.5 text-[11px] font-medium text-ink-2"
-          title={byId.get(id)?.body}
-        >
-          <LibraryBigIcon className="size-3 text-muted-foreground" />
-          {byId.get(id)?.name ?? id}
-          <button
-            type="button"
-            aria-label={`Unbind ${byId.get(id)?.name ?? id}`}
-            onClick={() => bound.setIds((prev) => prev.filter((x) => x !== id))}
-            className="flex size-5 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-paper-3 hover:text-ink"
+    <ul className="flex flex-wrap gap-1.5" aria-label="Prompts sent with this message">
+      {chips.map(({ section, id, prompt }) => {
+        const Icon = section.icon;
+        const name = prompt?.name ?? id;
+        return (
+          <li
+            key={`${section.key}:${id}`}
+            className="flex h-6 items-center gap-1 rounded-full border border-rule bg-paper-2 pr-0.5 pl-2.5 text-[11px] font-medium text-ink-2"
+            title={`${section.title}: ${prompt?.body ?? ""}`}
           >
-            <XIcon className="size-3" />
-          </button>
-        </li>
-      ))}
+            <Icon className="size-3 text-muted-foreground" />
+            {name}
+            <button
+              type="button"
+              aria-label={`Don't send ${name}`}
+              onClick={() => section.bound.setIds((prev) => prev.filter((x) => x !== id))}
+              className="flex size-5 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-paper-3 hover:text-ink"
+            >
+              <XIcon className="size-3" />
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }

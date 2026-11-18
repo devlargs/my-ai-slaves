@@ -10,7 +10,9 @@ import type {
   DiffResponse,
   FsBrowseResponse,
   HistoryItem,
-  Knowledge,
+  CreateRepoPromptRequest,
+  RepoPrompt,
+  UpdateRepoPromptRequest,
   LoginState,
   PromptPreviewRequest,
   PromptPreviewResponse,
@@ -98,9 +100,13 @@ export const api = {
     return request<FsBrowseResponse>("GET", `/fs/browse${qs ? `?${qs}` : ""}`);
   },
 
-  getKnowledge: (repo: string) => request<Knowledge>("GET", `/repos/${enc(repo)}/knowledge`),
-  putKnowledge: (repo: string, basePrompt: string) =>
-    request<Knowledge>("PUT", `/repos/${enc(repo)}/knowledge`, { basePrompt }),
+  getRepoPrompts: (repo: string) => request<RepoPrompt[]>("GET", `/repos/${enc(repo)}/prompts`),
+  createRepoPrompt: (repo: string, body: CreateRepoPromptRequest) =>
+    request<RepoPrompt>("POST", `/repos/${enc(repo)}/prompts`, body),
+  updateRepoPrompt: (repo: string, id: string, body: UpdateRepoPromptRequest) =>
+    request<RepoPrompt>("PATCH", `/repos/${enc(repo)}/prompts/${enc(id)}`, body),
+  deleteRepoPrompt: (repo: string, id: string) => request<Ok>("DELETE", `/repos/${enc(repo)}/prompts/${enc(id)}`),
+  orderRepoPrompts: (repo: string, ids: string[]) => request<unknown>("PUT", `/repos/${enc(repo)}/prompts/order`, { ids }),
 
   previewPrompt: (body: PromptPreviewRequest) => request<PromptPreviewResponse>("POST", "/prompt/preview", body),
 

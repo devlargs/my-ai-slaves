@@ -44,7 +44,7 @@ design.md         locked visual design system (Hallmark, Coral theme): read befo
 ## Data (`.data/`, gitignored, never commit it)
 
 Plain pretty-printed JSON: `settings.json`, `accounts.json`, `repos.json`, `queue.json`,
-`prompts.json` (saved prompt library), `knowledge/<repo>.json`, `activity/NNNN_activity.json`, `attachments/<id>/`,
+`prompts.json` (saved prompt library), `knowledge/<repo>.json` (the repo's prompts), `activity/NNNN_activity.json`, `attachments/<id>/`,
 `cli-config/<account>/` (CLI logins: never read, log or serve). It can contain the user's API tokens.
 Use `SLAVES_DATA_DIR=<dir>` to point the server or scripts at a scratch folder when testing, and
 `SLAVES_PORT=<port>` (default 3005) to run that test copy next to the user's running app. Never stop
@@ -52,9 +52,11 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
 
 ## Rules that must hold
 
-- **Prompts:** the only text sent to a CLI is global base prompt → repo base prompt → saved prompts
-  bound to that message (from the Prompts library, `.data/prompts.json`, in library order) → task
-  message, joined by a blank line, empty layers skipped. The single exception is the visible "Attached files:"
+- **Prompts:** the only text sent to a CLI is global base prompt → the repo prompts ticked for that task
+  (each repo has a list in `knowledge/<repo>.json`, in list order; `default` ones come pre-ticked, and a
+  task queued without `repoPromptIds` gets the defaults) → saved prompts bound to that message (from the
+  Prompts library, `.data/prompts.json`, in library order) → task message, joined by a blank line, empty
+  layers skipped. The single exception is the visible "Attached files:"
   path list when files are attached. Never add hidden system/role/wrapper text anywhere. Replies resume
   the session and send only the reply (+ its attachments).
 - **Every started run is logged** in activity with its full assembled prompt.
@@ -67,7 +69,7 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
   branch. Claude runs with `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and
   Cursor never gets `-w`.
 - **Base prompts reach the CLI:** tests assert the exact text the (fake) CLIs receive; each task view shows
-  "… received: ✓ global base prompt ✓ repo base prompt" from the run's recorded prompt.
+  "… received: ✓ global base prompt ✓ repo: <ticked prompts>" from the run's recorded prompt.
 - **Security:** bind 127.0.0.1 only; spawn with argument arrays, never a shell string; scrub
   `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` etc. from child envs.
 - Cursor supports **one** account on this Mac (its login lives in the macOS Keychain under a fixed name).

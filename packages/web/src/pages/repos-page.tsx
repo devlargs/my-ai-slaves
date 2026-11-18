@@ -1,4 +1,4 @@
-import type { Knowledge, RemoteHost, Repo, RepoView } from "@my-ai-slaves/shared";
+import type { RemoteHost, Repo, RepoView } from "@my-ai-slaves/shared";
 import {
   AlertTriangleIcon,
   ChevronRightIcon,
@@ -8,7 +8,6 @@ import {
   Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
-  SaveIcon,
   ServerIcon,
   Trash2Icon,
   XIcon,
@@ -17,13 +16,13 @@ import { useEffect, useMemo, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FolderBrowserDialog } from "@/components/folder-browser";
 import { PageHeader } from "@/components/page-header";
-import { FullscreenButton, FullscreenEditor } from "@/components/fullscreen-editor";
+import { RepoPromptsEditor } from "@/components/repo-prompts";
 import { SortableList } from "@/components/sortable-list";
 import { AccountStatusBadge, ProviderLabel } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
 import { api, attempt } from "@/lib/api";
@@ -367,7 +366,7 @@ function RepoCard({
           variant="ghost"
           className="text-muted-foreground hover:bg-danger-soft hover:text-danger-ink"
           title={`Remove ${repo.name}?`}
-          description="Unregisters the repository and deletes its base prompt from .data/knowledge. Your repository on disk is not touched."
+          description="Unregisters the repository and deletes its prompts from .data/knowledge. Your repository on disk is not touched."
           confirmLabel="Remove"
           onConfirm={async () => {
             if (await attempt(api.deleteRepo(repo.id), "Repository removed")) onDeleted();
@@ -376,7 +375,7 @@ function RepoCard({
           <Trash2Icon /> Remove
         </ConfirmButton>
       </CardHeader>
-      {/* Hidden, not unmounted: an unsaved base prompt survives collapsing. */}
+      {/* Hidden, not unmounted: an unsaved repo prompt survives collapsing. */}
       <CardContent id={`repo-body-${repo.id}`} hidden={!expanded}>
         {unreachable && (
           <p className="mb-4 flex items-start gap-1.5 rounded-md bg-warning-soft px-2.5 py-1.5 text-xs text-warning-ink">
@@ -409,7 +408,7 @@ function RepoCard({
           <ChainEditor repo={repo} onSave={(chain) => patch({ accountChain: chain })} />
           <CommitterEditor repo={repo} onSave={(body) => patch(body, "Committer saved")} />
         </div>
-        <BasePromptEditor repoId={repo.id} />
+        <RepoPromptsEditor repoId={repo.id} />
         </fieldset>
       </CardContent>
     </Card>
@@ -607,68 +606,6 @@ function RemoteAccountActions({
           <code className="font-mono">cursor-agent update</code> there).
         </p>
       )}
-    </div>
-  );
-}
-
-function BasePromptEditor({ repoId }: { repoId: string }) {
-  const { data, setData } = useApi<Knowledge>(() => api.getKnowledge(repoId), [repoId]);
-  const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-  useEffect(() => {
-    if (data) setDraft(data.basePrompt);
-  }, [data]);
-  const dirty = data !== undefined && draft !== data.basePrompt;
-
-  const save = async () => {
-    setBusy(true);
-    const saved = await attempt(api.putKnowledge(repoId, draft), "Base prompt saved");
-    setBusy(false);
-    if (saved) setData(saved);
-  };
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
-        <Label htmlFor={`kb-${repoId}`}>Repo base prompt</Label>
-        {dirty && <Badge variant="warning">unsaved</Badge>}
-        <span className="ml-auto">
-          <FullscreenButton onClick={() => setFullscreen(true)} />
-        </span>
-      </div>
-      <FullscreenEditor
-        open={fullscreen}
-        onOpenChange={setFullscreen}
-        title={`Repo base prompt: ${repoId}`}
-        note={`Stored in .data/knowledge/${repoId}.json`}
-        value={draft}
-        onChange={setDraft}
-        placeholder="Blank. Anything you write here is sent before every task message for this repo."
-        dirty={dirty}
-        saving={busy}
-        onSave={() => void save()}
-      />
-      <Textarea
-        id={`kb-${repoId}`}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            if (dirty) void save();
-          }
-        }}
-        disabled={data === undefined}
-        placeholder="Blank. Anything you write here is sent before every task message for this repo."
-        className="min-h-40 flex-1 font-mono text-xs"
-      />
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-muted-foreground">Stored in .data/knowledge/{repoId}.json</span>
-        <Button size="sm" disabled={!dirty || busy} onClick={() => void save()}>
-          <SaveIcon /> Save
-        </Button>
-      </div>
     </div>
   );
 }

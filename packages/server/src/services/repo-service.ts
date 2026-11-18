@@ -4,7 +4,6 @@ import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import {
   type FsBrowseResponse,
   formatLocalIso,
-  type Knowledge,
   type Repo,
   type RepoAvailability,
   type RepoView,
@@ -13,6 +12,7 @@ import {
 import { assertHost, failureReason, runOn, scriptOn, shq } from "../remote/machine";
 import type { DataStores } from "../storage/data-stores";
 import { badRequest, conflict, notFound, slugify } from "./common";
+import { RepoPromptList } from "./prompt-library";
 
 const exists = (p: string) => access(p).then(() => true, () => false);
 
@@ -243,23 +243,10 @@ export class RepoService {
   }
 
   // ── knowledge ────────────────────────────────────────────────────────────
-  async getKnowledge(id: string): Promise<Knowledge> {
+  /** This repo's prompts (you tick which ones each task sends). */
+  async prompts(id: string): Promise<RepoPromptList> {
     await this.get(id);
-    return this.stores.knowledge(id).read();
-  }
-
-  async setKnowledge(id: string, basePrompt: string): Promise<Knowledge> {
-    await this.get(id);
-    return this.stores.knowledge(id).update((k) => {
-      k.basePrompt = basePrompt;
-      k.updatedAt = formatLocalIso(this.now());
-    });
-  }
-
-  /** Repo base prompt for the PromptAssembler ("" for unknown repos). */
-  async basePromptOf(id: string): Promise<string> {
-    if (!(await this.list()).some((r) => r.id === id)) return "";
-    return (await this.stores.knowledge(id).read()).basePrompt;
+    return new RepoPromptList(this.stores, id, this.now);
   }
 
   // ── folder browser ───────────────────────────────────────────────────────
