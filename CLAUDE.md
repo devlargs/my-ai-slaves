@@ -63,10 +63,32 @@ Use `SLAVES_DATA_DIR=<dir>` to point the server or scripts at a scratch folder w
 - Cursor supports **one** account only (its login lives in the macOS Keychain under a fixed name).
 - Verify CLI flags against the official docs before using them; don't guess.
 
-## Working with the user
+## Commits
 
-- **Commit every finished request locally right away**, one commit per request, conventional message.
-  **No signature**: no `Co-Authored-By`, no "Generated with Claude Code". Don't push unless asked.
+- **Commit every finished request locally right away**, one commit per request. Don't push unless asked.
+- **Author / committer is always `Ralph Largo <devlargs@gmail.com>`** (set in this repo's local git
+  config; check with `git config user.email` before committing, never commit as anyone else).
+- **No signature**: no `Co-Authored-By`, no "Generated with Claude Code", no emoji footer.
+- **Always [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):**
+
+  ```
+  <type>[optional scope][!]: <description>
+
+  [optional body]
+
+  [optional footer(s)]
+  ```
+
+  - `type`: `feat` (new feature → MINOR), `fix` (bug fix → PATCH), or `docs`, `style`, `refactor`,
+    `perf`, `test`, `build`, `ci`, `chore`, `revert`.
+  - `scope` (optional) is a noun in parentheses for the area touched, e.g. `feat(queue):`,
+    `fix(login):`, `refactor(server):`, `docs(claude-md):`.
+  - `description`: imperative, lowercase start, no trailing period, right after `: `.
+  - Body (optional): one blank line after the description; explain what and why.
+  - Breaking changes: `!` before the colon (`feat(api)!: ...`) and/or a `BREAKING CHANGE: <what>`
+    footer. Footers otherwise follow git-trailer format (`Refs: #123`), but never signature trailers.
+
+## Working with the user
 - The user prefers getting things done in one go and refining after.
 - UI changes follow `design.md` (modern-minimal, Coral theme, Geist). Reuse `PageHeader`, the
   `Button` variants (`signal` = the one coral main action per view) and the tokens in `tokens.css`.
