@@ -11,10 +11,13 @@ export function FolderBrowserDialog({
   open,
   onOpenChange,
   onPick,
+  host = null,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onPick: (path: string) => void;
+  /** Browse folders on this SSH host instead of this Mac. */
+  host?: string | null;
 }) {
   const [data, setData] = useState<FsBrowseResponse | null>(null);
   const [pathInput, setPathInput] = useState("");
@@ -22,7 +25,7 @@ export function FolderBrowserDialog({
 
   const load = async (path?: string) => {
     setLoading(true);
-    const res = await attempt(api.browse(path));
+    const res = await attempt(api.browse(path, host));
     setLoading(false);
     if (res) {
       setData(res);
@@ -30,16 +33,22 @@ export function FolderBrowserDialog({
     }
   };
 
+  // A different machine starts over at its home folder.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the host changes
+  useEffect(() => {
+    setData(null);
+  }, [host]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: load on open
   useEffect(() => {
     if (open && !data) void load();
-  }, [open]);
+  }, [open, data]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogTitle>Choose a repository folder</DialogTitle>
-        <DialogDescription>Folders on this Mac. Git repositories are marked.</DialogDescription>
+        <DialogDescription>{host ? `Folders on ${host}.` : "Folders on this Mac."} Git repositories are marked.</DialogDescription>
         <form
           className="flex gap-2"
           onSubmit={(e) => {

@@ -70,7 +70,16 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
   "… received: ✓ global base prompt ✓ repo base prompt" from the run's recorded prompt.
 - **Security:** bind 127.0.0.1 only; spawn with argument arrays, never a shell string; scrub
   `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` etc. from child envs.
-- Cursor supports **one** account only (its login lives in the macOS Keychain under a fixed name).
+- Cursor supports **one** account on this Mac (its login lives in the macOS Keychain under a fixed name).
+- **Remote repos (SSH, like VS Code Remote Explorer):** a repo or account can have a `host` (an alias from
+  `~/.ssh/config`). For those, git and the CLI run **on that server** via `ssh` (`src/remote/machine.ts`):
+  every argument is `shq`-quoted, host names are validated, `~/.local/bin` is added to PATH, remote runs
+  announce their PID so Cancel kills them on the server, and attachments are streamed to
+  `~/.my-ai-slaves/attachments/` there. Remote accounts use the server's own login (one per CLI per host;
+  deleting one never logs the server out) and only serve repos on the same host. Never run
+  `cursor-agent status` on a server: old versions start a login instead. Repos are checked for
+  reachability every minute; unreachable ones show disabled with an alert, and their tasks wait.
+  Tests use `test/fixtures/fake-ssh.mjs` (`SLAVES_SSH_BIN`), which runs the remote command locally.
 - Verify CLI flags against the official docs before using them; don't guess.
 
 ## Commits

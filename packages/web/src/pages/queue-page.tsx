@@ -1,4 +1,4 @@
-import type { PromptPreviewResponse, Repo, TaskView } from "@my-ai-slaves/shared";
+import type { PromptPreviewResponse, RepoView, TaskView } from "@my-ai-slaves/shared";
 import {
   ActivityIcon,
   AlertTriangleIcon,
@@ -261,7 +261,7 @@ function QueueList({
 // ── Composer ────────────────────────────────────────────────────────────────
 
 function Composer() {
-  const { data: repos } = useApi<Repo[]>(() => api.getRepos(), []);
+  const { data: repos } = useApi<RepoView[]>(() => api.getRepos(), []);
   const accounts = useStore((s) => s.accounts);
   const [repo, setRepo] = useState<string | undefined>(() => storageGet(REPO_KEY) ?? undefined);
   const [account, setAccount] = useState<string>(CHAIN);
@@ -279,6 +279,7 @@ function Composer() {
   }, [repos, repo]);
 
   const currentRepo = repos?.find((r) => r.id === repo);
+  const repoDown = currentRepo?.availability.state === "unreachable";
   const chainEmpty = currentRepo && currentRepo.accountChain.length === 0 && account === CHAIN;
   const canSend = Boolean(repo && message.trim()) && !busy && !files.uploading && !files.failed;
 
@@ -329,7 +330,10 @@ function Composer() {
               }}
               placeholder="Repository"
               className="h-7 w-auto min-w-0 flex-1 border-transparent bg-transparent text-xs font-medium hover:bg-paper-2"
-              options={(repos ?? []).map((r) => ({ value: r.id, label: r.name }))}
+              options={(repos ?? []).map((r) => ({
+                value: r.id,
+                label: `${r.name}${r.host ? ` · ${r.host}` : ""}${r.availability.state === "unreachable" ? " (unreachable)" : ""}`,
+              }))}
             />
             <Select
               aria-label="Account"
@@ -382,6 +386,16 @@ function Composer() {
           </div>
         </div>
       </DropZone>
+      {repoDown && (
+        <div className="flex items-start gap-1.5 rounded-md bg-warning-soft px-2.5 py-1.5 text-xs text-warning-ink">
+          <AlertTriangleIcon className="mt-px size-3.5 shrink-0" />
+          <span>
+            Unable to load {currentRepo?.name} at this time
+            {currentRepo?.availability.message ? ` (${currentRepo.availability.message})` : ""}. You can still queue: the task
+            waits and starts once the repo is reachable.
+          </span>
+        </div>
+      )}
       {chainEmpty && (
         <div className="flex items-start gap-1.5 rounded-md bg-warning-soft px-2.5 py-1.5 text-xs text-warning-ink">
           <AlertTriangleIcon className="mt-px size-3.5 shrink-0" />

@@ -7,7 +7,9 @@ const acct = (id: string, extra: Partial<Account> = {}): Account => ({
   id,
   label: id,
   provider: id.includes("cursor") ? "cursor-agent" : "claude-code",
+  host: null,
   configDir: `.data/cli-config/${id}`,
+  binary: null,
   status: "available",
   limitedUntil: null,
   lastLimitReason: null,
@@ -68,6 +70,16 @@ describe("pickAccount", () => {
       provider: "claude-code",
     });
     expect(r).toMatchObject({ kind: "account", account: { id: "personal-claude" } });
+  });
+
+  it("only picks accounts on the repo's machine", () => {
+    const r = pickAccount({
+      candidates: ["work_1-claude", "dev-claude"],
+      accounts: [acct("work_1-claude"), acct("dev-claude", { host: "dev" })],
+      now,
+      host: "dev",
+    });
+    expect(r).toMatchObject({ kind: "account", account: { id: "dev-claude" } });
   });
 
   it("empty chain explains itself", () => {

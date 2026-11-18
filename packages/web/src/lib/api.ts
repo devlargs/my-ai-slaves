@@ -16,7 +16,9 @@ import type {
   PromptPreviewResponse,
   PushResponse,
   RegisterRepoRequest,
+  RemoteHost,
   Repo,
+  RepoView,
   SessionInfo,
   Settings,
   TaskView,
@@ -82,11 +84,19 @@ export const api = {
   checkAccount: (id: string) => request<AccountView>("POST", `/accounts/${enc(id)}/check`),
   clearLimit: (id: string) => request<AccountView>("POST", `/accounts/${enc(id)}/clear-limit`),
 
-  getRepos: () => request<Repo[]>("GET", "/repos"),
-  registerRepo: (body: RegisterRepoRequest) => request<Repo>("POST", "/repos", body),
+  getRepos: () => request<RepoView[]>("GET", "/repos"),
+  registerRepo: (body: RegisterRepoRequest) => request<RepoView>("POST", "/repos", body),
+  checkRepo: (id: string) => request<RepoView>("POST", `/repos/${enc(id)}/check`),
+  getRemoteHosts: () => request<RemoteHost[]>("GET", "/remote/hosts"),
   updateRepo: (id: string, body: UpdateRepoRequest) => request<Repo>("PATCH", `/repos/${enc(id)}`, body),
   deleteRepo: (id: string) => request<Ok>("DELETE", `/repos/${enc(id)}`),
-  browse: (path?: string) => request<FsBrowseResponse>("GET", `/fs/browse${path ? `?path=${enc(path)}` : ""}`),
+  browse: (path?: string, host?: string | null) => {
+    const q = new URLSearchParams();
+    if (path) q.set("path", path);
+    if (host) q.set("host", host);
+    const qs = q.toString();
+    return request<FsBrowseResponse>("GET", `/fs/browse${qs ? `?${qs}` : ""}`);
+  },
 
   getKnowledge: (repo: string) => request<Knowledge>("GET", `/repos/${enc(repo)}/knowledge`),
   putKnowledge: (repo: string, basePrompt: string) =>

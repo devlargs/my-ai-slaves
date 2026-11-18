@@ -2,6 +2,7 @@ import { rm } from "node:fs/promises";
 import type { Repo, Task } from "@my-ai-slaves/shared";
 import { type GitIdentity, gitIdentityEnv } from "../providers/types";
 import { badRequest } from "./common";
+import { runOn } from "../remote/machine";
 import { git, gitOk, run } from "./git";
 
 export type TaskBranch = NonNullable<Task["branch"]>;
@@ -44,17 +45,33 @@ export interface SettleResult {
  * checked out again. No worktrees. main/master are never committed to.
  */
 export class BranchService {
+  /** git in the repo, on its own machine (this Mac or the SSH host). Returns stdout. */
+  private async git(repo: Repo, args: string[], extraEnv?: Record<string, string>): Promise<string> {
+    return (await runOn(repo.host, "git", args, repo.path, { extraEnv })).stdout;
+  }
+
+  private gitOk(repo: Repo, args: string[]): Promise<boolean> {
+    return this.git(repo, args).then(
+      () => true,
+      () => false,
+    );
+  }
+
+  private run(repo: Repo, command: string, args: string[]) {
+    return runOn(repo.host, command, args, repo.path);
+  }
+
   /** True when there are no uncommitted changes (ignored files don't count). */
   async isClean(repo: Repo): Promise<boolean> {
-    return (await git(["status", "--porcelain"], repo.path)).trim() === "";
+    return (await this.git(repo, ["status", "--porcelain"])).trim() === "";
   }
 
   /** The checked-out branch name, or the commit when HEAD is detached. */
   async currentRef(repo: Repo): Promise<string> {
     try {
-      return (await git(["symbolic-ref", "--short", "-q", "HEAD"], repo.path)).trim();
+      return (await this.git(repo, ["symbolic-ref", "--short", "-q", "HEAD"])).trim();
     } catch {
-      return (await git(["rev-parse", "HEAD"], repo.path)).trim();
+      return (await this.git(repo, ["rev-parse", "HEAD"])).trim();
     }
   }
 
@@ -68,7 +85,7 @@ export class BranchService {
     if (!(await this.isClean(repo))) throw new DirtyRepoError(repo);
     const returnTo = await this.currentRef(repo);
     if (existing && !fromScratch) {
-      await git(["checkout", existing.name], repo.path);
+      await this.git(repo, ["checkout", existing.name]);
       return { ...existing, returnTo: returnTo === existing.name ? existing.returnTo : returnTo };
     }
 
@@ -77,13 +94,13 @@ export class BranchService {
     let baseCommit = existing?.baseCommit ?? null;
     if (!baseCommit) {
       try {
-        baseCommit = (await git(["rev-parse", "--verify", `${repo.defaultBranch}^{commit}`], repo.path)).trim();
+        baseCommit = (await this.git(repo, ["rev-parse", "--verify", `${repo.defaultBranch}^{commit}`])).trim();
       } catch {
         throw badRequest(`Base branch "${repo.defaultBranch}" not found in ${repo.path}. Fix it on the Repos page.`);
       }
     }
     // -B: create, or reset a leftover branch of the same name to the base commit.
-    await git(["checkout", "-B", name, baseCommit], repo.path);
+    await this.git(repo, ["checkout", "-B", name, baseCommit]);
     return { name, base: repo.defaultBranch, baseCommit, returnTo: returnTo === name ? null : returnTo };
   }
 
@@ -98,14 +115,12 @@ export class BranchService {
     }
     let committed = false;
     if (!(await this.isClean(repo))) {
-      await git(["add", "--all"], repo.path);
+      await this.git(repo, ["add", "--all"]);
       // --no-verify: the agent's work is committed as-is on its own ai/ branch; review happens in the app.
-      await run("git", ["commit", "--no-verify", "-m", message], repo.path, {
-        env: { ...process.env, ...gitIdentityEnv(identity) },
-      });
+      await this.git(repo, ["commit", "--no-verify", "-m", message], gitIdentityEnv(identity));
       committed = true;
     }
-    if (br.returnTo && br.returnTo !== br.name) await git(["checkout", br.returnTo], repo.path);
+    if (br.returnTo && br.returnTo !== br.name) await this.git(repo, ["checkout", br.returnTo]);
     return { committed, warning: null };
   }
 
@@ -113,19 +128,19 @@ export class BranchService {
   async resetToBase(repo: Repo, br: TaskBranch): Promise<void> {
     assertAiBranch(br.name);
     if ((await this.currentRef(repo)) === br.name) {
-      await git(["reset", "--hard", br.baseCommit], repo.path);
-      await git(["clean", "-fd"], repo.path);
+      await this.git(repo, ["reset", "--hard", br.baseCommit]);
+      await this.git(repo, ["clean", "-fd"]);
     } else {
-      await git(["branch", "-f", br.name, br.baseCommit], repo.path);
+      await this.git(repo, ["branch", "-f", br.name, br.baseCommit]);
     }
   }
 
   async deleteBranch(repo: Repo, br: TaskBranch): Promise<void> {
     assertAiBranch(br.name);
     if ((await this.currentRef(repo)) === br.name) {
-      await git(["checkout", br.returnTo ?? br.base], repo.path);
+      await this.git(repo, ["checkout", br.returnTo ?? br.base]);
     }
-    await gitOk(["branch", "-D", br.name], repo.path);
+    await this.gitOk(repo, ["branch", "-D", br.name]);
   }
 
   /**
@@ -148,7 +163,7 @@ export class BranchService {
 
   /** Everything the task changed: base commit vs the task branch. */
   async diff(repo: Repo, br: TaskBranch): Promise<string> {
-    return git(["diff", "--no-color", "--no-ext-diff", br.baseCommit, br.name, "--"], repo.path);
+    return this.git(repo, ["diff", "--no-color", "--no-ext-diff", br.baseCommit, br.name, "--"]);
   }
 
   /**
@@ -158,42 +173,39 @@ export class BranchService {
    */
   async stripAiTrailers(repo: Repo, br: TaskBranch): Promise<number> {
     assertAiBranch(br.name);
-    const lines = (await git(["rev-list", "--reverse", "--parents", `${br.baseCommit}..${br.name}`], repo.path))
+    const lines = (await this.git(repo, ["rev-list", "--reverse", "--parents", `${br.baseCommit}..${br.name}`]))
       .trim()
       .split("\n")
       .filter(Boolean);
     const commits = lines.map((l) => l.split(" "));
     if (commits.some((c) => c.length !== 2)) return 0; // merges: leave history alone
 
-    const messages = await Promise.all(commits.map(([sha]) => git(["log", "-1", "--format=%B", sha as string], repo.path)));
+    const messages = await Promise.all(commits.map(([sha]) => this.git(repo, ["log", "-1", "--format=%B", sha as string])));
     const dirty = messages.filter((m) => m.split("\n").some((l) => AI_TRAILER_LINE.test(l))).length;
     if (dirty === 0) return 0;
 
-    const oldTip = (await git(["rev-parse", br.name], repo.path)).trim();
+    const oldTip = (await this.git(repo, ["rev-parse", br.name])).trim();
     const mapped = new Map<string, string>();
     for (const [i, [sha, parent]] of commits.entries()) {
       const meta = (
-        await git(["log", "-1", "--format=%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd%x00%T", "--date=raw", sha as string], repo.path)
+        await this.git(repo, ["log", "-1", "--format=%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd%x00%T", "--date=raw", sha as string])
       )
         .trim()
         .split("\0");
       const [an, ae, ad, cn, ce, cd, tree] = meta as [string, string, string, string, string, string, string];
       const newParent = mapped.get(parent as string) ?? (parent as string);
-      const created = await run("git", ["commit-tree", tree, "-p", newParent, "-m", stripAiLines(messages[i] ?? "").trimEnd()], repo.path, {
-        env: {
-          ...process.env,
-          GIT_AUTHOR_NAME: an,
-          GIT_AUTHOR_EMAIL: ae,
-          GIT_AUTHOR_DATE: ad,
-          GIT_COMMITTER_NAME: cn,
-          GIT_COMMITTER_EMAIL: ce,
-          GIT_COMMITTER_DATE: cd,
-        },
+      const created = await this.git(repo, ["commit-tree", tree, "-p", newParent, "-m", stripAiLines(messages[i] ?? "").trimEnd()], {
+        GIT_AUTHOR_NAME: an,
+        GIT_AUTHOR_EMAIL: ae,
+        GIT_AUTHOR_DATE: ad,
+        GIT_COMMITTER_NAME: cn,
+        GIT_COMMITTER_EMAIL: ce,
+        GIT_COMMITTER_DATE: cd,
       });
-      mapped.set(sha as string, created.stdout.trim());
+      mapped.set(sha as string, created.trim());
     }
     const newTip = mapped.get(commits.at(-1)?.[0] as string) as string;
-    await git(["update-ref", `refs/heads/${br.name}`, newTip, oldTip], repo.path);
+    await this.git(repo, ["update-ref", `refs/heads/${br.name}`, newTip, oldTip]);
     return dirty;
   }
 
@@ -201,22 +213,22 @@ export class BranchService {
   async push(repo: Repo, br: TaskBranch, title: string): Promise<{ url: string | null; output: string }> {
     assertAiBranch(br.name);
     const log: string[] = [];
-    const pushed = await run("git", ["push", "-u", "origin", br.name], repo.path);
+    const pushed = await this.run(repo, "git", ["push", "-u", "origin", br.name]);
     log.push(pushed.stderr.trim(), pushed.stdout.trim());
 
-    const remote = (await git(["remote", "get-url", "origin"], repo.path)).trim();
+    const remote = (await this.git(repo, ["remote", "get-url", "origin"])).trim();
     const web = remoteToWeb(remote);
     try {
       if (web?.kind === "github") {
-        const out = await run("gh", ["pr", "create", "--head", br.name, "--base", br.base, "--title", title, "--body", ""], repo.path);
+        const out = await this.run(repo, "gh", ["pr", "create", "--head", br.name, "--base", br.base, "--title", title, "--body", ""]);
         log.push(out.stdout.trim());
         return { url: lastUrl(out.stdout) ?? web.compare(br), output: log.filter(Boolean).join("\n") };
       }
       if (web?.kind === "gitlab") {
-        const out = await run(
+        const out = await this.run(
+          repo,
           "glab",
           ["mr", "create", "--source-branch", br.name, "--target-branch", br.base, "--title", title, "--description", "", "--yes"],
-          repo.path,
         );
         log.push(out.stdout.trim());
         return { url: lastUrl(out.stdout) ?? web.compare(br), output: log.filter(Boolean).join("\n") };

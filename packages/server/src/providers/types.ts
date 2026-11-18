@@ -3,8 +3,11 @@ import type { Account, ProviderId, RawLine, SettingsFile, StreamEvent } from "@m
 export interface SpawnSpec {
   command: string;
   args: string[];
-  env: Record<string, string>;
-  cwd?: string;
+  /** Variables to set for the command (on top of the machine's own environment). */
+  extraEnv: Record<string, string>;
+  cwd?: string | null;
+  /** SSH host to run on; null/undefined = this Mac. */
+  host?: string | null;
 }
 
 export interface LimitInfo {
@@ -33,8 +36,8 @@ export type CursorSettings = SettingsFile["providers"]["cursor-agent"];
 
 export interface AccountContext {
   account: Account;
-  /** Absolute path of the account's isolated CLI config dir. */
-  configDir: string;
+  /** Local accounts: absolute path of the isolated CLI config dir. Remote (server's own login): null. */
+  configDir: string | null;
 }
 
 export interface RunInput extends AccountContext {
@@ -43,7 +46,7 @@ export interface RunInput extends AccountContext {
   /** Working directory: the repository itself (checked out on the task branch). */
   cwd: string;
   /** Continue an earlier CLI session (follow-up reply). */
-  resume: { sessionId: string; fromConfigDir: string } | null;
+  resume: { sessionId: string; fromConfigDir: string | null } | null;
   /** Extra folders the CLI may read (the task's attachment folders). */
   addDirs?: string[];
   /** Author/committer for any commit the agent makes (the repo's setting). */

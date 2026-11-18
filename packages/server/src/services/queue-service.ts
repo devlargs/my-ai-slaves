@@ -103,6 +103,8 @@ export class QueueService {
 
   /** Tasks that were running when the server stopped come back as interrupted. */
   async init(): Promise<void> {
+    // A repo that becomes reachable (or unreachable) again changes what can run.
+    this.deps.repos.onChange(() => void this.tick());
     await this.migrateLegacyWorktrees();
     const interrupted: Task[] = [];
     await this.stores.queue.update((q) => {
@@ -523,10 +525,19 @@ export class QueueService {
         notes.set(task.id, `Repo "${task.repo}" is no longer registered.`);
         continue;
       }
+      // A repo that can't be reached right now (SSH host down, folder gone): wait, it's re-checked.
+      const availability = this.deps.repos.availabilityOf(repo.id);
+      if (availability?.state === "unreachable") {
+        notes.set(task.id, `Unable to load ${repo.name} at this time (${availability.message ?? "unreachable"}). Retrying automatically.`);
+        continue;
+      }
       // Tasks switch branches in your checkout, so they only start on a clean working tree.
-      const clean = await this.deps.branches.isClean(repo).catch(() => null);
-      if (clean === null) {
-        notes.set(task.id, `Can't read the git status of ${repo.path}. Is the folder still there?`);
+      let clean: boolean | null = null;
+      try {
+        clean = await this.deps.branches.isClean(repo);
+      } catch (error) {
+        this.deps.repos.markUnreachable(repo, error);
+        notes.set(task.id, `Unable to load ${repo.name} at this time. Retrying automatically.`);
         continue;
       }
       if (!clean) {
@@ -539,6 +550,7 @@ export class QueueService {
         accounts,
         now,
         provider: isReply ? task.session?.provider : undefined,
+        host: repo.host ?? null,
       });
       if (pick.kind === "wait") {
         notes.set(task.id, pick.until ? `${pick.reason} Next one frees up at ${shortTime(pick.until, now)}.` : pick.reason);
@@ -587,11 +599,13 @@ export class QueueService {
         t.branch = br;
       });
 
-      const store = this.deps.attachments;
+      // Attached files: on this Mac they're read in place; for a remote repo they're copied to the server.
+      const allFiles = [...task.attachments, ...task.replies.flatMap((r) => r.attachments)];
+      const located = await this.deps.attachments.locate(repo.host ?? null, allFiles);
       const runFiles = isReply ? (task.replies.at(-1)?.attachments ?? []) : task.attachments;
-      const runPaths = runFiles.map((a) => store.pathOf(a));
+      const runPaths = runFiles.map((a) => located.get(a.id)?.path as string);
       // The session may refer back to earlier files, so every file of the task stays readable.
-      const addDirs = [...task.attachments, ...task.replies.flatMap((r) => r.attachments)].map((a) => store.dirOf(a.id));
+      const addDirs = allFiles.map((a) => located.get(a.id)?.dir as string);
       // Bound saved prompts: their current text, read now (like the base prompts).
       const boundIds = isReply ? (task.replies.at(-1)?.promptIds ?? []) : task.promptIds;
       const bound = await this.deps.prompts.resolve(boundIds);
@@ -609,7 +623,7 @@ export class QueueService {
         ? this.deps.assembler.forReply(task.pendingReply ?? "", runPaths, boundBodies)
         : await this.deps.assembler.forTask(repo.id, task.message, runPaths, boundBodies);
 
-      let resume: { sessionId: string; fromConfigDir: string } | null = null;
+      let resume: { sessionId: string; fromConfigDir: string | null } | null = null;
       if (isReply && task.session) {
         const from = (await this.deps.accounts.listRaw()).find((a) => a.id === task.session?.account);
         resume = {
@@ -771,6 +785,7 @@ export class QueueService {
               accounts: await this.deps.accounts.listRaw(),
               now: this.now(),
               provider: run.isReply ? task.session?.provider : undefined,
+              host: repo.host ?? null,
             })
           : null;
         const what = result.outcome === "limit" ? "hit usage limit" : "is logged out";

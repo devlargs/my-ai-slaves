@@ -6,6 +6,7 @@ import type { AccountService } from "../services/account-service";
 import { badRequest, HttpError } from "../services/common";
 import { CommandError } from "../services/git";
 import { EmptyMessageError, type PromptAssembler } from "../services/prompt-assembler";
+import { listRemoteHosts } from "../remote/hosts";
 import type { PromptLibrary } from "../services/prompt-library";
 import type { QueueService } from "../services/queue-service";
 import type { RepoService } from "../services/repo-service";
@@ -69,8 +70,11 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // ── accounts ──────────────────────────────────────────────────────────────
   app.get("/api/accounts", () => accounts.list());
   app.post("/api/accounts", async (req) => {
-    const body = parseBody(z.object({ label: z.string(), provider: ProviderId }), req.body);
-    return accounts.create(body.label.trim(), body.provider);
+    const body = parseBody(
+      z.object({ label: z.string(), provider: ProviderId, host: z.string().min(1).nullable().optional() }),
+      req.body,
+    );
+    return accounts.create(body.label.trim(), body.provider, body.host ?? null);
   });
   app.put("/api/accounts/order", async (req) => {
     await accounts.reorder(parseBody(Ids, req.body).ids);
@@ -99,8 +103,18 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
 
   // ── repos & knowledge ─────────────────────────────────────────────────────
-  app.get("/api/repos", () => repos.list());
-  app.post("/api/repos", async (req) => repos.register(parseBody(z.object({ path: z.string() }), req.body).path));
+  app.get("/api/repos", () => repos.listViews());
+  app.post("/api/repos", async (req) => {
+    const body = parseBody(z.object({ path: z.string(), host: z.string().min(1).nullable().optional() }), req.body);
+    return repos.register(body.path, body.host ?? null);
+  });
+  app.post("/api/repos/:id/check", async (req) => {
+    const repo = await repos.get(params(req).id);
+    await repos.checkAvailability(repo);
+    void queue.tick();
+    return repos.toView(repo);
+  });
+  app.get("/api/remote/hosts", () => listRemoteHosts());
   app.patch("/api/repos/:id", async (req) => {
     const body = parseBody(
       z.object({
@@ -124,7 +138,10 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.put("/api/repos/:id/knowledge", async (req) =>
     repos.setKnowledge(params(req).id, parseBody(z.object({ basePrompt: z.string() }), req.body).basePrompt),
   );
-  app.get("/api/fs/browse", (req) => repos.browse((req.query as { path?: string }).path));
+  app.get("/api/fs/browse", (req) => {
+    const q = req.query as { path?: string; host?: string };
+    return repos.browse(q.path, q.host || null);
+  });
 
   // ── prompt preview ────────────────────────────────────────────────────────
   app.post("/api/prompt/preview", async (req) => {

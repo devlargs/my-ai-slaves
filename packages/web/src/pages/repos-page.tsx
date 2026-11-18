@@ -1,5 +1,18 @@
-import type { Knowledge, Repo } from "@my-ai-slaves/shared";
-import { ChevronRightIcon, FolderOpenIcon, FolderGit2Icon, PlusIcon, SaveIcon, Trash2Icon, XIcon } from "lucide-react";
+import type { Knowledge, RemoteHost, Repo, RepoView } from "@my-ai-slaves/shared";
+import {
+  AlertTriangleIcon,
+  ChevronRightIcon,
+  FolderGit2Icon,
+  FolderOpenIcon,
+  LaptopIcon,
+  Loader2Icon,
+  PlusIcon,
+  RefreshCwIcon,
+  SaveIcon,
+  ServerIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FolderBrowserDialog } from "@/components/folder-browser";
@@ -12,16 +25,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Tooltip } from "@/components/ui/tooltip";
 import { api, attempt } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { useStore } from "@/lib/store";
 import { cn, storageGet, storageSet } from "@/lib/utils";
 
 export function ReposPage() {
-  const { data: repos, setData, reload } = useApi<Repo[]>(() => api.getRepos(), []);
-  const [path, setPath] = useState("");
-  const [browsing, setBrowsing] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const { data: repos, setData, reload } = useApi<RepoView[]>(() => api.getRepos(), []);
   const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded());
 
   const sorted = useMemo(
@@ -38,19 +49,14 @@ export function ReposPage() {
     });
   const toggle = (id: string) => updateExpanded((set) => (set.has(id) ? set.delete(id) : set.add(id)));
 
-  const register = async (p: string) => {
-    if (!p.trim()) return;
-    setBusy(true);
-    const repo = await attempt(api.registerRepo({ path: p.trim() }), "Repository registered");
-    setBusy(false);
-    if (repo) {
-      setPath("");
-      updateExpanded((set) => set.add(repo.id)); // open the one you just added
-      void reload();
-    }
-  };
+  // Reachability is re-checked on the server every minute; refresh what we show as well.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: interval
+  useEffect(() => {
+    const t = setInterval(() => void api.getRepos().then(setData).catch(() => {}), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
-  const replace = (repo: Repo) => setData((list) => list?.map((r) => (r.id === repo.id ? repo : r)));
+  const replace = (repo: Repo) => setData((list) => list?.map((r) => (r.id === repo.id ? { ...r, ...repo } : r)));
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 py-8">
@@ -65,34 +71,12 @@ export function ReposPage() {
         }
       />
 
-      <Card>
-        <CardContent className="flex flex-col gap-2">
-          <Label htmlFor="repo-path">Register a repository (absolute path)</Label>
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void register(path);
-            }}
-          >
-            <Input
-              id="repo-path"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder="/Users/you/code/my-repo"
-              className="font-mono text-xs"
-            />
-            <Button type="button" variant="outline" onClick={() => setBrowsing(true)}>
-              <FolderOpenIcon /> Browse
-            </Button>
-            <Button type="submit" disabled={busy || !path.trim()}>
-              <PlusIcon /> Register
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <FolderBrowserDialog open={browsing} onOpenChange={setBrowsing} onPick={(p) => void register(p)} />
+      <RegisterRepoCard
+        onRegistered={(repo) => {
+          updateExpanded((set) => set.add(repo.id)); // open the one you just added
+          void reload();
+        }}
+      />
 
       {repos?.length === 0 && <p className="text-[13px] text-muted-foreground">No repositories yet.</p>}
       {sorted.length > 1 && (
@@ -122,6 +106,152 @@ export function ReposPage() {
   );
 }
 
+/** Register a repo on this Mac, or on an SSH host the way VS Code's Remote Explorer does. */
+function RegisterRepoCard({ onRegistered }: { onRegistered: (repo: RepoView) => void }) {
+  const [where, setWhere] = useState<"local" | "remote">("local");
+  const [hosts, setHosts] = useState<RemoteHost[] | null>(null);
+  const [host, setHost] = useState<string | undefined>(undefined);
+  const [path, setPath] = useState("");
+  const [browsing, setBrowsing] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (where !== "remote" || hosts) return;
+    void attempt(api.getRemoteHosts()).then((list) => {
+      setHosts(list ?? []);
+      if (list?.[0] && !host) setHost(list[0].host);
+    });
+  }, [where, hosts, host]);
+
+  const current = hosts?.find((h) => h.host === host);
+  const register = async (p: string) => {
+    if (!p.trim() || (where === "remote" && !host)) return;
+    setBusy(true);
+    const repo = await attempt(
+      api.registerRepo({ path: p.trim(), host: where === "remote" ? host : null }),
+      "Repository registered",
+    );
+    setBusy(false);
+    if (repo) {
+      setPath("");
+      onRegistered(repo);
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <Label htmlFor="repo-path">Register a repository</Label>
+          <div className="flex rounded-full border border-rule bg-paper-2 p-0.5" role="radiogroup" aria-label="Where the repo is">
+            {(
+              [
+                ["local", "This Mac", LaptopIcon],
+                ["remote", "Remote (SSH)", ServerIcon],
+              ] as const
+            ).map(([value, label, Icon]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={where === value}
+                onClick={() => setWhere(value)}
+                className={cn(
+                  "flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
+                  where === value ? "bg-surface text-ink shadow-[0_1px_2px_oklch(0%_0_0/0.08)]" : "text-muted-foreground hover:text-ink",
+                )}
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {where === "remote" && (
+          <div className="flex flex-col gap-1.5">
+            {hosts && hosts.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No SSH hosts found. Add one to <code className="font-mono">~/.ssh/config</code> (the same list VS Code&apos;s
+                Remote Explorer shows), then come back.
+              </p>
+            ) : (
+              <Select
+                aria-label="SSH host"
+                value={host}
+                onValueChange={setHost}
+                placeholder={hosts ? "Choose a host" : "Loading SSH hosts…"}
+                disabled={!hosts}
+                options={(hosts ?? []).map((h) => ({
+                  value: h.host,
+                  label: h.hostname && h.hostname !== h.host ? `${h.host} (${h.hostname})` : h.host,
+                }))}
+              />
+            )}
+            {current && current.recentFolders.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[11px] text-muted-foreground">Opened in VS Code:</span>
+                {current.recentFolders.map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void register(f)}
+                    title={`Register ${current.host}:${f}`}
+                    className="flex h-6 cursor-pointer items-center gap-1 rounded-full border border-rule bg-surface px-2.5 font-mono text-[11px] text-ink-2 transition-colors hover:border-rule-strong hover:text-ink disabled:opacity-50"
+                  >
+                    <FolderGit2Icon className="size-3 text-muted-foreground" />
+                    {f.split("/").pop()}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void register(path);
+          }}
+        >
+          <Input
+            id="repo-path"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            placeholder={where === "remote" ? "/home/you/projects/my-repo" : "/Users/you/code/my-repo"}
+            className="font-mono text-xs"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            disabled={where === "remote" && !host}
+            onClick={() => setBrowsing(true)}
+          >
+            <FolderOpenIcon /> Browse
+          </Button>
+          <Button type="submit" disabled={busy || !path.trim() || (where === "remote" && !host)}>
+            {busy ? <Loader2Icon className="animate-spin" /> : <PlusIcon />} Register
+          </Button>
+        </form>
+        {where === "remote" && (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Tasks for a remote repo run on that server over SSH, with git and the Claude / Cursor CLI installed and
+            logged in there. Add a matching account under Settings → Accounts (&ldquo;Runs on&rdquo; the host).
+          </p>
+        )}
+      </CardContent>
+      <FolderBrowserDialog
+        open={browsing}
+        onOpenChange={setBrowsing}
+        host={where === "remote" ? (host ?? null) : null}
+        onPick={(p) => void register(p)}
+      />
+    </Card>
+  );
+}
+
 const EXPANDED_KEY = "slaves.expandedRepos";
 
 function loadExpanded(): Set<string> {
@@ -140,12 +270,20 @@ function RepoCard({
   onChange,
   onDeleted,
 }: {
-  repo: Repo;
+  repo: RepoView;
   expanded: boolean;
   onToggle: () => void;
-  onChange: (repo: Repo) => void;
+  onChange: (repo: Repo | RepoView) => void;
   onDeleted: () => void;
 }) {
+  const unreachable = repo.availability.state === "unreachable";
+  const [checking, setChecking] = useState(false);
+  const checkAgain = async () => {
+    setChecking(true);
+    const fresh = await attempt(api.checkRepo(repo.id));
+    setChecking(false);
+    if (fresh) onChange(fresh);
+  };
   const [branch, setBranch] = useState(repo.defaultBranch);
   useEffect(() => setBranch(repo.defaultBranch), [repo.defaultBranch]);
 
@@ -156,20 +294,29 @@ function RepoCard({
   };
 
   return (
-    <Card>
+    <Card className={cn(unreachable && "bg-paper-2/60")} aria-disabled={unreachable || undefined}>
       <CardHeader className={cn(!expanded && "border-b-0")}>
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
           aria-controls={`repo-body-${repo.id}`}
-          className="-my-1 flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left"
+          className={cn(
+            "-my-1 flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left",
+            unreachable && "opacity-55",
+          )}
         >
           <ChevronRightIcon
             className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
           />
           <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
           <CardTitle className="shrink-0">{repo.name}</CardTitle>
+          {repo.host && (
+            <Badge variant="outline" className="shrink-0 gap-1 font-mono" title={`On ${repo.host} (SSH)`}>
+              <ServerIcon className="size-3" />
+              {repo.host}
+            </Badge>
+          )}
           <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={repo.path}>
             {repo.path}
           </span>
@@ -187,6 +334,34 @@ function RepoCard({
             </span>
           )}
         </button>
+        {unreachable && (
+          <>
+            <Tooltip
+              content={
+                <>
+                  <span className="font-medium">Unable to load the repo at this time.</span>
+                  {repo.availability.message && <span className="mt-0.5 block text-paper/75">{repo.availability.message}</span>}
+                  <span className="mt-0.5 block text-paper/75">Tasks for it wait and start once it&apos;s back.</span>
+                </>
+              }
+            >
+              <span
+                tabIndex={0}
+                role="img"
+                aria-label="Unable to load the repo at this time"
+                className="flex size-7 shrink-0 cursor-help items-center justify-center rounded-full text-warning-ink focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+              >
+                <AlertTriangleIcon className="size-4" />
+              </span>
+            </Tooltip>
+            <Button size="sm" variant="ghost" disabled={checking} onClick={() => void checkAgain()}>
+              {checking ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />} Check again
+            </Button>
+          </>
+        )}
+        {repo.availability.state === "checking" && (
+          <Loader2Icon className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Checking the repo" />
+        )}
         <ConfirmButton
           size="sm"
           variant="ghost"
@@ -202,7 +377,14 @@ function RepoCard({
         </ConfirmButton>
       </CardHeader>
       {/* Hidden, not unmounted: an unsaved base prompt survives collapsing. */}
-      <CardContent id={`repo-body-${repo.id}`} hidden={!expanded} className="grid gap-5 md:grid-cols-2">
+      <CardContent id={`repo-body-${repo.id}`} hidden={!expanded}>
+        {unreachable && (
+          <p className="mb-4 flex items-start gap-1.5 rounded-md bg-warning-soft px-2.5 py-1.5 text-xs text-warning-ink">
+            <AlertTriangleIcon className="mt-px size-3.5 shrink-0" />
+            Unable to load the repo at this time. Its settings are locked until it&apos;s reachable again.
+          </p>
+        )}
+        <fieldset disabled={unreachable} className={cn("grid min-w-0 gap-5 md:grid-cols-2", unreachable && "opacity-55")}>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`branch-${repo.id}`}>Base branch (new task branches start here)</Label>
@@ -228,6 +410,7 @@ function RepoCard({
           <CommitterEditor repo={repo} onSave={(body) => patch(body, "Committer saved")} />
         </div>
         <BasePromptEditor repoId={repo.id} />
+        </fieldset>
       </CardContent>
     </Card>
   );
@@ -293,7 +476,8 @@ function ChainEditor({ repo, onSave }: { repo: Repo; onSave: (chain: string[]) =
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const [chain, setChain] = useState(repo.accountChain);
   useEffect(() => setChain(repo.accountChain), [repo.accountChain]);
-  const available = accounts.filter((a) => !chain.includes(a.id));
+  // Only accounts on the repo's own machine can run its tasks.
+  const available = accounts.filter((a) => !chain.includes(a.id) && (a.host ?? null) === (repo.host ?? null));
 
   const save = async (next: string[]) => {
     const previous = chain;

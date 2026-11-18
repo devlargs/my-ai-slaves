@@ -6,7 +6,9 @@ export const RepoSlug = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,99}$/);
 export const Repo = z.object({
   id: RepoSlug,
   name: z.string().min(1),
-  /** Absolute path to the repo's main working tree. */
+  /** SSH host (from ~/.ssh/config) the repo lives on; null = this Mac. */
+  host: z.string().min(1).nullable().default(null),
+  /** Absolute path to the repo on that machine. */
   path: z.string().min(1),
   defaultBranch: z.string().min(1),
   /** Ordered account ids; first available one runs the task. */

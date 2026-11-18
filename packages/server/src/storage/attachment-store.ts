@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Attachment, ATTACHMENT_LIMITS } from "@my-ai-slaves/shared";
+import { scriptOn, sendFile } from "../remote/machine";
 import { toPrettyJson } from "./fs-utils";
 
 const META = "meta.json";
@@ -67,6 +68,32 @@ export class AttachmentStore {
 
   async read(a: Attachment): Promise<Buffer> {
     return readFile(this.pathOf(a));
+  }
+
+  private readonly remoteHomes = new Map<string, string>();
+
+  /**
+   * Where each file is on the machine that runs the task: this Mac → in place; an SSH host →
+   * copied to `~/.my-ai-slaves/attachments/<id>/<name>` there (once per host).
+   */
+  async locate(host: string | null, files: Attachment[]): Promise<Map<string, { path: string; dir: string }>> {
+    const result = new Map<string, { path: string; dir: string }>();
+    if (!host) {
+      for (const a of files) result.set(a.id, { path: this.pathOf(a), dir: this.dirOf(a.id) });
+      return result;
+    }
+    if (files.length === 0) return result;
+    let home = this.remoteHomes.get(host);
+    if (!home) {
+      home = (await scriptOn(host, 'printf %s "$HOME"')).stdout.trim();
+      this.remoteHomes.set(host, home);
+    }
+    for (const a of files) {
+      const dir = `${home}/.my-ai-slaves/attachments/${a.id}`;
+      await sendFile(host, this.pathOf(a), dir, a.name);
+      result.set(a.id, { path: `${dir}/${a.name}`, dir });
+    }
+    return result;
   }
 
   /** The attachments a request refers to; throws if any is missing. */

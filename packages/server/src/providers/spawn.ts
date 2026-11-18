@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { RawLine, StreamEvent } from "@my-ai-slaves/shared";
+import { localInvocation, REMOTE_PID_MARKER, runOn } from "../remote/machine";
 import type { RunHandle, RunResult, SpawnSpec } from "./types";
 
 /**
@@ -32,16 +33,40 @@ export interface StreamParser {
 
 const STDERR_TAIL_BYTES = 4096;
 
+/**
+ * What to actually start for a spec: the command itself on this Mac (with a scrubbed copy of our
+ * env plus the spec's extras), or ssh carrying the quoted command for a remote host (the remote
+ * side only gets the spec's extras: the server's own env and logins apply there).
+ */
+export function resolveSpawn(
+  spec: SpawnSpec,
+  opts: { announcePid?: boolean; tty?: boolean } = {},
+): { command: string; args: string[]; env: Record<string, string>; cwd: string | undefined } {
+  if (!spec.host) {
+    return { command: spec.command, args: spec.args, env: childEnv(spec.extraEnv), cwd: spec.cwd ?? undefined };
+  }
+  const inv = localInvocation(
+    spec.host,
+    { command: spec.command, args: spec.args, cwd: spec.cwd, env: spec.extraEnv, announcePid: opts.announcePid },
+    { tty: opts.tty },
+  );
+  return { command: inv.command, args: inv.args, env: childEnv({}), cwd: undefined };
+}
+
 /** Spawn without a shell, feed stdout through `parser`, expose it as a RunHandle. */
 export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: StreamParser): RunHandle {
   const streamListeners = new Set<(e: StreamEvent) => void>();
   const rawListeners = new Set<(r: RawLine) => void>();
   let stderrTail = "";
   let cancelled = false;
+  const remote = Boolean(spec.host);
+  /** On a remote host: the CLI's pid there, announced by the wrapper before it execs. */
+  let remotePid: string | null = null;
 
-  const child = spawn(spec.command, spec.args, {
-    cwd: spec.cwd,
-    env: spec.env,
+  const launch = resolveSpawn(spec, { announcePid: remote });
+  const child = spawn(launch.command, launch.args, {
+    cwd: launch.cwd,
+    env: launch.env,
     shell: false,
     stdio: [stdinText === null ? "ignore" : "pipe", "pipe", "pipe"],
   });
@@ -51,6 +76,10 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
   };
 
   createInterface({ input: child.stdout! }).on("line", (line) => {
+    if (remote && remotePid === null && line.startsWith(REMOTE_PID_MARKER)) {
+      remotePid = line.slice(REMOTE_PID_MARKER.length).trim();
+      return;
+    }
     emitRaw({ src: "stdout", line });
     let events: StreamEvent[] = [];
     try {
@@ -74,7 +103,7 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
     let spawnError: string | null = null;
     child.on("error", (error) => {
       spawnError = (error as NodeJS.ErrnoException).code === "ENOENT"
-        ? `Command not found: ${spec.command}`
+        ? `Command not found: ${launch.command}`
         : error.message;
       if (child.exitCode === null && child.pid === undefined) resolve({ code: null, signal: null, spawnError });
     });
@@ -102,12 +131,22 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
     async cancel() {
       cancelled = true;
       if (child.exitCode !== null || child.signalCode !== null) return;
-      child.kill("SIGINT");
-      const term = setTimeout(() => child.kill("SIGTERM"), 5000);
-      const kill = setTimeout(() => child.kill("SIGKILL"), 10000);
+      // Remote: stop the process on the server itself; killing the local ssh alone can leave it running.
+      const signal = (sig: "INT" | "TERM" | "KILL") => {
+        if (remote && remotePid && spec.host) {
+          void runOn(spec.host, "kill", [`-${sig}`, remotePid], null, { timeoutMs: 15_000 }).catch(() => {});
+        } else {
+          child.kill(`SIG${sig}`);
+        }
+      };
+      signal("INT");
+      const term = setTimeout(() => signal("TERM"), 5000);
+      const kill = setTimeout(() => signal("KILL"), 10000);
+      const local = setTimeout(() => child.kill("SIGKILL"), 15000);
       await exited;
       clearTimeout(term);
       clearTimeout(kill);
+      clearTimeout(local);
     },
   };
 }
@@ -117,11 +156,12 @@ export function runToCompletion(
   spec: SpawnSpec,
   timeoutMs = 20000,
 ): Promise<{ code: number | null; stdout: string; stderr: string; error: string | null }> {
+  const launch = resolveSpawn(spec);
   return new Promise((resolve) => {
     execFile(
-      spec.command,
-      spec.args,
-      { cwd: spec.cwd, env: spec.env, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+      launch.command,
+      launch.args,
+      { cwd: launch.cwd, env: launch.env, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
       (error, stdout, stderr) => {
         const code = error ? (typeof error.code === "number" ? error.code : null) : 0;
         resolve({ code, stdout: String(stdout), stderr: String(stderr), error: error ? error.message : null });

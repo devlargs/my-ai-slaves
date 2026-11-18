@@ -18,11 +18,13 @@ export interface PickArgs {
   now: Date;
   /** Only accounts of this provider (resuming a session). */
   provider?: ProviderId;
+  /** Only accounts on the repo's machine (null = this Mac). Omitted = no filter. */
+  host?: string | null;
   exclude?: ReadonlySet<string>;
 }
 
 /** First usable account in order; otherwise when to look again and why. */
-export function pickAccount({ candidates, accounts, now, provider, exclude }: PickArgs): PickResult {
+export function pickAccount({ candidates, accounts, now, provider, host, exclude }: PickArgs): PickResult {
   const byId = new Map(accounts.map((a) => [a.id, a]));
   let earliest: string | null = null;
   const skipped: string[] = [];
@@ -34,6 +36,10 @@ export function pickAccount({ candidates, accounts, now, provider, exclude }: Pi
       continue;
     }
     if (exclude?.has(id)) continue;
+    if (host !== undefined && (account.host ?? null) !== host) {
+      skipped.push(`${id} (runs on ${account.host ?? "this Mac"}, not ${host ?? "this Mac"})`);
+      continue;
+    }
     if (provider && account.provider !== provider) {
       skipped.push(`${id} (different CLI than the session)`);
       continue;

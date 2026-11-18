@@ -41,6 +41,8 @@ export type AccountView = Account & {
 export interface CreateAccountRequest {
   label: string;
   provider: ProviderId;
+  /** SSH host for an account that uses that server's own login; omit for this Mac. */
+  host?: string | null;
 }
 /** PUT /api/accounts/order */
 export interface ReorderRequest {
@@ -84,9 +86,28 @@ export interface LoginCodeRequest {
 /** DELETE /api/accounts/:id → { ok: true } (logs the CLI out for that config dir, deletes the dir, removes it from repo chains) */
 
 // ── Repos ───────────────────────────────────────────────────────────────────
-/** GET /api/repos → Repo[] · POST /api/repos → Repo */
+/** Whether the repo can be reached right now (checked in the background). */
+export interface RepoAvailability {
+  state: "ok" | "unreachable" | "checking";
+  /** Why it can't be reached (e.g. "ssh: connect to host dev: Operation timed out"). */
+  message: string | null;
+  checkedAt: string | null;
+}
+export type RepoView = Repo & { availability: RepoAvailability };
+/** GET /api/repos → RepoView[] · POST /api/repos → RepoView · POST /api/repos/:id/check → RepoView */
 export interface RegisterRepoRequest {
   path: string;
+  /** SSH host from ~/.ssh/config; omit for a repo on this Mac. */
+  host?: string | null;
+}
+
+/** GET /api/remote/hosts: what VS Code's Remote Explorer shows (SSH hosts + remembered folders). */
+export interface RemoteHost {
+  host: string;
+  /** HostName from ~/.ssh/config, if set. */
+  hostname: string | null;
+  /** Remote folders VS Code has opened on this host (newest first). */
+  recentFolders: string[];
 }
 /** PATCH /api/repos/:id → Repo */
 export interface UpdateRepoRequest {
@@ -99,7 +120,7 @@ export interface UpdateRepoRequest {
 }
 /** DELETE /api/repos/:id → { ok: true } (refused with 409 while it has tasks in the queue) */
 
-/** GET /api/fs/browse?path=<abs> (defaults to home) */
+/** GET /api/fs/browse?path=<abs>&host=<ssh host> (defaults to home; host omitted = this Mac) */
 export interface FsBrowseResponse {
   path: string;
   parent: string | null;

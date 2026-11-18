@@ -10,6 +10,7 @@ import {
 import { PROJECT_ROOT } from "../paths";
 import type { AdapterRegistry } from "../providers";
 import { runToCompletion } from "../providers/spawn";
+import { assertHost } from "../remote/machine";
 import type { AccountContext } from "../providers/types";
 import type { DataStores } from "../storage/data-stores";
 import { effectiveStatus } from "./account-router";
@@ -26,8 +27,9 @@ export class AccountService {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  configDirOf(account: Account): string {
-    return resolve(PROJECT_ROOT, account.configDir);
+  /** Local accounts: their isolated CLI config folder. Remote accounts (server's own login): null. */
+  configDirOf(account: Account): string | null {
+    return account.host || !account.configDir ? null : resolve(PROJECT_ROOT, account.configDir);
   }
 
   context(account: Account): AccountContext {
@@ -63,26 +65,49 @@ export class AccountService {
     this.broadcaster.accountsUpdated(await this.list());
   }
 
-  async create(label: string, provider: ProviderId): Promise<AccountView> {
+  /**
+   * Local accounts get their own CLI config folder. A remote account (host set) runs on that SSH
+   * host with the server's own login, so there is one per CLI per host and no folder here.
+   */
+  async create(label: string, provider: ProviderId, host: string | null = null): Promise<AccountView> {
     const parsed = AccountLabel.safeParse(label);
     if (!parsed.success) throw badRequest(`Invalid label: ${parsed.error.issues[0]?.message}`);
+    if (host) {
+      try {
+        assertHost(host);
+      } catch (e) {
+        throw badRequest((e as Error).message);
+      }
+    }
     const accounts = await this.listRaw();
     if (accounts.some((a) => a.id === label)) throw conflict(`An account named "${label}" already exists.`);
-    if (provider === "cursor-agent" && accounts.some((a) => a.provider === "cursor-agent")) {
+    const cli = provider === "claude-code" ? "Claude Code" : "Cursor";
+    if (host && accounts.some((a) => a.host === host && a.provider === provider)) {
+      throw conflict(`${host} already has a ${cli} account. It uses the server's own login, so one is enough.`);
+    }
+    if (!host && provider === "cursor-agent" && accounts.some((a) => !a.host && a.provider === "cursor-agent")) {
       throw conflict(
-        "Only one Cursor account is supported: the Cursor CLI keeps its login in the macOS Keychain under a fixed name, so a second account would share the same login.",
+        "Only one Cursor account is supported on this Mac: the Cursor CLI keeps its login in the macOS Keychain under a fixed name, so a second account would share the same login.",
       );
     }
 
-    const configDirAbs = join(this.stores.paths.cliConfigDir, label);
-    await mkdir(configDirAbs, { recursive: true });
+    let configDir = "";
+    if (!host) {
+      const configDirAbs = join(this.stores.paths.cliConfigDir, label);
+      await mkdir(configDirAbs, { recursive: true });
+      // Relative to the project when .data is inside it (the normal case), absolute otherwise.
+      configDir = relative(PROJECT_ROOT, configDirAbs).startsWith("..") ? configDirAbs : relative(PROJECT_ROOT, configDirAbs);
+    }
     const stamp = formatLocalIso(this.now());
     const account: Account = {
       id: label,
       label,
       provider,
-      // Relative to the project when .data is inside it (the normal case), absolute otherwise.
-      configDir: relative(PROJECT_ROOT, configDirAbs).startsWith("..") ? configDirAbs : relative(PROJECT_ROOT, configDirAbs),
+      host,
+      configDir,
+      // On a server, use its own commands (found via ~/.local/bin); servers often only have the
+      // older `cursor-agent` name. Settings' binary is a path on this Mac, so it isn't used there.
+      binary: host ? (provider === "cursor-agent" ? "cursor-agent" : "claude") : null,
       status: "unknown",
       limitedUntil: null,
       lastLimitReason: null,
@@ -111,8 +136,12 @@ export class AccountService {
     const account = await this.get(id);
     const settings = await this.stores.settings.read();
     const adapter = this.adapters[account.provider];
-    await runToCompletion(adapter.logoutCommand(this.context(account), settings), 20000);
-    await rm(this.configDirOf(account), { recursive: true, force: true });
+    const configDir = this.configDirOf(account);
+    // Remote accounts use the server's own login: removing one from the app never logs the server out.
+    if (configDir) {
+      await runToCompletion(adapter.logoutCommand(this.context(account), settings), 20000);
+      await rm(configDir, { recursive: true, force: true });
+    }
 
     this.authInfo.delete(id);
     await this.stores.accounts.update((file) => {

@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { AccountStatusDot, LiveDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { useStore, ws } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -60,6 +61,7 @@ export function App() {
   if (unauthorized) return <SessionExpired />;
 
   return (
+    <TooltipProvider delayDuration={250}>
     <div className="flex h-full">
       <Sidebar route={route} />
       <main className="scroll-quiet min-w-0 flex-1 overflow-auto">
@@ -77,6 +79,7 @@ export function App() {
         }}
       />
     </div>
+    </TooltipProvider>
   );
 }
 

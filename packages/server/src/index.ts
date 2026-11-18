@@ -95,6 +95,10 @@ try {
 }
 
 await queue.init();
+// Reachability of every repo (SSH hosts can come and go): now, then every minute.
+void repos.checkAll();
+const availabilityTimer = setInterval(() => void repos.checkAll(), 60_000);
+availabilityTimer.unref();
 void accounts.checkAll().then(() => queue.tick()); // fresh login status + emails
 
 console.log(`

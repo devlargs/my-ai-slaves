@@ -1,5 +1,5 @@
 import type { AccountView, ProviderId, Settings, UpdateSettingsRequest } from "@my-ai-slaves/shared";
-import { LogInIcon, PlusIcon, RefreshCwIcon, SaveIcon, TimerResetIcon, Trash2Icon } from "lucide-react";
+import { LogInIcon, PlusIcon, RefreshCwIcon, SaveIcon, ServerIcon, TimerResetIcon, Trash2Icon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { SortableList } from "@/components/sortable-list";
@@ -32,6 +32,7 @@ export function SettingsPage() {
 // ── Accounts ────────────────────────────────────────────────────────────────
 
 const LABEL_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const THIS_MAC = "__this_mac__";
 
 async function refreshAccounts() {
   const accounts = await attempt(api.getAccounts());
@@ -43,8 +44,19 @@ function AccountsCard() {
   const [loginFor, setLoginFor] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [provider, setProvider] = useState<ProviderId>("claude-code");
+  const [runsOn, setRunsOn] = useState<string>(THIS_MAC);
+  const [hosts, setHosts] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const hasCursor = accounts.some((a) => a.provider === "cursor-agent");
+  const remoteHost = runsOn === THIS_MAC ? null : runsOn;
+  // This Mac: one Cursor account (Keychain). A host: one account per CLI (it uses the server's login).
+  const hasCursor = accounts.some((a) => (a.host ?? null) === remoteHost && a.provider === "cursor-agent");
+
+  useEffect(() => {
+    void api
+      .getRemoteHosts()
+      .then((list) => setHosts(list.map((h) => h.host)))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (hasCursor && provider === "cursor-agent") setProvider("claude-code");
@@ -55,12 +67,13 @@ function AccountsCard() {
   const create = async () => {
     if (!labelValid) return;
     setBusy(true);
-    const account = await attempt(api.createAccount({ label, provider }), "Account added");
+    const account = await attempt(api.createAccount({ label, provider, host: remoteHost }), "Account added");
     setBusy(false);
     if (account) {
       setLabel("");
       await refreshAccounts();
-      setLoginFor(account.id);
+      // Remote accounts use the server's existing login; local ones log in now.
+      if (!account.host) setLoginFor(account.id);
     }
   };
 
@@ -110,6 +123,21 @@ function AccountsCard() {
             />
           </div>
           <div className="flex w-44 flex-col gap-1">
+            <Label>Runs on</Label>
+            <Select
+              aria-label="Runs on"
+              value={runsOn}
+              onValueChange={(v) => {
+                setRunsOn(v);
+                if (v !== THIS_MAC && !label) setLabel(`${v.split(".")[0]?.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}-claude`);
+              }}
+              options={[
+                { value: THIS_MAC, label: "This Mac" },
+                ...hosts.map((h) => ({ value: h, label: `${h} (SSH)` })),
+              ]}
+            />
+          </div>
+          <div className="flex w-44 flex-col gap-1">
             <Label>Provider</Label>
             <Select
               value={provider}
@@ -121,12 +149,21 @@ function AccountsCard() {
             />
           </div>
           <Button type="submit" disabled={!labelValid || busy}>
-            <PlusIcon /> Add & log in
+            <PlusIcon /> {remoteHost ? "Add" : "Add & log in"}
           </Button>
           <p className="w-full text-[11px] text-muted-foreground">
-            Labels: lowercase letters, digits, <code>_</code> and <code>-</code>. Each Claude account gets its own config
-            folder so logins don&apos;t collide. Only one Cursor account is supported: the Cursor CLI keeps its login in
-            the macOS Keychain, shared by every config folder.
+            {remoteHost ? (
+              <>
+                Runs tasks on <code className="font-mono">{remoteHost}</code> over SSH with whatever Claude / Cursor login is
+                already on that server. Use it in the chains of repos on that host.
+              </>
+            ) : (
+              <>
+                Labels: lowercase letters, digits, <code>_</code> and <code>-</code>. Each Claude account gets its own
+                config folder so logins don&apos;t collide. Only one Cursor account is supported on this Mac: the Cursor
+                CLI keeps its login in the macOS Keychain, shared by every config folder.
+              </>
+            )}
           </p>
         </form>
       </CardContent>
@@ -161,6 +198,12 @@ function AccountRow({
         <div className="flex items-center gap-2">
           <span className="truncate font-medium">{account.label}</span>
           <ProviderLabel provider={account.provider} />
+          {account.host && (
+            <Badge variant="outline" className="gap-1 font-mono" title={`Runs on ${account.host} over SSH, with that server's login`}>
+              <ServerIcon className="size-3" />
+              {account.host}
+            </Badge>
+          )}
           <AccountStatusBadge account={account} />
         </div>
         {account.email && account.status !== "logged-out" && (
@@ -211,12 +254,19 @@ function AccountRow({
         title={`Delete ${account.label}?`}
         description={
           <div className="flex flex-col gap-2">
-            <p>
-              This logs the CLI out for this account, deletes its config folder{" "}
-              <code className="font-mono text-xs">{account.configDir}</code>, and removes it from every repo&apos;s
-              chain.
-            </p>
-            {account.provider === "cursor-agent" && (
+            {account.host ? (
+              <p>
+                This removes it from the app and from every repo&apos;s chain. The login on{" "}
+                <code className="font-mono text-xs">{account.host}</code> is left as it is.
+              </p>
+            ) : (
+              <p>
+                This logs the CLI out for this account, deletes its config folder{" "}
+                <code className="font-mono text-xs">{account.configDir}</code>, and removes it from every repo&apos;s
+                chain.
+              </p>
+            )}
+            {!account.host && account.provider === "cursor-agent" && (
               <p className="font-medium text-danger-ink">
                 Cursor keeps one login per Mac, so this also logs out the Cursor CLI (<code>agent</code>) everywhere on
                 this machine.

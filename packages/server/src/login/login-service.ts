@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import type { LoginState, LoginStatus } from "@my-ai-slaves/shared";
 import { type IPty, spawn } from "node-pty";
 import type { AdapterRegistry } from "../providers";
+import { resolveSpawn } from "../providers/spawn";
 import type { AccountService } from "../services/account-service";
 import { conflict, notFound } from "../services/common";
 import type { DataStores } from "../storage/data-stores";
@@ -70,12 +72,14 @@ export class LoginService {
 
     const settings = await this.stores.settings.read();
     const spec = this.adapters[account.provider].loginCommand(this.accounts.context(account), settings);
-    const pty = spawn(spec.command, spec.args, {
+    // Remote accounts log in on the server through `ssh -tt`, so the CLI still sees a terminal.
+    const launch = resolveSpawn(spec, { tty: true });
+    const pty = spawn(launch.command, launch.args, {
       name: "xterm-256color",
       cols: 500, // wide, so long sign-in links are never wrapped
       rows: 50,
-      cwd: spec.cwd,
-      env: spec.env,
+      cwd: launch.cwd ?? homedir(),
+      env: launch.env,
     });
 
     const session: Session = {

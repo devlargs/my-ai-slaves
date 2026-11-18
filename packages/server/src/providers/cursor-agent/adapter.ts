@@ -1,15 +1,28 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SettingsFile } from "@my-ai-slaves/shared";
-import { childEnv, runProcess, runToCompletion } from "../spawn";
-import { type AccountContext, type AuthInfo, gitIdentityEnv, type ProviderAdapter, type RunHandle, type RunInput, type SpawnSpec } from "../types";
+import { runProcess, runToCompletion } from "../spawn";
+import {
+  type AccountContext,
+  type AuthInfo,
+  gitIdentityEnv,
+  type ProviderAdapter,
+  type RunHandle,
+  type RunInput,
+  type SpawnSpec,
+} from "../types";
 import { CursorStreamParser } from "./parse-stream";
 
 /**
  * NOTE: CURSOR_CONFIG_DIR only isolates cli-config.json. The login itself lives in the macOS
- * Keychain under a fixed name, so all Cursor "accounts" share one login (the app allows only one).
+ * Keychain under a fixed name, so all local Cursor "accounts" share one login (the app allows one).
+ * Remote accounts use the server's own Cursor login and config.
  */
-const env = (ctx: AccountContext) => childEnv({ CURSOR_CONFIG_DIR: ctx.configDir });
+const configEnv = (ctx: AccountContext): Record<string, string> =>
+  ctx.configDir ? { CURSOR_CONFIG_DIR: ctx.configDir } : {};
+
+const binaryOf = (ctx: AccountContext, settings: SettingsFile) =>
+  ctx.account.binary ?? settings.providers["cursor-agent"].binary;
 
 const MODE_FLAGS: Record<SettingsFile["providers"]["cursor-agent"]["permissionMode"], string[]> = {
   "auto-review": ["--auto-review"],
@@ -41,10 +54,11 @@ export class CursorAgentAdapter implements ProviderAdapter {
   }
 
   /**
-   * Turn off "Made with Cursor" on commits and PRs (documented cli-config.json keys). Only the
-   * account's own cli-config.json is touched; Cursor's login lives in the Keychain, not here.
+   * Turn off "Made with Cursor" on commits and PRs (documented cli-config.json keys), for local
+   * accounts. Remote accounts use the server's own config; Keep/Push still strip such lines.
    */
   async prepare(ctx: AccountContext): Promise<void> {
+    if (!ctx.configDir) return;
     const file = join(ctx.configDir, "cli-config.json");
     let config: Record<string, any> = {};
     try {
@@ -63,32 +77,35 @@ export class CursorAgentAdapter implements ProviderAdapter {
   run(input: RunInput, settings: SettingsFile): RunHandle {
     const s = settings.providers["cursor-agent"];
     return runProcess(
-      { command: s.binary, args: this.buildArgs(input, settings), env: { ...env(input), ...gitIdentityEnv(input.gitIdentity) }, cwd: input.cwd },
+      {
+        command: binaryOf(input, settings),
+        args: this.buildArgs(input, settings),
+        extraEnv: { ...configEnv(input), ...gitIdentityEnv(input.gitIdentity) },
+        cwd: input.cwd,
+        host: input.account.host,
+      },
       null,
       new CursorStreamParser(s.limitPatterns),
     );
   }
 
+  private spec(ctx: AccountContext, settings: SettingsFile, args: string[]): SpawnSpec {
+    return { command: binaryOf(ctx, settings), args, extraEnv: configEnv(ctx), cwd: ctx.configDir, host: ctx.account.host };
+  }
+
   loginCommand(ctx: AccountContext, settings: SettingsFile): SpawnSpec {
-    return {
-      command: settings.providers["cursor-agent"].binary,
-      args: ["login"],
-      env: env(ctx), // opens your browser; finishes by itself once you approve
-      cwd: ctx.configDir,
-    };
+    return this.spec(ctx, settings, ["login"]); // opens your browser (or prints the link); finishes by itself
   }
 
   logoutCommand(ctx: AccountContext, settings: SettingsFile): SpawnSpec {
-    return { command: settings.providers["cursor-agent"].binary, args: ["logout"], env: env(ctx), cwd: ctx.configDir };
+    return this.spec(ctx, settings, ["logout"]);
   }
 
   async checkAuth(ctx: AccountContext, settings: SettingsFile): Promise<AuthInfo> {
-    const out = await runToCompletion({
-      command: settings.providers["cursor-agent"].binary,
-      args: ["status", "--format", "json"],
-      env: env(ctx),
-      cwd: ctx.configDir,
-    });
+    // On older Cursor CLIs (seen on servers: 2025.09) `status` starts a login instead of reporting,
+    // so remote accounts are never status-checked; a logged-out run is detected from its output.
+    if (ctx.account.host) return { state: "unknown", email: null, plan: null };
+    const out = await runToCompletion(this.spec(ctx, settings, ["status", "--format", "json"]));
     try {
       const j = JSON.parse(out.stdout) as { isAuthenticated?: boolean; userInfo?: { email?: unknown; teamName?: unknown } };
       if (typeof j.isAuthenticated === "boolean") {

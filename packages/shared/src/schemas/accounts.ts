@@ -13,8 +13,15 @@ export const Account = z.object({
   id: AccountLabel,
   label: AccountLabel,
   provider: ProviderId,
-  /** Relative to the project root, e.g. `.data/cli-config/work_1-claude`. */
-  configDir: z.string().min(1),
+  /** SSH host (from ~/.ssh/config) this account runs on; null = this Mac. */
+  host: z.string().min(1).nullable().default(null),
+  /**
+   * Local accounts: their isolated CLI config folder, relative to the project root
+   * (e.g. `.data/cli-config/work_1-claude`). Remote accounts use the server's own login: "".
+   */
+  configDir: z.string(),
+  /** CLI command override (remote hosts may only have `cursor-agent`). null = the provider setting. */
+  binary: z.string().min(1).nullable().default(null),
   status: AccountStatus.default("unknown"),
   limitedUntil: Timestamp.nullable().default(null),
   lastLimitReason: z.string().nullable().default(null),
