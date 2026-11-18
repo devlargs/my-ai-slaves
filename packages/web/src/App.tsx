@@ -1,4 +1,12 @@
-import { BellIcon, HistoryIcon, ListOrderedIcon, type LucideIcon, FolderGit2Icon, SettingsIcon } from "lucide-react";
+import {
+  BellIcon,
+  FolderGit2Icon,
+  HistoryIcon,
+  LibraryBigIcon,
+  ListOrderedIcon,
+  type LucideIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { AccountStatusDot, LiveDot } from "@/components/status";
@@ -7,15 +15,17 @@ import { api } from "@/lib/api";
 import { useStore, ws } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { HistoryPage } from "@/pages/history-page";
+import { PromptsPage } from "@/pages/prompts-page";
 import { QueuePage } from "@/pages/queue-page";
 import { ReposPage } from "@/pages/repos-page";
 import { SettingsPage } from "@/pages/settings-page";
 
-type Route = "queue" | "repos" | "settings" | "history";
+type Route = "queue" | "repos" | "prompts" | "settings" | "history";
 
 const NAV: { route: Route; label: string; icon: LucideIcon }[] = [
   { route: "queue", label: "Queue", icon: ListOrderedIcon },
   { route: "repos", label: "Repos", icon: FolderGit2Icon },
+  { route: "prompts", label: "Prompts", icon: LibraryBigIcon },
   { route: "settings", label: "Settings", icon: SettingsIcon },
   { route: "history", label: "History", icon: HistoryIcon },
 ];
@@ -55,6 +65,7 @@ export function App() {
       <main className="scroll-quiet min-w-0 flex-1 overflow-auto">
         {route === "queue" && <QueuePage />}
         {route === "repos" && <ReposPage />}
+        {route === "prompts" && <PromptsPage />}
         {route === "settings" && <SettingsPage />}
         {route === "history" && <HistoryPage />}
       </main>

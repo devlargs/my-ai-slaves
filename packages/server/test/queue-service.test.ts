@@ -8,6 +8,7 @@ import { AccountService } from "../src/services/account-service";
 import { BranchService } from "../src/services/branch-service";
 import { nullBroadcaster } from "../src/services/common";
 import { PromptAssembler } from "../src/services/prompt-assembler";
+import { PromptLibrary } from "../src/services/prompt-library";
 import { QueueService } from "../src/services/queue-service";
 import { RepoService } from "../src/services/repo-service";
 import { AttachmentStore } from "../src/storage/attachment-store";
@@ -74,6 +75,7 @@ async function setup(chain = ["work_1-claude", "work_2-cursor"]) {
     repoBasePrompt: (r) => repos.basePromptOf(r),
   });
   const attachments = new AttachmentStore(stores.paths.attachmentsDir);
+  const prompts = new PromptLibrary(stores);
   const queue = new QueueService({
     stores,
     accounts,
@@ -83,9 +85,10 @@ async function setup(chain = ["work_1-claude", "work_2-cursor"]) {
     adapters,
     broadcaster: nullBroadcaster,
     attachments,
+    prompts,
   });
   await queue.init();
-  return { dir, stores, accounts, repos, queue, repo, attachments, received };
+  return { dir, stores, accounts, repos, queue, repo, attachments, prompts, received };
 }
 
 async function waitFor<T>(fn: () => Promise<T | undefined | null | false>, timeoutMs = 10000): Promise<T> {
@@ -130,6 +133,7 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     expect(started?.data?.layers).toEqual([
       { name: "global", included: true },
       { name: "repo", included: true },
+      { name: "prompts", included: false },
       { name: "message", included: true },
       { name: "attachments", included: false },
     ]);
@@ -175,6 +179,63 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     await expect(
       queue.create({ repo: repo.id, message: "x", attachmentIds: ["00000000-0000-4000-8000-000000000000"] }),
     ).rejects.toThrow("missing");
+  });
+
+  it("sends bound saved prompts between the repo base prompt and the message, in library order", async () => {
+    const { queue, repo, prompts, received, stores } = await setup();
+    const jira = await prompts.create("Analyze Jira ticket", "JIRA STEPS");
+    const plan = await prompts.create("Plan first", "PLAN FIRST");
+    // Picked in reverse order: still sent in library order.
+    const created = await queue.create({ repo: repo.id, message: "FT-123", promptIds: [plan.id, jira.id] });
+    expect(created.promptIds).toEqual([jira.id, plan.id]);
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+
+    const [call] = await received();
+    expect(call?.prompt).toBe("GLOBAL RULES\n\nREPO RULES\n\nJIRA STEPS\n\nPLAN FIRST\n\nFT-123");
+    const started = (await stores.activity.forTask(created.id)).find((e) => e.event === "started");
+    expect(started?.data?.boundPrompts).toEqual([
+      { id: "analyze-jira-ticket", name: "Analyze Jira ticket" },
+      { id: "plan-first", name: "Plan first" },
+    ]);
+    expect((started?.data?.layers as { name: string; included: boolean }[]).map((l) => l.name)).toEqual([
+      "global",
+      "repo",
+      "prompts",
+      "message",
+      "attachments",
+    ]);
+  });
+
+  it("uses a bound prompt's latest text at run time, and skips (with a warning) one deleted before it ran", async () => {
+    const { queue, repo, prompts, received, stores } = await setup();
+    const a = await prompts.create("Style", "OLD STYLE");
+    const b = await prompts.create("Gone soon", "BYE");
+    const blocker = await queue.create({ repo: repo.id, message: "SLOW first" });
+    const task = await queue.create({ repo: repo.id, message: "go", promptIds: [a.id, b.id] });
+    await prompts.update(a.id, { body: "NEW STYLE" });
+    await prompts.remove(b.id);
+    await waitFor(async () => queue.replay(blocker.id).events.length > 0);
+    await queue.cancel(blocker.id);
+    await waitFor(taskWith(queue, task.id, "needs-review"));
+
+    const call = (await received()).find((c) => c.prompt.endsWith("go"));
+    expect(call?.prompt).toBe("GLOBAL RULES\n\nREPO RULES\n\nNEW STYLE\n\ngo");
+    const history = await stores.activity.forTask(task.id);
+    expect(history.some((e) => e.event === "warning" && e.detail.includes("gone-soon"))).toBe(true);
+    await expect(queue.create({ repo: repo.id, message: "x", promptIds: ["nope"] })).rejects.toThrow("Unknown saved prompt");
+  });
+
+  it("replies can bind saved prompts too", async () => {
+    const { queue, repo, prompts, received } = await setup();
+    const p = await prompts.create("Commit style", "CONVENTIONAL COMMITS");
+    const created = await queue.create({ repo: repo.id, message: "first" });
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+    await queue.reply(created.id, "and commit it", [], [p.id]);
+    await waitFor(async () => {
+      const t = (await queue.list()).find((x) => x.id === created.id);
+      return t?.status === "needs-review" && t.pendingReply === null && t.replies.length === 1;
+    });
+    expect((await received()).at(-1)?.prompt).toBe("CONVENTIONAL COMMITS\n\nand commit it");
   });
 
   it("Claude never gets its worktree tools", async () => {
@@ -327,6 +388,7 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
         status: "needs-review",
         message: "old",
         attachments: [],
+        promptIds: [],
         accountOverride: null,
         currentAccount: "work_1-claude",
         branch: null,

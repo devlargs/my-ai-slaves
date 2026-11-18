@@ -22,6 +22,7 @@ import type { AccountService } from "./account-service";
 import { pickAccount } from "./account-router";
 import { badRequest, type Broadcaster, conflict, notFound, shortTime, slugify } from "./common";
 import type { PromptAssembler } from "./prompt-assembler";
+import type { PromptLibrary } from "./prompt-library";
 import type { RepoService } from "./repo-service";
 import { type BranchService, DirtyRepoError, type TaskBranch } from "./branch-service";
 
@@ -53,6 +54,7 @@ export interface QueueDeps {
   adapters: AdapterRegistry;
   broadcaster: Broadcaster;
   attachments: AttachmentStore;
+  prompts: PromptLibrary;
   now?: () => Date;
 }
 
@@ -223,6 +225,7 @@ export class QueueService {
       throw badRequest(`"${repo.id}" has no accounts in its chain. Add some on the Repos page.`);
     }
     const attachments = await this.deps.attachments.resolve(req.attachmentIds);
+    const promptIds = await this.deps.prompts.validate(req.promptIds);
 
     const firstLine = message.trim().split("\n")[0] ?? "";
     const title = firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
@@ -240,6 +243,7 @@ export class QueueService {
         status: "pending",
         message,
         attachments,
+        promptIds,
         accountOverride: override,
         currentAccount: null,
         branch: null,
@@ -258,7 +262,7 @@ export class QueueService {
       account: override,
       event: "queued",
       detail: `Queued: ${created.title}`,
-      data: { title: created.title, message, accountOverride: override, attachments },
+      data: { title: created.title, message, accountOverride: override, attachments, promptIds },
     });
     await this.publish();
     void this.tick();
@@ -326,19 +330,20 @@ export class QueueService {
     void this.tick();
   }
 
-  async reply(id: string, message: string, attachmentIds: string[] = []): Promise<void> {
+  async reply(id: string, message: string, attachmentIds: string[] = [], promptIdsIn: string[] = []): Promise<void> {
     if (!message.trim()) throw badRequest("The reply is empty.");
     const task = await this.getTask(id);
     if (task.status !== "needs-review" || !task.session) {
       throw conflict("You can reply to a task once it's finished a run and is waiting for review.");
     }
     const attachments = await this.deps.attachments.resolve(attachmentIds);
+    const promptIds = await this.deps.prompts.validate(promptIdsIn);
     await this.updateTask(id, (t) => {
-      t.replies.push({ at: this.stamp(), message, attachments });
+      t.replies.push({ at: this.stamp(), message, attachments, promptIds });
       t.pendingReply = message;
       t.status = "pending";
     });
-    this.log({ taskId: id, repo: task.repo, account: null, event: "reply", detail: preview(message, 200), data: { message, attachments } });
+    this.log({ taskId: id, repo: task.repo, account: null, event: "reply", detail: preview(message, 200), data: { message, attachments, promptIds } });
     await this.publish();
     void this.tick();
   }
@@ -587,9 +592,22 @@ export class QueueService {
       const runPaths = runFiles.map((a) => store.pathOf(a));
       // The session may refer back to earlier files, so every file of the task stays readable.
       const addDirs = [...task.attachments, ...task.replies.flatMap((r) => r.attachments)].map((a) => store.dirOf(a.id));
+      // Bound saved prompts: their current text, read now (like the base prompts).
+      const boundIds = isReply ? (task.replies.at(-1)?.promptIds ?? []) : task.promptIds;
+      const bound = await this.deps.prompts.resolve(boundIds);
+      if (bound.missing.length) {
+        this.log({
+          taskId: task.id,
+          repo: repo.id,
+          account: account.id,
+          event: "warning",
+          detail: `Saved prompt(s) no longer in the library, not sent: ${bound.missing.join(", ")}`,
+        });
+      }
+      const boundBodies = bound.prompts.map((p) => p.body);
       const assembled = isReply
-        ? this.deps.assembler.forReply(task.pendingReply ?? "", runPaths)
-        : await this.deps.assembler.forTask(repo.id, task.message, runPaths);
+        ? this.deps.assembler.forReply(task.pendingReply ?? "", runPaths, boundBodies)
+        : await this.deps.assembler.forTask(repo.id, task.message, runPaths, boundBodies);
 
       let resume: { sessionId: string; fromConfigDir: string } | null = null;
       if (isReply && task.session) {
@@ -606,7 +624,15 @@ export class QueueService {
         account: account.id,
         event: "started",
         detail: `Started on ${account.id} (${account.provider})${isReply ? ", continuing the session with your reply" : ""}`,
-        data: { prompt: assembled.prompt, kind: isReply ? "reply" : "fresh", branch: br.name, baseBranch: br.base, cwd: repo.path, layers: assembled.layers },
+        data: {
+          prompt: assembled.prompt,
+          kind: isReply ? "reply" : "fresh",
+          branch: br.name,
+          baseBranch: br.base,
+          cwd: repo.path,
+          layers: assembled.layers,
+          boundPrompts: bound.prompts.map((p) => ({ id: p.id, name: p.name })),
+        },
       });
 
       const adapter = this.deps.adapters[account.provider];

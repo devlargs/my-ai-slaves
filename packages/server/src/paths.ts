@@ -17,6 +17,7 @@ export function dataPaths(dataDir: string) {
     accounts: join(dataDir, "accounts.json"),
     repos: join(dataDir, "repos.json"),
     queue: join(dataDir, "queue.json"),
+    prompts: join(dataDir, "prompts.json"),
     knowledgeDir: join(dataDir, "knowledge"),
     activityDir: join(dataDir, "activity"),
     cliConfigDir: join(dataDir, "cli-config"),

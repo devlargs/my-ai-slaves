@@ -9,6 +9,7 @@ import { createAdapters } from "./providers";
 import { createRequestGuard } from "./security/request-guard";
 import { AccountService } from "./services/account-service";
 import { PromptAssembler } from "./services/prompt-assembler";
+import { PromptLibrary } from "./services/prompt-library";
 import { QueueService } from "./services/queue-service";
 import { RepoService } from "./services/repo-service";
 import { BranchService } from "./services/branch-service";
@@ -32,11 +33,12 @@ const accounts = new AccountService(stores, adapters, hub);
 const repos = new RepoService(stores);
 const branches = new BranchService();
 const attachments = new AttachmentStore(stores.paths.attachmentsDir);
+const prompts = new PromptLibrary(stores);
 const assembler = new PromptAssembler({
   globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
   repoBasePrompt: (repo) => repos.basePromptOf(repo),
 });
-const queue = new QueueService({ stores, accounts, repos, branches, assembler, adapters, broadcaster: hub, attachments });
+const queue = new QueueService({ stores, accounts, repos, branches, assembler, adapters, broadcaster: hub, attachments, prompts });
 const logins = new LoginService(stores, accounts, adapters, {
   loginUpdated: (state) => hub.loginUpdated(state),
   onLoggedIn: () => void queue.tick(),
@@ -54,7 +56,7 @@ await app.register(fastifyWebsocket);
 app.register(async (scope) => {
   scope.get("/ws", { websocket: true }, (socket) => hub.handle(socket));
 });
-registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments });
+registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments, prompts });
 
 let closeVite: (() => Promise<void>) | null = null;
 if (isProduction) {

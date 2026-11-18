@@ -6,6 +6,7 @@ import type { AccountService } from "../services/account-service";
 import { badRequest, HttpError } from "../services/common";
 import { CommandError } from "../services/git";
 import { EmptyMessageError, type PromptAssembler } from "../services/prompt-assembler";
+import type { PromptLibrary } from "../services/prompt-library";
 import type { QueueService } from "../services/queue-service";
 import type { RepoService } from "../services/repo-service";
 import { AttachmentError, type AttachmentStore } from "../storage/attachment-store";
@@ -22,6 +23,7 @@ export interface RouteDeps {
   adapters: AdapterRegistry;
   logins: LoginService;
   attachments: AttachmentStore;
+  prompts: PromptLibrary;
 }
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -37,7 +39,7 @@ const Ids = z.object({ ids: z.array(z.string()) });
 const params = (req: { params: unknown }) => req.params as { id: string };
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
-  const { stores, accounts, repos, queue, assembler, logins, attachments } = deps;
+  const { stores, accounts, repos, queue, assembler, logins, attachments, prompts } = deps;
 
   app.setErrorHandler((error, _req, reply) => {
     if (error instanceof HttpError) return reply.code(error.status).send({ error: error.message });
@@ -127,12 +129,23 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // ── prompt preview ────────────────────────────────────────────────────────
   app.post("/api/prompt/preview", async (req) => {
     const body = parseBody(
-      z.object({ repo: z.string(), message: z.string(), attachmentIds: z.array(z.string()).optional() }),
+      z.object({
+        repo: z.string(),
+        message: z.string(),
+        attachmentIds: z.array(z.string()).optional(),
+        promptIds: z.array(z.string()).optional(),
+      }),
       req.body,
     );
     if (!body.message.trim()) return { prompt: "", layers: [] };
     const files = await attachments.resolve(body.attachmentIds);
-    return assembler.forTask(body.repo, body.message, files.map((a) => attachments.pathOf(a)));
+    const bound = await prompts.resolve(await prompts.validate(body.promptIds));
+    return assembler.forTask(
+      body.repo,
+      body.message,
+      files.map((a) => attachments.pathOf(a)),
+      bound.prompts.map((p) => p.body),
+    );
   });
 
   // ── tasks ─────────────────────────────────────────────────────────────────
@@ -145,6 +158,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
           message: z.string(),
           accountOverride: z.string().nullable().optional(),
           attachmentIds: z.array(z.string()).optional(),
+          promptIds: z.array(z.string()).optional(),
         }),
         req.body,
       ),
@@ -163,8 +177,11 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
   app.post("/api/tasks/:id/reply", async (req) => {
-    const body = parseBody(z.object({ message: z.string(), attachmentIds: z.array(z.string()).optional() }), req.body);
-    await queue.reply(params(req).id, body.message, body.attachmentIds);
+    const body = parseBody(
+      z.object({ message: z.string(), attachmentIds: z.array(z.string()).optional(), promptIds: z.array(z.string()).optional() }),
+      req.body,
+    );
+    await queue.reply(params(req).id, body.message, body.attachmentIds, body.promptIds);
     return { ok: true };
   });
   app.get("/api/tasks/:id/history", (req) => stores.activity.forTask(params(req).id));
@@ -181,6 +198,23 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
 
   app.get("/api/history", () => queue.history());
+
+  // ── prompt library ────────────────────────────────────────────────────────
+  const PromptBody = z.object({ name: z.string().max(120), body: z.string().max(200_000) });
+  app.get("/api/prompts", () => prompts.list());
+  app.post("/api/prompts", async (req, reply) => {
+    const body = parseBody(PromptBody, req.body);
+    return reply.code(201).send(await prompts.create(body.name, body.body));
+  });
+  app.put("/api/prompts/order", async (req) => {
+    await prompts.reorder(parseBody(Ids, req.body).ids);
+    return { ok: true };
+  });
+  app.patch("/api/prompts/:id", async (req) => prompts.update(params(req).id, parseBody(PromptBody.partial(), req.body)));
+  app.delete("/api/prompts/:id", async (req) => {
+    await prompts.remove(params(req).id);
+    return { ok: true };
+  });
 
   // ── attachments ───────────────────────────────────────────────────────────
   // One raw file per request; the name rides in the query string.

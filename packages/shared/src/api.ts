@@ -6,6 +6,7 @@ import type { Account, AccountStatus } from "./schemas/accounts";
 import type { ActivityEntry } from "./schemas/activity";
 import type { ProviderId } from "./schemas/common";
 import type { Task, TaskStatus } from "./schemas/queue";
+import type { SavedPrompt as SavedPromptT } from "./schemas/prompts";
 import type { KnowledgeFile, Repo } from "./schemas/repos";
 import type { SettingsFile } from "./schemas/settings";
 
@@ -119,10 +120,11 @@ export interface PromptPreviewRequest {
   repo: string;
   message: string;
   attachmentIds?: string[];
+  promptIds?: string[];
 }
 export interface PromptPreviewResponse {
   prompt: string;
-  layers: { name: "global" | "repo" | "message" | "attachments"; included: boolean }[];
+  layers: { name: "global" | "repo" | "prompts" | "message" | "attachments"; included: boolean }[];
 }
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
@@ -138,6 +140,8 @@ export interface CreateTaskRequest {
   accountOverride?: string | null;
   /** Ids from POST /api/attachments. */
   attachmentIds?: string[];
+  /** Saved prompts to bind (ids from GET /api/prompts). */
+  promptIds?: string[];
 }
 /** PUT /api/tasks/order (body ReorderRequest, only pending tasks move) */
 /** POST /api/tasks/:id/cancel — pending: removed from queue; running: stopped → interrupted */
@@ -146,6 +150,25 @@ export interface CreateTaskRequest {
 export interface ReplyRequest {
   message: string;
   attachmentIds?: string[];
+  promptIds?: string[];
+}
+
+// ── Prompt library ──────────────────────────────────────────────────────────
+/**
+ * GET /api/prompts → SavedPrompt[] (library order)
+ * POST /api/prompts (CreatePromptRequest) → SavedPrompt
+ * PATCH /api/prompts/:id (UpdatePromptRequest) → SavedPrompt
+ * PUT /api/prompts/order (ReorderRequest)
+ * DELETE /api/prompts/:id → { ok: true } (tasks that bound it skip it, with a warning in their history)
+ */
+export type SavedPromptView = SavedPromptT;
+export interface CreatePromptRequest {
+  name: string;
+  body: string;
+}
+export interface UpdatePromptRequest {
+  name?: string;
+  body?: string;
 }
 
 // ── Attachments ─────────────────────────────────────────────────────────────

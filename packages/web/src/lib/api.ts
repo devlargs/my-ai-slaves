@@ -1,6 +1,9 @@
 import type {
   AccountView,
   Attachment,
+  CreatePromptRequest,
+  SavedPromptView,
+  UpdatePromptRequest,
   ActivityEntry,
   CreateAccountRequest,
   CreateTaskRequest,
@@ -96,8 +99,14 @@ export const api = {
   orderTasks: (ids: string[]) => request<unknown>("PUT", "/tasks/order", { ids }),
   cancelTask: (id: string) => request<unknown>("POST", `/tasks/${enc(id)}/cancel`),
   retryTask: (id: string) => request<unknown>("POST", `/tasks/${enc(id)}/retry`),
-  replyTask: (id: string, message: string, attachmentIds: string[] = []) =>
-    request<unknown>("POST", `/tasks/${enc(id)}/reply`, { message, attachmentIds }),
+  replyTask: (id: string, message: string, attachmentIds: string[] = [], promptIds: string[] = []) =>
+    request<unknown>("POST", `/tasks/${enc(id)}/reply`, { message, attachmentIds, promptIds }),
+
+  getPrompts: () => request<SavedPromptView[]>("GET", "/prompts"),
+  createPrompt: (body: CreatePromptRequest) => request<SavedPromptView>("POST", "/prompts", body),
+  updatePrompt: (id: string, body: UpdatePromptRequest) => request<SavedPromptView>("PATCH", `/prompts/${enc(id)}`, body),
+  deletePrompt: (id: string) => request<Ok>("DELETE", `/prompts/${enc(id)}`),
+  orderPrompts: (ids: string[]) => request<unknown>("PUT", "/prompts/order", { ids }),
   uploadAttachment: async (file: File): Promise<Attachment> => {
     const res = await fetch(`/api/attachments?name=${enc(file.name || "pasted-image.png")}`, {
       method: "POST",

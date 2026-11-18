@@ -13,6 +13,7 @@ describe("assemblePrompt", () => {
     expect(layers).toEqual([
       { name: "global", included: false },
       { name: "repo", included: false },
+      { name: "prompts", included: false },
       { name: "message", included: true },
       { name: "attachments", included: false },
     ]);
@@ -49,6 +50,23 @@ describe("assemblePrompt", () => {
 
   it("refuses an empty message", () => {
     expect(() => assemblePrompt({ globalBase: "G", repoBase: "R", message: "   " })).toThrow(EmptyMessageError);
+  });
+});
+
+describe("bound saved prompts", () => {
+  it("go after the repo base prompt and before the message, verbatim, blank ones skipped", () => {
+    const { prompt, layers } = assemblePrompt({
+      globalBase: "G",
+      repoBase: "R",
+      boundPrompts: ["P1", "   ", "P2\n"],
+      message: "M",
+    });
+    expect(prompt).toBe("G\n\nR\n\nP1\n\nP2\n\n\nM");
+    expect(layers.find((l) => l.name === "prompts")).toEqual({ name: "prompts", included: true });
+  });
+
+  it("replies send bound prompts before the reply", () => {
+    expect(assembleReply("do it", [], ["STYLE"]).prompt).toBe("STYLE\n\ndo it");
   });
 });
 

@@ -38,6 +38,8 @@ export const TaskReply = z.object({
   at: Timestamp,
   message: z.string(),
   attachments: z.array(Attachment).default([]),
+  /** Saved prompts bound to this reply (ids from prompts.json). */
+  promptIds: z.array(z.string()).default([]),
 });
 
 export const Task = z.object({
@@ -48,6 +50,8 @@ export const Task = z.object({
   message: z.string(),
   /** Files attached to the task message. */
   attachments: z.array(Attachment).default([]),
+  /** Saved prompts bound to the task message (ids from prompts.json), sent in library order. */
+  promptIds: z.array(z.string()).default([]),
   accountOverride: z.string().nullable().default(null),
   currentAccount: z.string().nullable().default(null),
   branch: TaskBranch.nullable().default(null),

@@ -28,6 +28,7 @@ import {
 } from "@/components/attachments";
 import { DiffPanel } from "@/components/diff-panel";
 import { LiveOutput } from "@/components/live-output";
+import { BoundPromptChips, PromptPicker, useBoundPrompts, usePromptLibrary } from "@/components/prompt-picker";
 import { PanelHeader } from "@/components/page-header";
 import { SortableList } from "@/components/sortable-list";
 import { TaskStatusBadge } from "@/components/status";
@@ -176,6 +177,14 @@ function QueueList({
                   <span className="truncate">{task.currentAccount}</span>
                 </>
               )}
+              {task.promptIds.length > 0 && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="shrink-0" title={task.promptIds.join(", ")}>
+                    {task.promptIds.length} prompt{task.promptIds.length === 1 ? "" : "s"}
+                  </span>
+                </>
+              )}
               {task.attachments.length > 0 && (
                 <>
                   <span aria-hidden>·</span>
@@ -260,6 +269,8 @@ function Composer() {
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState(false);
   const files = useAttachments();
+  const library = usePromptLibrary();
+  const bound = useBoundPrompts();
 
   // Fall back to the first repo when the remembered one is gone.
   useEffect(() => {
@@ -275,13 +286,20 @@ function Composer() {
     if (!repo || !canSend) return;
     setBusy(true);
     const task = await attempt(
-      api.createTask({ repo, message, accountOverride: account === CHAIN ? null : account, attachmentIds: files.ids }),
+      api.createTask({
+        repo,
+        message,
+        accountOverride: account === CHAIN ? null : account,
+        attachmentIds: files.ids,
+        promptIds: bound.ids,
+      }),
       "Task queued",
     );
     setBusy(false);
     if (task) {
       setMessage("");
       files.clear();
+      bound.setIds([]);
     }
   };
 
@@ -324,6 +342,11 @@ function Composer() {
               ]}
             />
           </div>
+          {bound.ids.length > 0 && (
+            <div className="px-2.5 pt-2">
+              <BoundPromptChips bound={bound} library={library} />
+            </div>
+          )}
           <textarea
             aria-label="Task message"
             value={message}
@@ -345,6 +368,7 @@ function Composer() {
           )}
           <div className="flex items-center gap-1 border-t border-rule px-1.5 py-1.5">
             <AttachButton attachments={files} />
+            <PromptPicker bound={bound} library={library} />
             <label className="ml-1 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground select-none">
               <Switch checked={preview} onCheckedChange={setPreview} />
               Preview prompt
@@ -370,12 +394,24 @@ function Composer() {
           </span>
         </div>
       )}
-      {preview && repo && <PromptPreview repo={repo} message={message} attachmentIds={files.ids} />}
+      {preview && repo && (
+        <PromptPreview repo={repo} message={message} attachmentIds={files.ids} promptIds={bound.ids} />
+      )}
     </div>
   );
 }
 
-function PromptPreview({ repo, message, attachmentIds }: { repo: string; message: string; attachmentIds: string[] }) {
+function PromptPreview({
+  repo,
+  message,
+  attachmentIds,
+  promptIds,
+}: {
+  repo: string;
+  message: string;
+  attachmentIds: string[];
+  promptIds: string[];
+}) {
   const debounced = useDebounced(message, 300);
   const [result, setResult] = useState<PromptPreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -388,7 +424,7 @@ function PromptPreview({ repo, message, attachmentIds }: { repo: string; message
       return;
     }
     api
-      .previewPrompt({ repo, message: debounced, attachmentIds })
+      .previewPrompt({ repo, message: debounced, attachmentIds, promptIds })
       .then((r) => {
         if (!cancelled) {
           setResult(r);
@@ -401,7 +437,7 @@ function PromptPreview({ repo, message, attachmentIds }: { repo: string; message
     return () => {
       cancelled = true;
     };
-  }, [repo, debounced, attachmentIds.join(",")]);
+  }, [repo, debounced, attachmentIds.join(","), promptIds.join(",")]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-rule bg-surface">
@@ -409,7 +445,7 @@ function PromptPreview({ repo, message, attachmentIds }: { repo: string; message
         <span className="label-mono">Exactly what will be sent</span>
         <span className="ml-auto flex flex-wrap gap-1">
           {result?.layers
-            .filter((l) => l.name !== "attachments" || l.included)
+            .filter((l) => (l.name !== "attachments" && l.name !== "prompts") || l.included)
             .map((l) => (
               <Badge
                 key={l.name}
@@ -532,21 +568,29 @@ function ReplyBox({ taskId }: { taskId: string }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const files = useAttachments();
+  const library = usePromptLibrary();
+  const bound = useBoundPrompts();
   const canSend = Boolean(message.trim()) && !busy && !files.uploading && !files.failed;
   const send = async () => {
     if (!canSend) return;
     setBusy(true);
-    const ok = await attempt(api.replyTask(taskId, message, files.ids), "Reply queued");
+    const ok = await attempt(api.replyTask(taskId, message, files.ids, bound.ids), "Reply queued");
     setBusy(false);
     if (ok !== undefined) {
       setMessage("");
       files.clear();
+      bound.setIds([]);
     }
   };
   return (
     <div className="border-t border-rule bg-paper px-6 py-3">
       <DropZone attachments={files}>
         <div className="rounded-lg border border-rule-strong bg-surface transition-[border-color,box-shadow] duration-150 focus-within:border-signal/60 focus-within:ring-3 focus-within:ring-signal/10">
+          {bound.ids.length > 0 && (
+            <div className="px-2.5 pt-2">
+              <BoundPromptChips bound={bound} library={library} />
+            </div>
+          )}
           <textarea
             aria-label="Reply"
             value={message}
@@ -566,8 +610,9 @@ function ReplyBox({ taskId }: { taskId: string }) {
               <AttachmentTray attachments={files} />
             </div>
           )}
-          <div className="flex items-center gap-2 border-t border-rule px-1.5 py-1.5">
+          <div className="flex items-center gap-1 border-t border-rule px-1.5 py-1.5">
             <AttachButton attachments={files} />
+            <PromptPicker bound={bound} library={library} />
             <span className="min-w-0 truncate text-[11px] text-muted-foreground" title="The session already has the base prompts from its first run.">
               Continues the same session. Base prompts aren&apos;t re-sent.
             </span>
@@ -658,6 +703,12 @@ function PromptReceived({ taskId, version }: { taskId: string; version: string }
         </span>
         {layer("global", "global base prompt")}
         {layer("repo", "repo base prompt")}
+        {has("prompts") && (
+          <span className="inline-flex items-center gap-1 text-success-ink">
+            <CheckIcon className="size-3" />
+            saved: {((fresh.data?.boundPrompts as { name: string }[] | undefined) ?? []).map((p) => p.name).join(", ")}
+          </span>
+        )}
         {layer("message", "your message")}
         {has("attachments") && layer("attachments", "attached files")}
         <button

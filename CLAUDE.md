@@ -44,7 +44,7 @@ design.md         locked visual design system (Hallmark, Coral theme): read befo
 ## Data (`.data/`, gitignored, never commit it)
 
 Plain pretty-printed JSON: `settings.json`, `accounts.json`, `repos.json`, `queue.json`,
-`knowledge/<repo>.json`, `activity/NNNN_activity.json`, `attachments/<id>/`,
+`prompts.json` (saved prompt library), `knowledge/<repo>.json`, `activity/NNNN_activity.json`, `attachments/<id>/`,
 `cli-config/<account>/` (CLI logins: never read, log or serve). It can contain the user's API tokens.
 Use `SLAVES_DATA_DIR=<dir>` to point the server or scripts at a scratch folder when testing, and
 `SLAVES_PORT=<port>` (default 3005) to run that test copy next to the user's running app. Never stop
@@ -52,8 +52,9 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
 
 ## Rules that must hold
 
-- **Prompts:** the only text sent to a CLI is global base prompt → repo base prompt → task message,
-  joined by a blank line, empty layers skipped. The single exception is the visible "Attached files:"
+- **Prompts:** the only text sent to a CLI is global base prompt → repo base prompt → saved prompts
+  bound to that message (from the Prompts library, `.data/prompts.json`, in library order) → task
+  message, joined by a blank line, empty layers skipped. The single exception is the visible "Attached files:"
   path list when files are attached. Never add hidden system/role/wrapper text anywhere. Replies resume
   the session and send only the reply (+ its attachments).
 - **Every started run is logged** in activity with its full assembled prompt.

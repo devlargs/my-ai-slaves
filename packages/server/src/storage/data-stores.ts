@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   AccountsFile,
   KnowledgeFile,
+  PromptsFile,
   QueueFile,
   RepoSlug,
   ReposFile,
@@ -19,6 +20,8 @@ export interface DataStores {
   accounts: JsonStore<AccountsFile>;
   repos: JsonStore<ReposFile>;
   queue: JsonStore<QueueFile>;
+  /** `.data/prompts.json`: the saved prompt library. */
+  prompts: JsonStore<PromptsFile>;
   activity: ActivityLog;
   /** `.data/knowledge/<slug>.json`; created blank on first load. */
   knowledge(repoSlug: string): JsonStore<KnowledgeFile>;
@@ -46,6 +49,7 @@ export async function openDataStores(
   const accounts = new JsonStore({ file: paths.accounts, schema: AccountsFile, ...common });
   const repos = new JsonStore({ file: paths.repos, schema: ReposFile, ...common });
   const queue = new JsonStore({ file: paths.queue, schema: QueueFile, ...common });
+  const prompts = new JsonStore({ file: paths.prompts, schema: PromptsFile, ...common });
 
   const knowledgeStores = new Map<string, JsonStore<KnowledgeFile>>();
   const knowledge = (repoSlug: string) => {
@@ -64,7 +68,7 @@ export async function openDataStores(
   };
 
   const report: Record<string, LoadOutcome> = {};
-  for (const store of [settings, accounts, repos, queue]) report[store.file] = await store.load();
+  for (const store of [settings, accounts, repos, queue, prompts]) report[store.file] = await store.load();
 
   for (const name of await readdir(paths.knowledgeDir)) {
     const slug = name.endsWith(".json") ? name.slice(0, -".json".length) : null;
@@ -81,7 +85,7 @@ export async function openDataStores(
   await activity.init();
 
   return {
-    stores: { paths, settings, accounts, repos, queue, activity, knowledge },
+    stores: { paths, settings, accounts, repos, queue, prompts, activity, knowledge },
     report,
   };
 }
