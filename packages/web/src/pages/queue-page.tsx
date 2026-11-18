@@ -12,10 +12,12 @@ import {
   RotateCcwIcon,
   SendIcon,
   SquareIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityTimeline } from "@/components/activity-timeline";
+import { ConfirmButton } from "@/components/confirm-dialog";
 import {
   AttachButton,
   AttachmentList,
@@ -196,17 +198,32 @@ function QueueList({
             )}
           </div>
           <div className="flex shrink-0 flex-col gap-1">
-            {(task.status === "pending" || task.status === "running") && (
+            {task.status === "running" && (
               <Button
                 size="icon-sm"
                 variant="ghost"
-                title={task.status === "running" ? "Stop" : "Cancel"}
+                title="Stop (keeps the worktree; you can retry or discard)"
+                aria-label="Stop"
                 onClick={(e) => {
                   e.stopPropagation();
                   void attempt(api.cancelTask(task.id));
                 }}
               >
-                {task.status === "running" ? <SquareIcon /> : <XIcon />}
+                <SquareIcon />
+              </Button>
+            )}
+            {task.status === "pending" && task.pendingReply !== null && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                title="Cancel the queued reply (keeps the earlier work)"
+                aria-label="Cancel queued reply"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void attempt(api.cancelTask(task.id));
+                }}
+              >
+                <XIcon />
               </Button>
             )}
             {task.status === "interrupted" && (
@@ -214,6 +231,7 @@ function QueueList({
                 size="icon-sm"
                 variant="ghost"
                 title="Retry from scratch"
+                aria-label="Retry"
                 onClick={(e) => {
                   e.stopPropagation();
                   void attempt(api.retryTask(task.id), "Re-queued");
@@ -222,6 +240,7 @@ function QueueList({
                 <RotateCcwIcon />
               </Button>
             )}
+            <DiscardTaskButton task={task} />
           </div>
         </div>
       )}
@@ -431,6 +450,7 @@ function TaskDetail({ task }: { task: TaskView }) {
             {task.title}
           </h2>
           <TaskStatusBadge status={task.status} className="mt-1 shrink-0" />
+          {(task.status === "pending" || task.status === "running") && <DiscardTaskButton task={task} withLabel />}
         </div>
         <dl className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground">
           <Meta label="repo" value={task.repo} />
@@ -557,6 +577,47 @@ function ReplyBox({ taskId }: { taskId: string }) {
         </div>
       </DropZone>
     </div>
+  );
+}
+
+/** Remove a task in any state, after confirming what is lost. Running tasks are stopped first. */
+export function DiscardTaskButton({ task, withLabel = false }: { task: TaskView; withLabel?: boolean }) {
+  const branch = task.worktree?.branch;
+  const what = branch ? (
+    <>
+      removes its worktree and deletes branch <code className="font-mono text-xs text-ink">{branch}</code>, so any
+      unpushed changes are lost
+    </>
+  ) : (
+    "removes it from the queue"
+  );
+  return (
+    // Stops clicks and keys (also from the dialog, which React bubbles through) from selecting the card.
+    <span
+      className="contents"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      role="presentation"
+    >
+      <ConfirmButton
+        size={withLabel ? "sm" : "icon-sm"}
+        variant="ghost"
+        className="text-muted-foreground hover:bg-danger-soft hover:text-danger-ink"
+        aria-label={`Discard ${task.title}`}
+        title={`Discard “${task.title}”?`}
+        description={
+          <p>
+            {task.status === "running" ? "Stops the run, then " : "This "}
+            {what}. The task&apos;s record stays in History.
+          </p>
+        }
+        confirmLabel={task.status === "running" ? "Stop and discard" : "Discard"}
+        onConfirm={() => attempt(api.discardTask(task.id), "Task discarded")}
+      >
+        <Trash2Icon />
+        {withLabel && "Discard"}
+      </ConfirmButton>
+    </span>
   );
 }
 

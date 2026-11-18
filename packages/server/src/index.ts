@@ -17,9 +17,10 @@ import { openDataStores } from "./storage/data-stores";
 import { LoginService } from "./login/login-service";
 import { WsHub } from "./ws/hub";
 
-const PORT = 3005;
+// SLAVES_PORT lets a second instance (e.g. a test copy on scratch data) run next to yours.
+const PORT = Number(process.env.SLAVES_PORT) || 3005;
 const HOST = "127.0.0.1"; // never 0.0.0.0
-const HMR_PORT = 3006;
+const HMR_PORT = PORT + 1;
 const isProduction = process.env.NODE_ENV === "production";
 const webRoot = join(PROJECT_ROOT, "packages", "web");
 

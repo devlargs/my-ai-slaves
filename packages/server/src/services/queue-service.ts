@@ -345,15 +345,46 @@ export class QueueService {
     return result;
   }
 
+  /** Remove a task from the queue in any state. A running task is stopped first. */
   async discard(id: string): Promise<void> {
-    const task = await this.getTask(id);
-    if (task.status === "running") throw conflict("Cancel the task before discarding it.");
+    let task = await this.getTask(id);
+    const wasRunning = task.status === "running";
+    if (wasRunning) task = await this.stopForDiscard(id);
     if (task.worktree) await this.deps.worktrees.remove(await this.deps.repos.get(task.repo), task.worktree, { deleteBranch: true });
     await this.removeTask(id);
-    this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "discarded", detail: "Worktree and branch removed." });
+    this.log({
+      taskId: id,
+      repo: task.repo,
+      account: task.currentAccount,
+      event: "discarded",
+      detail: task.worktree
+        ? `${wasRunning ? "Stopped and discarded" : "Discarded"}: worktree and branch ${task.worktree.branch} removed.`
+        : "Discarded before it ran.",
+    });
     this.deps.broadcaster.taskStatus(id, "done", "Discarded");
     await this.publish();
     void this.tick();
+  }
+
+  /**
+   * Stop a running task and wait for its run to wind down (finishRun marks it interrupted).
+   * Covers a task that is still starting: waits for its process to attach, then stops it.
+   */
+  private async stopForDiscard(id: string): Promise<Task> {
+    const deadline = Date.now() + 15_000;
+    let cancelled = false;
+    for (;;) {
+      const run = this.live.get(id);
+      if (run && !cancelled) {
+        cancelled = true;
+        run.cancelRequested = true;
+        await run.handle.cancel();
+      }
+      const task = await this.getTask(id);
+      if (task.status !== "running") return task;
+      if (Date.now() > deadline) return task; // stale "running" with no process: discard anyway
+      await new Promise((r) => setTimeout(r, 100));
+    }
   }
 
   // ── history ──────────────────────────────────────────────────────────────

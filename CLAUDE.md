@@ -45,7 +45,9 @@ design.md         locked visual design system (Hallmark, Coral theme): read befo
 Plain pretty-printed JSON: `settings.json`, `accounts.json`, `repos.json`, `queue.json`,
 `knowledge/<repo>.json`, `activity/NNNN_activity.json`, `attachments/<id>/`, `worktrees/`,
 `cli-config/<account>/` (CLI logins: never read, log or serve). It can contain the user's API tokens.
-Use `SLAVES_DATA_DIR=<dir>` to point the server or scripts at a scratch folder when testing.
+Use `SLAVES_DATA_DIR=<dir>` to point the server or scripts at a scratch folder when testing, and
+`SLAVES_PORT=<port>` (default 3005) to run that test copy next to the user's running app. Never stop
+a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_DIR` = theirs).
 
 ## Rules that must hold
 

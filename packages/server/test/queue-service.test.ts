@@ -198,6 +198,24 @@ describe("QueueService (fake CLIs, real git)", () => {
     expect(commits.some((c) => c.includes("feat: agent work"))).toBe(true);
   });
 
+  it("discards tasks in any state, stopping a running one first", async () => {
+    const { queue, repo, stores } = await setup();
+    const running = await queue.create({ repo: repo.id, message: "SLOW long job" });
+    const pending = await queue.create({ repo: repo.id, message: "never started" });
+    await waitFor(async () => queue.replay(running.id).events.length > 0);
+
+    await queue.discard(pending.id);
+    await queue.discard(running.id);
+
+    expect(await queue.list()).toEqual([]);
+    expect(sh(repo.path, "branch", "--list", "ai/*")).toBe("");
+    expect(sh(repo.path, "worktree", "list")).not.toContain("task_0001");
+    const outcomes = Object.fromEntries((await queue.history()).map((h) => [h.taskId, h.outcome]));
+    expect(outcomes).toEqual({ [running.id]: "discarded", [pending.id]: "discarded" });
+    const last = (await stores.activity.forTask(running.id)).at(-1);
+    expect(last?.detail).toContain("Stopped and discarded");
+  });
+
   it("runs only one task per repo at a time", async () => {
     const { queue, repo } = await setup();
     const a = await queue.create({ repo: repo.id, message: "SLOW one" });
