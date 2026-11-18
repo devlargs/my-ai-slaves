@@ -6,8 +6,9 @@ Guidance for Claude Code when working in this repository.
 
 **My AI Slaves**: a local web app (macOS first) that queues AI coding tasks and runs them through the
 Claude Code CLI and the Cursor Agent CLI, falling back across several logged-in subscriptions when one
-hits a usage limit. Each task runs in its own git worktree on an `ai/<task-id>` branch; you review the
-diff, then keep / push + open a PR / discard.
+hits a usage limit. Each task checks out its own `ai/<task-id>` branch, created from the repo's base
+branch, **directly in the repo** (no worktrees); afterwards its work is committed on that branch and the
+user's previous branch is checked out again. You review the diff, then keep / push + open a PR / discard.
 
 ## Commands
 
@@ -31,7 +32,7 @@ packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with t
   src/storage     JsonStore (atomic writes, per-file queue, corrupt-file backup), ActivityLog (5 MB rotation),
                   AttachmentStore. The only code that touches .data/.
   src/providers   ProviderAdapter per CLI: claude-code/, cursor-agent/ (args, stream parser, limit detection)
-  src/services    PromptAssembler, AccountRouter (pure) + AccountService, RepoService, WorktreeService,
+  src/services    PromptAssembler, AccountRouter (pure) + AccountService, RepoService, BranchService,
                   QueueService (scheduler, runs, fallback, replies, review actions)
   src/login       LoginService: drives `claude auth login` / `agent login` in a hidden pty
   src/http, src/ws, src/security (Host / Origin / Sec-Fetch-Site guard; no token)
@@ -43,7 +44,7 @@ design.md         locked visual design system (Hallmark, Coral theme): read befo
 ## Data (`.data/`, gitignored, never commit it)
 
 Plain pretty-printed JSON: `settings.json`, `accounts.json`, `repos.json`, `queue.json`,
-`knowledge/<repo>.json`, `activity/NNNN_activity.json`, `attachments/<id>/`, `worktrees/`,
+`knowledge/<repo>.json`, `activity/NNNN_activity.json`, `attachments/<id>/`,
 `cli-config/<account>/` (CLI logins: never read, log or serve). It can contain the user's API tokens.
 Use `SLAVES_DATA_DIR=<dir>` to point the server or scripts at a scratch folder when testing, and
 `SLAVES_PORT=<port>` (default 3005) to run that test copy next to the user's running app. Never stop
@@ -59,7 +60,13 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
 - **No AI attribution** in commits or PRs: Claude runs with `attribution: false`, Cursor's cli-config sets
   `attributeCommitsToAgent/attributePRsToAgent: false`, and Keep/Push strip leftover co-author lines.
   Task commits use the repo's committer name/email when set.
-- **Never touch the user's main working tree** or commit to main/master: only `ai/` branches in worktrees.
+- **No worktrees, ever.** Tasks run in the repo itself on `ai/<task-id>` (from the repo's base branch).
+  A task only starts when the checkout has no uncommitted changes; after each run the work is committed on
+  its branch and the previous branch is checked out again. Never commit to main/master or any non-`ai/`
+  branch. Claude runs with `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and
+  Cursor never gets `-w`.
+- **Base prompts reach the CLI:** tests assert the exact text the (fake) CLIs receive; each task view shows
+  "… received: ✓ global base prompt ✓ repo base prompt" from the run's recorded prompt.
 - **Security:** bind 127.0.0.1 only; spawn with argument arrays, never a shell string; scrub
   `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` etc. from child envs.
 - Cursor supports **one** account only (its login lives in the macOS Keychain under a fixed name).

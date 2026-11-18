@@ -58,8 +58,9 @@ export function ReposPage() {
         title="Repositories"
         description={
           <>
-            Tasks run in a separate git worktree on an <code className="font-mono text-xs text-ink-2">ai/…</code> branch.
-            Your main working tree is never touched.
+            Each task checks out its own <code className="font-mono text-xs text-ink-2">ai/…</code> branch, created from the
+            repo&apos;s base branch, right in your checkout. When it finishes, its work is committed there and your
+            previous branch is checked out again.
           </>
         }
       />
@@ -204,7 +205,7 @@ function RepoCard({
       <CardContent id={`repo-body-${repo.id}`} hidden={!expanded} className="grid gap-5 md:grid-cols-2">
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`branch-${repo.id}`}>Base branch for new worktrees</Label>
+            <Label htmlFor={`branch-${repo.id}`}>Base branch (new task branches start here)</Label>
             <form
               className="flex gap-2"
               onSubmit={(e) => {

@@ -17,7 +17,7 @@ export class AttachmentError extends Error {
 
 /**
  * Pasted and uploaded files: `.data/attachments/<id>/<name>` + `.data/attachments/<id>/meta.json`.
- * Outside every repository, so a task's worktree (and its diff) stays clean. The CLI gets read
+ * Outside every repository, so a task branch (and its diff) stays clean. The CLI gets read
  * access to a task's attachment folders through `--add-dir`.
  */
 export class AttachmentStore {

@@ -1,5 +1,5 @@
 /**
- * Run one prompt on one account from the terminal, no UI, no queue, no worktree.
+ * Run one prompt on one account from the terminal, no UI, no queue, no branch switching.
  *   npm run run-task -w @my-ai-slaves/server -- --account work_1-claude --cwd /path/to/scratch "say hi"
  * Prints normalized stream events and the final result (limit / logged-out / failed / success).
  */

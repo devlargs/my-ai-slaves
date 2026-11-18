@@ -11,7 +11,7 @@ import { AccountService } from "./services/account-service";
 import { PromptAssembler } from "./services/prompt-assembler";
 import { QueueService } from "./services/queue-service";
 import { RepoService } from "./services/repo-service";
-import { WorktreeService } from "./services/worktree-service";
+import { BranchService } from "./services/branch-service";
 import { AttachmentStore } from "./storage/attachment-store";
 import { openDataStores } from "./storage/data-stores";
 import { LoginService } from "./login/login-service";
@@ -30,13 +30,13 @@ const adapters = createAdapters();
 const hub = new WsHub();
 const accounts = new AccountService(stores, adapters, hub);
 const repos = new RepoService(stores);
-const worktrees = new WorktreeService(stores.paths.worktreesDir);
+const branches = new BranchService();
 const attachments = new AttachmentStore(stores.paths.attachmentsDir);
 const assembler = new PromptAssembler({
   globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
   repoBasePrompt: (repo) => repos.basePromptOf(repo),
 });
-const queue = new QueueService({ stores, accounts, repos, worktrees, assembler, adapters, broadcaster: hub, attachments });
+const queue = new QueueService({ stores, accounts, repos, branches, assembler, adapters, broadcaster: hub, attachments });
 const logins = new LoginService(stores, accounts, adapters, {
   loginUpdated: (state) => hub.loginUpdated(state),
   onLoggedIn: () => void queue.tick(),

@@ -23,12 +23,14 @@ import { pickAccount } from "./account-router";
 import { badRequest, type Broadcaster, conflict, notFound, shortTime, slugify } from "./common";
 import type { PromptAssembler } from "./prompt-assembler";
 import type { RepoService } from "./repo-service";
-import type { WorktreeService } from "./worktree-service";
+import { type BranchService, DirtyRepoError, type TaskBranch } from "./branch-service";
 
 const LIVE_BUFFER_LIMIT = 5000;
 const MAX_TIMER_MS = 60 * 60 * 1000;
 
 interface LiveRun {
+  /** The task branch is checked out in the repo (so the run must be settled afterwards). */
+  checkedOut: boolean;
   taskId: string;
   repo: string;
   account: Account;
@@ -46,7 +48,7 @@ export interface QueueDeps {
   stores: DataStores;
   accounts: AccountService;
   repos: RepoService;
-  worktrees: WorktreeService;
+  branches: BranchService;
   assembler: PromptAssembler;
   adapters: AdapterRegistry;
   broadcaster: Broadcaster;
@@ -65,7 +67,9 @@ const pushCapped = <T>(list: T[], item: T) => {
 /**
  * Owns queue.json and every task run.
  * - 1 running task per repo, `maxParallelTasks` overall, pending tasks start in queue order.
- * - Usage limit / logged out mid-run → mark the account, reset the worktree, re-run the same prompt on
+ * - Each run checks out `ai/<task-id>` (from the repo's base branch) in the repo itself; afterwards the
+ *   work is committed on that branch and the previous branch is checked out again.
+ * - Usage limit / logged out mid-run → mark the account, reset the task branch, re-run the same prompt on
  *   the next account in the chain (or wait until one frees up).
  */
 export class QueueService {
@@ -97,6 +101,7 @@ export class QueueService {
 
   /** Tasks that were running when the server stopped come back as interrupted. */
   async init(): Promise<void> {
+    await this.migrateLegacyWorktrees();
     const interrupted: Task[] = [];
     await this.stores.queue.update((q) => {
       for (const task of q.tasks) {
@@ -108,6 +113,14 @@ export class QueueService {
       }
     });
     for (const task of interrupted) {
+      // Commit what it left on its branch and give the repo back to you.
+      const repo = (await this.deps.repos.list()).find((r) => r.id === task.repo);
+      if (repo && task.branch) {
+        const settled = await this.deps.branches
+          .settle(repo, task.branch, `${task.title} (interrupted)`, identityOf(repo))
+          .catch((e: Error) => ({ committed: false, warning: e.message }));
+        if (settled.warning) this.log({ taskId: task.id, repo: task.repo, account: null, event: "warning", detail: settled.warning });
+      }
       this.log({
         taskId: task.id,
         repo: task.repo,
@@ -117,6 +130,40 @@ export class QueueService {
       });
     }
     await this.tick();
+  }
+
+  /**
+   * One-time move off worktrees: commit what an old worktree held onto its branch, remove the
+   * worktree (the branch stays in the repo), and record the branch on the task.
+   */
+  private async migrateLegacyWorktrees(): Promise<void> {
+    const { tasks } = await this.stores.queue.read();
+    const legacy = tasks.filter((t) => t.worktree);
+    if (legacy.length === 0) return;
+    const repos = await this.deps.repos.list();
+    for (const task of legacy) {
+      const wt = task.worktree as NonNullable<Task["worktree"]>;
+      const repo = repos.find((r) => r.id === task.repo);
+      if (repo) {
+        try {
+          await this.deps.branches.removeLegacyWorktree(repo, wt.path, `${task.title} (moved off worktree)`, identityOf(repo));
+        } catch (e) {
+          console.error(`[queue] couldn't move ${task.id} off its worktree (left as is): ${(e as Error).message}`);
+          continue;
+        }
+      }
+      await this.updateTask(task.id, (t) => {
+        t.branch = { name: wt.branch, base: wt.baseBranch, baseCommit: wt.baseCommit, returnTo: null };
+        delete t.worktree;
+      });
+      this.log({
+        taskId: task.id,
+        repo: task.repo,
+        account: null,
+        event: "warning",
+        detail: `Moved off its worktree: the work is on branch ${wt.branch} in the repo.`,
+      });
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -195,7 +242,7 @@ export class QueueService {
         attachments,
         accountOverride: override,
         currentAccount: null,
-        worktree: null,
+        branch: null,
         session: null,
         replies: [],
         pendingReply: null,
@@ -250,7 +297,7 @@ export class QueueService {
       });
       this.log({ taskId: id, repo: task.repo, account: null, event: "cancelled", detail: "Queued reply cancelled." });
     } else {
-      if (task.worktree) await this.deps.worktrees.remove(await this.deps.repos.get(task.repo), task.worktree, { deleteBranch: true });
+      if (task.branch) await this.deps.branches.deleteBranch(await this.deps.repos.get(task.repo), task.branch);
       await this.removeTask(id);
       this.log({ taskId: id, repo: task.repo, account: null, event: "cancelled", detail: "Cancelled before it ran." });
       this.deps.broadcaster.taskStatus(id, "failed", "Cancelled");
@@ -265,7 +312,7 @@ export class QueueService {
     if (task.status !== "interrupted" && task.status !== "needs-review") {
       throw conflict(`Only interrupted or needs-review tasks can be retried (this one is ${task.status}).`);
     }
-    if (task.worktree) await this.deps.worktrees.reset(task.worktree);
+    if (task.branch) await this.deps.branches.resetToBase(await this.deps.repos.get(task.repo), task.branch);
     await this.updateTask(id, (t) => {
       t.status = "pending";
       t.session = null;
@@ -298,49 +345,46 @@ export class QueueService {
 
   // ── review actions ───────────────────────────────────────────────────────
 
-  private async reviewable(id: string): Promise<{ task: Task; repo: Repo; wt: NonNullable<Task["worktree"]> }> {
+  private async reviewable(id: string): Promise<{ task: Task; repo: Repo; br: TaskBranch }> {
     const task = await this.getTask(id);
     if (task.status !== "needs-review" && task.status !== "interrupted") {
       throw conflict(`This task is ${task.status}; review actions need a finished or interrupted task.`);
     }
-    if (!task.worktree) throw conflict("This task has no worktree yet.");
-    return { task, repo: await this.deps.repos.get(task.repo), wt: task.worktree };
+    if (!task.branch) throw conflict("This task has no branch yet.");
+    return { task, repo: await this.deps.repos.get(task.repo), br: task.branch };
   }
 
   async diff(id: string): Promise<DiffResponse> {
     const task = await this.getTask(id);
-    if (!task.worktree) throw conflict("This task has no worktree yet.");
-    const wt = task.worktree;
-    return { patch: await this.deps.worktrees.diff(wt), branch: wt.branch, baseBranch: wt.baseBranch, baseCommit: wt.baseCommit, worktreePath: wt.path };
+    if (!task.branch) throw conflict("This task has no branch yet.");
+    const repo = await this.deps.repos.get(task.repo);
+    const br = task.branch;
+    return { patch: await this.deps.branches.diff(repo, br), branch: br.name, baseBranch: br.base, baseCommit: br.baseCommit, repoPath: repo.path };
   }
 
   async keep(id: string): Promise<void> {
-    const { task, repo, wt } = await this.reviewable(id);
-    await this.deps.worktrees.commitLeftovers(wt, task.title, identityOf(repo));
-    await this.deps.worktrees.stripAiTrailers(wt);
-    await this.deps.worktrees.remove(repo, wt, { deleteBranch: false });
+    const { task, repo, br } = await this.reviewable(id);
+    await this.deps.branches.stripAiTrailers(repo, br);
     await this.removeTask(id);
-    this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "kept", detail: `Kept branch ${wt.branch}`, data: { branch: wt.branch } });
-    this.deps.broadcaster.taskStatus(id, "done", `Kept branch ${wt.branch}`);
+    this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "kept", detail: `Kept branch ${br.name}`, data: { branch: br.name } });
+    this.deps.broadcaster.taskStatus(id, "done", `Kept branch ${br.name}`);
     await this.publish();
   }
 
   async push(id: string): Promise<PushResponse> {
-    const { task, repo, wt } = await this.reviewable(id);
-    await this.deps.worktrees.commitLeftovers(wt, task.title, identityOf(repo));
-    await this.deps.worktrees.stripAiTrailers(wt);
-    const result = await this.deps.worktrees.push(wt, task.title);
-    await this.deps.worktrees.remove(repo, wt, { deleteBranch: false });
+    const { task, repo, br } = await this.reviewable(id);
+    await this.deps.branches.stripAiTrailers(repo, br);
+    const result = await this.deps.branches.push(repo, br, task.title);
     await this.removeTask(id);
     this.log({
       taskId: id,
       repo: task.repo,
       account: task.currentAccount,
       event: "pushed",
-      detail: result.url ? `Pushed ${wt.branch}: ${result.url}` : `Pushed ${wt.branch}`,
-      data: { branch: wt.branch, url: result.url, output: result.output },
+      detail: result.url ? `Pushed ${br.name}: ${result.url}` : `Pushed ${br.name}`,
+      data: { branch: br.name, url: result.url, output: result.output },
     });
-    this.deps.broadcaster.taskStatus(id, "done", `Pushed ${wt.branch}`);
+    this.deps.broadcaster.taskStatus(id, "done", `Pushed ${br.name}`);
     await this.publish();
     return result;
   }
@@ -350,15 +394,15 @@ export class QueueService {
     let task = await this.getTask(id);
     const wasRunning = task.status === "running";
     if (wasRunning) task = await this.stopForDiscard(id);
-    if (task.worktree) await this.deps.worktrees.remove(await this.deps.repos.get(task.repo), task.worktree, { deleteBranch: true });
+    if (task.branch) await this.deps.branches.deleteBranch(await this.deps.repos.get(task.repo), task.branch);
     await this.removeTask(id);
     this.log({
       taskId: id,
       repo: task.repo,
       account: task.currentAccount,
       event: "discarded",
-      detail: task.worktree
-        ? `${wasRunning ? "Stopped and discarded" : "Discarded"}: worktree and branch ${task.worktree.branch} removed.`
+      detail: task.branch
+        ? `${wasRunning ? "Stopped and discarded" : "Discarded"}: branch ${task.branch.name} deleted.`
         : "Discarded before it ran.",
     });
     this.deps.broadcaster.taskStatus(id, "done", "Discarded");
@@ -474,6 +518,16 @@ export class QueueService {
         notes.set(task.id, `Repo "${task.repo}" is no longer registered.`);
         continue;
       }
+      // Tasks switch branches in your checkout, so they only start on a clean working tree.
+      const clean = await this.deps.branches.isClean(repo).catch(() => null);
+      if (clean === null) {
+        notes.set(task.id, `Can't read the git status of ${repo.path}. Is the folder still there?`);
+        continue;
+      }
+      if (!clean) {
+        notes.set(task.id, `${repo.name} has uncommitted changes. Commit or stash them; tasks switch branches in your checkout.`);
+        continue;
+      }
       const isReply = task.pendingReply !== null && task.session !== null;
       const pick = pickAccount({
         candidates: [task.accountOverride, ...repo.accountChain].filter((a): a is string => !!a),
@@ -515,19 +569,18 @@ export class QueueService {
     const buffer: OutputBuffer = isReply ? (this.buffers.get(task.id) ?? { events: [], raw: [] }) : { events: [], raw: [] };
     this.buffers.set(task.id, buffer);
 
+    let checkedOut = false;
     try {
       await this.updateTask(task.id, (t) => {
         t.status = "running";
         t.currentAccount = account.id;
       });
-      let wt = task.worktree;
-      if (!wt) {
-        wt = await this.deps.worktrees.create(repo, task.id);
-        const created = wt;
-        await this.updateTask(task.id, (t) => {
-          t.worktree = created;
-        });
-      }
+      // Fresh runs (first run, retry, fallback) start the branch from the base commit; replies continue it.
+      const br = await this.deps.branches.checkoutForRun(repo, task.id, task.branch, !isReply);
+      checkedOut = true;
+      await this.updateTask(task.id, (t) => {
+        t.branch = br;
+      });
 
       const store = this.deps.attachments;
       const runFiles = isReply ? (task.replies.at(-1)?.attachments ?? []) : task.attachments;
@@ -553,7 +606,7 @@ export class QueueService {
         account: account.id,
         event: "started",
         detail: `Started on ${account.id} (${account.provider})${isReply ? ", continuing the session with your reply" : ""}`,
-        data: { prompt: assembled.prompt, kind: isReply ? "reply" : "fresh", branch: wt.branch, worktree: wt.path, layers: assembled.layers },
+        data: { prompt: assembled.prompt, kind: isReply ? "reply" : "fresh", branch: br.name, baseBranch: br.base, cwd: repo.path, layers: assembled.layers },
       });
 
       const adapter = this.deps.adapters[account.provider];
@@ -562,14 +615,14 @@ export class QueueService {
         {
           ...this.deps.accounts.context(account),
           prompt: assembled.prompt,
-          cwd: wt.path,
+          cwd: repo.path,
           resume,
           addDirs: [...new Set(addDirs)],
           gitIdentity: identityOf(repo),
         },
         settings,
       );
-      const run: LiveRun = { taskId: task.id, repo: repo.id, account, handle, isReply, cancelRequested: false };
+      const run: LiveRun = { checkedOut: true, taskId: task.id, repo: repo.id, account, handle, isReply, cancelRequested: false };
       this.live.set(task.id, run);
 
       handle.onStream((event) => this.onEvent(run, event, buffer));
@@ -585,10 +638,20 @@ export class QueueService {
         .then((result) => this.finishRun(run, result))
         .catch((error) => console.error(`[queue] finishing ${task.id}: ${(error as Error).stack ?? error}`));
     } catch (error) {
-      // Couldn't even start (worktree/base branch problems). Treat as a failed run.
       this.live.delete(task.id);
+      if (error instanceof DirtyRepoError) {
+        // You changed files between the check and the checkout: just wait again.
+        await this.updateTask(task.id, (t) => {
+          t.status = "pending";
+          t.currentAccount = null;
+        });
+        this.waitingNotes.set(task.id, error.message);
+        await this.publish();
+        return;
+      }
+      // Couldn't start (base branch missing, CLI setup…). Treat as a failed run.
       await this.finishRun(
-        { taskId: task.id, repo: repo.id, account, handle: null as never, isReply, cancelRequested: false },
+        { checkedOut, taskId: task.id, repo: repo.id, account, handle: null as never, isReply, cancelRequested: false },
         { outcome: "failed", exitCode: null, message: (error as Error).message, stderrTail: "" },
       );
     }
@@ -622,6 +685,17 @@ export class QueueService {
     if (!task) return;
     const account = run.account;
     const base = { taskId: task.id, repo: task.repo, account: account.id };
+    const repo = (await this.deps.repos.list()).find((r) => r.id === task.repo);
+
+    // Commit what the agent left on the task branch and check your previous branch out again.
+    if (run.checkedOut && repo && task.branch) {
+      const reply = run.isReply ? (task.replies.at(-1)?.message ?? "").trim().split("\n")[0] : "";
+      const message = reply ? `${task.title}: ${reply}`.slice(0, 120) : task.title;
+      const settled = await this.deps.branches
+        .settle(repo, task.branch, message, identityOf(repo))
+        .catch((e: Error) => ({ committed: false, warning: `Couldn't commit or switch back: ${e.message}` }));
+      if (settled.warning) this.log({ ...base, event: "warning", detail: settled.warning });
+    }
 
     switch (result.outcome) {
       case "success": {
@@ -658,14 +732,13 @@ export class QueueService {
         }
 
         // Fresh runs start over on the next account; replies keep their session and wait for a same-CLI account.
-        if (!run.isReply && task.worktree) await this.deps.worktrees.reset(task.worktree);
+        if (!run.isReply && repo && task.branch) await this.deps.branches.resetToBase(repo, task.branch);
         await this.updateTask(task.id, (t) => {
           t.status = "pending";
           t.currentAccount = null;
           if (!run.isReply) t.session = null;
         });
 
-        const repo = (await this.deps.repos.list()).find((r) => r.id === task.repo);
         const next = repo
           ? pickAccount({
               candidates: [task.accountOverride, ...repo.accountChain].filter((a): a is string => !!a),
@@ -707,8 +780,7 @@ export class QueueService {
           this.log({ ...base, event: "warning", detail: `Reply run failed: ${result.message}`, data });
           this.deps.broadcaster.taskStatus(task.id, "needs-review", `Reply failed: ${result.message}`);
         } else {
-          const repo = (await this.deps.repos.list()).find((r) => r.id === task.repo);
-          if (repo && task.worktree) await this.deps.worktrees.remove(repo, task.worktree, { deleteBranch: true });
+          if (repo && task.branch) await this.deps.branches.deleteBranch(repo, task.branch);
           await this.removeTask(task.id);
           this.log({ ...base, event: "failed", detail: result.message.slice(0, 500), data });
           this.deps.broadcaster.taskStatus(task.id, "failed", result.message);

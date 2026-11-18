@@ -4,7 +4,7 @@
 //   FAIL           → run fails
 //   SLOW           → waits 30s (for cancel tests)
 //   otherwise      → writes out-<label>.txt in cwd and succeeds
-import { existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { execFileSync } from "node:child_process";
 import { basename, join } from "node:path";
@@ -45,6 +45,10 @@ if (args[0] === "auth" && args[1] === "login") {
 let prompt = "";
 process.stdin.on("data", (d) => (prompt += d));
 process.stdin.on("end", async () => {
+  // Tests: record exactly what this CLI received (stdin), and where it ran.
+  if (process.env.FAKE_PROMPT_LOG) {
+    appendFileSync(process.env.FAKE_PROMPT_LOG, `${JSON.stringify({ cli: "claude", label, cwd: process.cwd(), args, prompt })}\n`);
+  }
   const mode = args[args.indexOf("--permission-mode") + 1];
   const resumeIdx = args.indexOf("--resume");
   const session = resumeIdx >= 0 ? args[resumeIdx + 1] : `sess-${label}-${Date.now()}`;

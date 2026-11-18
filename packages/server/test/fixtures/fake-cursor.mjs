@@ -2,7 +2,7 @@
 // Fake Cursor `agent` CLI for tests. Prompt is the argument after `--`.
 //   LIMIT:<label> → exits 1 with a usage-limit message on stderr
 //   otherwise     → writes out-<label>.txt in --workspace and succeeds
-import { writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const args = process.argv.slice(2);
@@ -22,6 +22,9 @@ if (args[0] === "login") {
 const prompt = args[args.indexOf("--") + 1] ?? "";
 const cwd = args[args.indexOf("--workspace") + 1] ?? process.cwd();
 const session = "cursor-chat-1";
+if (process.env.FAKE_PROMPT_LOG) {
+  appendFileSync(process.env.FAKE_PROMPT_LOG, `${JSON.stringify({ cli: "cursor", label, cwd, args, prompt })}\n`);
+}
 
 out({ type: "system", subtype: "init", apiKeySource: "login", cwd, session_id: session, model: "Fake", permissionMode: "default" });
 if (prompt.includes(`LIMIT:${label}`)) {

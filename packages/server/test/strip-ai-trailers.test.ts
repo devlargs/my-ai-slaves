@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createAdapters } from "../src/providers";
-import { stripAiLines } from "../src/services/strip-ai-trailers.mjs";
+import { stripAiLines } from "../src/services/branch-service";
 
 describe("stripAiLines", () => {
   it("removes AI attribution lines and keeps everything else", () => {

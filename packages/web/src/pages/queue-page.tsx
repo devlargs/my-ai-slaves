@@ -8,6 +8,7 @@ import {
   FileDiffIcon,
   HistoryIcon,
   InboxIcon,
+  MinusIcon,
   MousePointerClickIcon,
   RotateCcwIcon,
   SendIcon,
@@ -202,7 +203,7 @@ function QueueList({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                title="Stop (keeps the worktree; you can retry or discard)"
+                title="Stop (its work so far is committed on its branch; you can retry or discard)"
                 aria-label="Stop"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -433,8 +434,7 @@ function PromptPreview({ repo, message, attachmentIds }: { repo: string; message
 
 function TaskDetail({ task }: { task: TaskView }) {
   useTaskSubscription(task.id);
-  const hasWorktree = Boolean(task.worktree);
-  const reviewable = hasWorktree && (task.status === "needs-review" || task.status === "interrupted");
+  const reviewable = Boolean(task.branch) && (task.status === "needs-review" || task.status === "interrupted");
   const [tab, setTab] = useState(task.status === "needs-review" ? "diff" : "live");
 
   useEffect(() => {
@@ -456,7 +456,7 @@ function TaskDetail({ task }: { task: TaskView }) {
           <Meta label="repo" value={task.repo} />
           {task.currentAccount && <Meta label="account" value={task.currentAccount} />}
           {task.accountOverride && <Meta label="override" value={task.accountOverride} />}
-          {task.worktree && <Meta label="branch" value={task.worktree.branch} />}
+          {task.branch && <Meta label="branch" value={`${task.branch.name} ← ${task.branch.base}`} />}
           <Meta label="id" value={task.id} />
         </dl>
         {task.waitingNote && (
@@ -464,6 +464,7 @@ function TaskDetail({ task }: { task: TaskView }) {
             <ClockIcon className="mt-px size-3.5 shrink-0" /> {task.waitingNote}
           </div>
         )}
+        <PromptReceived taskId={task.id} version={task.updatedAt} />
         <Tabs value={tab} onValueChange={setTab} className="mt-3">
           <TabsList className="border-b-0">
             <TabsTrigger value="live">
@@ -582,11 +583,11 @@ function ReplyBox({ taskId }: { taskId: string }) {
 
 /** Remove a task in any state, after confirming what is lost. Running tasks are stopped first. */
 export function DiscardTaskButton({ task, withLabel = false }: { task: TaskView; withLabel?: boolean }) {
-  const branch = task.worktree?.branch;
+  const branch = task.branch?.name;
   const what = branch ? (
     <>
-      removes its worktree and deletes branch <code className="font-mono text-xs text-ink">{branch}</code>, so any
-      unpushed changes are lost
+      deletes branch <code className="font-mono text-xs text-ink">{branch}</code> from the repo, so any unpushed
+      changes on it are lost
     </>
   ) : (
     "removes it from the queue"
@@ -618,6 +619,66 @@ export function DiscardTaskButton({ task, withLabel = false }: { task: TaskView;
         {withLabel && "Discard"}
       </ConfirmButton>
     </span>
+  );
+}
+
+/**
+ * What the CLI actually received: read from the run's "started" activity entry, which records the
+ * exact text piped to the CLI. Shows the run that carried the base prompts (the session's first run).
+ */
+function PromptReceived({ taskId, version }: { taskId: string; version: string }) {
+  const { data } = useApi(() => api.taskHistory(taskId), [taskId, version]);
+  const [open, setOpen] = useState(false);
+  const starts = (data ?? []).filter((e) => e.event === "started");
+  const fresh = [...starts].reverse().find((e) => e.data?.kind !== "reply");
+  if (!data) return null;
+  if (!fresh) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        Not run yet. Turn on &ldquo;Preview prompt&rdquo; in the composer to see exactly what it will receive.
+      </p>
+    );
+  }
+  const layers = (fresh.data?.layers as { name: string; included: boolean }[] | undefined) ?? [];
+  const has = (name: string) => layers.find((l) => l.name === name)?.included ?? false;
+  const prompt = String(fresh.data?.prompt ?? "");
+  const replies = starts.filter((e) => e.data?.kind === "reply").length;
+  const layer = (name: string, label: string) => (
+    <span className={cn("inline-flex items-center gap-1", has(name) ? "text-success-ink" : "text-muted-foreground")}>
+      {has(name) ? <CheckIcon className="size-3" /> : <MinusIcon className="size-3" />}
+      {label}
+      {!has(name) && name !== "attachments" && <span className="text-muted-foreground"> (blank)</span>}
+    </span>
+  );
+  return (
+    <div className="mt-2.5 rounded-md border border-rule bg-surface text-xs">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2.5 py-1.5">
+        <span className="text-ink-2">
+          {fresh.account ?? "The CLI"} received{replies > 0 ? " (first run)" : ""}:
+        </span>
+        {layer("global", "global base prompt")}
+        {layer("repo", "repo base prompt")}
+        {layer("message", "your message")}
+        {has("attachments") && layer("attachments", "attached files")}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="ml-auto cursor-pointer text-muted-foreground underline-offset-2 hover:text-ink hover:underline"
+        >
+          {open ? "Hide" : "View exact text"}
+        </button>
+      </div>
+      {open && (
+        <pre className="scroll-quiet max-h-64 overflow-auto border-t border-rule bg-paper-2/50 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-2">
+          {prompt}
+        </pre>
+      )}
+      {replies > 0 && (
+        <p className="border-t border-rule px-2.5 py-1.5 text-muted-foreground">
+          {replies} repl{replies === 1 ? "y" : "ies"} since then continued the same session, which already has these.
+        </p>
+      )}
+    </div>
   );
 }
 

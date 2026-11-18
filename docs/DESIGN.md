@@ -1,5 +1,9 @@
 # My AI Slaves — Design proposal (step 2)
 
+> **Superseded on worktrees (2026-11-18):** tasks no longer use git worktrees. Each run checks out
+> `ai/<task-id>` from the repo's base branch directly in the repo, commits its work there when it ends,
+> and checks the previous branch out again (`BranchService`). Read the worktree parts below as history.
+
 Status: **proposal, awaiting OK**. Nothing here is built yet.
 
 Decisions already made (from step 1):

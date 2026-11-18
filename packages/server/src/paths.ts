@@ -20,7 +20,6 @@ export function dataPaths(dataDir: string) {
     knowledgeDir: join(dataDir, "knowledge"),
     activityDir: join(dataDir, "activity"),
     cliConfigDir: join(dataDir, "cli-config"),
-    worktreesDir: join(dataDir, "worktrees"),
     attachmentsDir: join(dataDir, "attachments"),
   };
 }

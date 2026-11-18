@@ -9,11 +9,23 @@ export type QueuedTaskStatus = z.infer<typeof QueuedTaskStatus>;
 export const TaskStatus = z.enum([...QueuedTaskStatus.options, "done", "failed"]);
 export type TaskStatus = z.infer<typeof TaskStatus>;
 
-export const TaskWorktree = z.object({
-  path: z.string().min(1),
-  branch: z.string().min(1),
-  baseBranch: z.string().min(1),
+/** The task's branch in the repository itself (no worktrees). */
+export const TaskBranch = z.object({
+  /** `ai/<task-id>` */
+  name: z.string().min(1),
+  /** The repo's base branch it was created from. */
+  base: z.string().min(1),
   baseCommit: z.string().min(1),
+  /** The branch (or commit) that was checked out before the last run; checked out again after it. */
+  returnTo: z.string().nullable().default(null),
+});
+
+/** Old worktree record, only read once on startup to move the task onto its branch. */
+export const LegacyTaskWorktree = z.object({
+  path: z.string(),
+  branch: z.string(),
+  baseBranch: z.string(),
+  baseCommit: z.string(),
 });
 
 export const TaskSession = z.object({
@@ -38,7 +50,9 @@ export const Task = z.object({
   attachments: z.array(Attachment).default([]),
   accountOverride: z.string().nullable().default(null),
   currentAccount: z.string().nullable().default(null),
-  worktree: TaskWorktree.nullable().default(null),
+  branch: TaskBranch.nullable().default(null),
+  /** Legacy (pre-branch) field; migrated and removed on startup. */
+  worktree: LegacyTaskWorktree.nullable().optional(),
   session: TaskSession.nullable().default(null),
   replies: z.array(TaskReply).default([]),
   /** A reply waiting to be sent to the existing CLI session (status is pending while set). */

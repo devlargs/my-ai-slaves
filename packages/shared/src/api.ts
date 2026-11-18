@@ -141,7 +141,7 @@ export interface CreateTaskRequest {
 }
 /** PUT /api/tasks/order (body ReorderRequest, only pending tasks move) */
 /** POST /api/tasks/:id/cancel — pending: removed from queue; running: stopped → interrupted */
-/** POST /api/tasks/:id/retry — interrupted/needs-review: worktree reset, back to pending */
+/** POST /api/tasks/:id/retry — interrupted/needs-review: task branch reset to the base commit, back to pending */
 /** POST /api/tasks/:id/reply (body ReplyRequest) — needs-review: resumes the CLI session */
 export interface ReplyRequest {
   message: string;
@@ -158,20 +158,21 @@ export interface ReplyRequest {
 export type TaskHistoryResponse = ActivityEntry[];
 /** GET /api/tasks/:id/diff */
 export interface DiffResponse {
-  /** Unified diff of everything in the worktree vs the base commit (committed + uncommitted + untracked). */
+  /** Unified diff of the task branch vs the base commit it was created from. */
   patch: string;
   branch: string;
   baseBranch: string;
   baseCommit: string;
-  worktreePath: string;
+  /** The repository the branch lives in. */
+  repoPath: string;
 }
-/** POST /api/tasks/:id/keep → { ok: true } — commits leftovers on the ai/ branch, removes the worktree, task → done */
+/** POST /api/tasks/:id/keep → { ok: true } — the ai/ branch stays in the repo, task → done */
 /** POST /api/tasks/:id/push → PushResponse — commit leftovers, push, open PR/MR when gh/glab is available, task → done */
 export interface PushResponse {
   url: string | null;
   output: string;
 }
-/** POST /api/tasks/:id/discard (body { confirm: true }) → { ok: true } — removes worktree and branch */
+/** POST /api/tasks/:id/discard (body { confirm: true }) → { ok: true } — stops it if running, deletes its ai/ branch */
 
 // ── History ─────────────────────────────────────────────────────────────────
 /** GET /api/history → HistoryItem[] (newest first; tasks no longer in the queue) */

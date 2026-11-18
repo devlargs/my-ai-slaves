@@ -46,7 +46,7 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
   const [push, setPush] = useState<{ url: string | null; output: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const worktreePath = data?.worktreePath ?? task.worktree?.path ?? null;
+  const branchName = data?.branch ?? task.branch?.name ?? null;
   const visible = files?.filter((f) => !selected || filePath(f) === selected) ?? [];
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -70,16 +70,16 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
         <Button size="sm" variant="ghost" onClick={() => void reload()} disabled={loading}>
           <RefreshCwIcon className={cn(loading && "animate-spin")} /> Refresh
         </Button>
-        {worktreePath && (
+        {branchName && (
           <Button
             size="sm"
             variant="outline"
             onClick={async () => {
-              if (await copyToClipboard(worktreePath)) toast.success("Worktree path copied");
-              else toast.error(`Couldn't copy. Path: ${worktreePath}`);
+              if (await copyToClipboard(branchName)) toast.success("Branch name copied");
+              else toast.error(`Couldn't copy. Branch: ${branchName}`);
             }}
           >
-            <CopyIcon /> Copy worktree path
+            <CopyIcon /> Copy branch name
           </Button>
         )}
         <Button
@@ -117,7 +117,7 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
           title="Discard this task?"
           description={
             <>
-              Removes the worktree and deletes branch <code className="font-mono">{task.worktree?.branch}</code>. This
+              Deletes branch <code className="font-mono">{task.branch?.name}</code> from the repo. This
               can&apos;t be undone.
             </>
           }
@@ -156,7 +156,7 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
       ) : files === null ? (
         <pre className="scroll-quiet min-h-0 flex-1 overflow-auto rounded-lg border border-rule bg-surface p-3 font-mono text-xs">{data?.patch}</pre>
       ) : files.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">No changes in the worktree yet.</p>
+        <p className="text-[13px] text-muted-foreground">No changes on this branch yet.</p>
       ) : (
         <div className="flex min-h-0 flex-1 gap-3">
           <ul className="scroll-quiet w-56 shrink-0 overflow-auto rounded-lg border border-rule bg-surface p-1.5 text-xs">
