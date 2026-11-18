@@ -221,10 +221,66 @@ function RepoCard({
             </form>
           </div>
           <ChainEditor repo={repo} onSave={(chain) => patch({ accountChain: chain })} />
+          <CommitterEditor repo={repo} onSave={(body) => patch(body, "Committer saved")} />
         </div>
         <BasePromptEditor repoId={repo.id} />
       </CardContent>
     </Card>
+  );
+}
+
+/** Author + committer for every commit on this repo's tasks. Blank = your git config. */
+function CommitterEditor({
+  repo,
+  onSave,
+}: {
+  repo: Repo;
+  onSave: (body: { committerName: string; committerEmail: string }) => Promise<unknown>;
+}) {
+  const [name, setName] = useState(repo.committerName ?? "");
+  const [email, setEmail] = useState(repo.committerEmail ?? "");
+  useEffect(() => {
+    setName(repo.committerName ?? "");
+    setEmail(repo.committerEmail ?? "");
+  }, [repo.committerName, repo.committerEmail]);
+  const dirty = name.trim() !== (repo.committerName ?? "") || email.trim() !== (repo.committerEmail ?? "");
+
+  return (
+    <form
+      className="flex flex-col gap-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (dirty) void onSave({ committerName: name.trim(), committerEmail: email.trim() });
+      }}
+    >
+      <Label htmlFor={`committer-name-${repo.id}`}>Commit as</Label>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Input
+          id={`committer-name-${repo.id}`}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Full name"
+          autoComplete="name"
+        />
+        <Input
+          type="email"
+          aria-label="Committer email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="email@example.com"
+          autoComplete="email"
+          className="font-mono text-xs"
+        />
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted-foreground">
+          Author and committer of every commit on this repo&apos;s tasks. Blank uses your git config.
+        </span>
+        <Button type="submit" size="sm" variant="outline" disabled={!dirty}>
+          Save
+        </Button>
+      </div>
+    </form>
   );
 }
 
