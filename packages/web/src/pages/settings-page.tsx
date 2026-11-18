@@ -5,6 +5,7 @@ import { ConfirmButton } from "@/components/confirm-dialog";
 import { SortableList } from "@/components/sortable-list";
 import { AccountStatusBadge, ProviderLabel } from "@/components/status";
 import { LoginDialog } from "@/components/login-dialog";
+import { FullscreenButton, FullscreenEditor } from "@/components/fullscreen-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -158,14 +159,20 @@ function AccountRow({
           <ProviderLabel provider={account.provider} />
           <AccountStatusBadge account={account} />
         </div>
+        {account.email && account.status !== "logged-out" && (
+          <div className="truncate text-[11px] text-muted-foreground">
+            {account.email}
+            {account.plan ? ` · ${account.plan}` : ""}
+          </div>
+        )}
         {account.lastLimitReason && (
           <div className="truncate text-[11px] text-muted-foreground" title={account.lastLimitReason}>
             Last limit: {account.lastLimitReason}
           </div>
         )}
       </div>
-      <Button size="sm" variant="outline" onClick={onLogin}>
-        <LogInIcon /> Log in
+      <Button size="sm" variant={account.status === "logged-out" || account.status === "unknown" ? "default" : "outline"} onClick={onLogin}>
+        <LogInIcon /> {account.status === "logged-out" || account.status === "unknown" ? "Log in" : "Log in again"}
       </Button>
       <Button
         size="sm"
@@ -232,6 +239,7 @@ function GeneralSettingsCard() {
   const [draft, setDraft] = useState<UpdateSettingsRequest | null>(null);
   const [patterns, setPatterns] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     if (!data) return;
@@ -291,7 +299,24 @@ function GeneralSettingsCard() {
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="global-base">Global base prompt</Label>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="global-base">Global base prompt</Label>
+            <span className="ml-auto">
+              <FullscreenButton onClick={() => setFullscreen(true)} />
+            </span>
+          </div>
+          <FullscreenEditor
+            open={fullscreen}
+            onOpenChange={setFullscreen}
+            title="Global base prompt"
+            note="Stored in .data/settings.json"
+            value={draft.basePrompt}
+            onChange={(basePrompt) => set({ basePrompt })}
+            placeholder="Blank. Anything you write here is sent first, before the repo base prompt and your task message."
+            dirty={dirty}
+            saving={busy}
+            onSave={() => void save()}
+          />
           <Textarea
             id="global-base"
             value={draft.basePrompt}

@@ -1,8 +1,9 @@
 import type { Knowledge, Repo } from "@my-ai-slaves/shared";
-import { FolderOpenIcon, FolderGit2Icon, PlusIcon, SaveIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ChevronRightIcon, FolderOpenIcon, FolderGit2Icon, PlusIcon, SaveIcon, Trash2Icon, XIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FolderBrowserDialog } from "@/components/folder-browser";
+import { FullscreenButton, FullscreenEditor } from "@/components/fullscreen-editor";
 import { SortableList } from "@/components/sortable-list";
 import { AccountStatusBadge, ProviderLabel } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
@@ -13,12 +14,28 @@ import { Select } from "@/components/ui/select";
 import { api, attempt } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { useStore } from "@/lib/store";
+import { cn, storageGet, storageSet } from "@/lib/utils";
 
 export function ReposPage() {
   const { data: repos, setData, reload } = useApi<Repo[]>(() => api.getRepos(), []);
   const [path, setPath] = useState("");
   const [browsing, setBrowsing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded());
+
+  const sorted = useMemo(
+    () => [...(repos ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })),
+    [repos],
+  );
+
+  const updateExpanded = (change: (set: Set<string>) => void) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      change(next);
+      storageSet(EXPANDED_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  const toggle = (id: string) => updateExpanded((set) => (set.has(id) ? set.delete(id) : set.add(id)));
 
   const register = async (p: string) => {
     if (!p.trim()) return;
@@ -27,6 +44,7 @@ export function ReposPage() {
     setBusy(false);
     if (repo) {
       setPath("");
+      updateExpanded((set) => set.add(repo.id)); // open the one you just added
       void reload();
     }
   };
@@ -73,19 +91,54 @@ export function ReposPage() {
       <FolderBrowserDialog open={browsing} onOpenChange={setBrowsing} onPick={(p) => void register(p)} />
 
       {repos?.length === 0 && <p className="text-sm text-muted-foreground">No repositories yet.</p>}
-      {repos?.map((repo) => (
-        <RepoCard key={repo.id} repo={repo} onChange={replace} onDeleted={() => void reload()} />
+      {sorted.length > 1 && (
+        <div className="-mb-2 flex justify-end gap-1">
+          <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => sorted.forEach((r) => set.add(r.id)))}>
+            Expand all
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => set.clear())}>
+            Collapse all
+          </Button>
+        </div>
+      )}
+      {sorted.map((repo) => (
+        <RepoCard
+          key={repo.id}
+          repo={repo}
+          expanded={expanded.has(repo.id)}
+          onToggle={() => toggle(repo.id)}
+          onChange={replace}
+          onDeleted={() => {
+            updateExpanded((set) => set.delete(repo.id));
+            void reload();
+          }}
+        />
       ))}
     </div>
   );
 }
 
+const EXPANDED_KEY = "slaves.expandedRepos";
+
+function loadExpanded(): Set<string> {
+  try {
+    const ids = JSON.parse(storageGet(EXPANDED_KEY) ?? "[]");
+    return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
 function RepoCard({
   repo,
+  expanded,
+  onToggle,
   onChange,
   onDeleted,
 }: {
   repo: Repo;
+  expanded: boolean;
+  onToggle: () => void;
   onChange: (repo: Repo) => void;
   onDeleted: () => void;
 }) {
@@ -100,14 +153,36 @@ function RepoCard({
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex min-w-0 items-center gap-2">
+      <CardHeader className={cn(!expanded && "border-b-0")}>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={`repo-body-${repo.id}`}
+          className="-my-1 flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left"
+        >
+          <ChevronRightIcon
+            className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
+          />
           <FolderGit2Icon className="size-4 shrink-0 text-primary" />
-          <CardTitle>{repo.name}</CardTitle>
-          <span className="truncate font-mono text-[11px] text-muted-foreground" title={repo.path}>
+          <CardTitle className="shrink-0">{repo.name}</CardTitle>
+          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={repo.path}>
             {repo.path}
           </span>
-        </div>
+          {!expanded && (
+            <span className="ml-auto hidden shrink-0 items-center gap-1.5 sm:flex">
+              <Badge variant="outline" className="font-mono">
+                {repo.defaultBranch}
+              </Badge>
+              <span
+                className={cn("text-[11px]", repo.accountChain.length ? "text-muted-foreground" : "text-destructive")}
+                title={repo.accountChain.join(" → ")}
+              >
+                {repo.accountChain.length ? repo.accountChain.join(" → ") : "No accounts"}
+              </span>
+            </span>
+          )}
+        </button>
         <ConfirmButton
           size="sm"
           variant="ghost"
@@ -122,7 +197,8 @@ function RepoCard({
           <Trash2Icon /> Remove
         </ConfirmButton>
       </CardHeader>
-      <CardContent className="grid gap-5 md:grid-cols-2">
+      {/* Hidden, not unmounted: an unsaved base prompt survives collapsing. */}
+      <CardContent id={`repo-body-${repo.id}`} hidden={!expanded} className="grid gap-5 md:grid-cols-2">
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`branch-${repo.id}`}>Base branch for new worktrees</Label>
@@ -232,6 +308,7 @@ function BasePromptEditor({ repoId }: { repoId: string }) {
   const { data, setData } = useApi<Knowledge>(() => api.getKnowledge(repoId), [repoId]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
     if (data) setDraft(data.basePrompt);
   }, [data]);
@@ -249,7 +326,22 @@ function BasePromptEditor({ repoId }: { repoId: string }) {
       <div className="flex items-center gap-2">
         <Label htmlFor={`kb-${repoId}`}>Repo base prompt</Label>
         {dirty && <Badge variant="warning">unsaved</Badge>}
+        <span className="ml-auto">
+          <FullscreenButton onClick={() => setFullscreen(true)} />
+        </span>
       </div>
+      <FullscreenEditor
+        open={fullscreen}
+        onOpenChange={setFullscreen}
+        title={`Repo base prompt: ${repoId}`}
+        note={`Stored in .data/knowledge/${repoId}.json`}
+        value={draft}
+        onChange={setDraft}
+        placeholder="Blank. Anything you write here is sent before every task message for this repo."
+        dirty={dirty}
+        saving={busy}
+        onSave={() => void save()}
+      />
       <Textarea
         id={`kb-${repoId}`}
         value={draft}

@@ -10,7 +10,10 @@ import { ws } from "@/lib/store";
 
 const FINAL = new Set(["success", "failed", "cancelled"]);
 
-/** Log an account in from the app: open the sign-in page, (Claude) paste the code back, done. */
+/**
+ * Log an account in from the app, the same way the CLI does it on its own:
+ * a sign-in page opens in your browser, you sign in there, and the login finishes by itself.
+ */
 export function LoginDialog({
   accountId,
   open,
@@ -25,8 +28,8 @@ export function LoginDialog({
       <DialogContent className="max-w-lg" onInteractOutside={(e) => e.preventDefault()}>
         <DialogTitle>Log in: {accountId}</DialogTitle>
         <DialogDescription>
-          Uses the CLI&apos;s official sign-in. You sign in on the provider&apos;s own page; the app never sees your
-          password, and the login is saved in this account&apos;s own config folder.
+          You sign in on the provider&apos;s own website. The app never sees your password; the login is saved in this
+          account&apos;s own config folder.
         </DialogDescription>
         {open && accountId && <LoginFlow accountId={accountId} onClose={() => onOpenChange(false)} />}
       </DialogContent>
@@ -38,6 +41,7 @@ function LoginFlow({ accountId, onClose }: { accountId: string; onClose: () => v
   const [attemptNo, setAttemptNo] = useState(0);
   const [login, setLogin] = useState<LoginState | null>(null);
   const [code, setCode] = useState("");
+  const [showCode, setShowCode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const latest = useRef<LoginState | null>(null);
@@ -49,6 +53,7 @@ function LoginFlow({ accountId, onClose }: { accountId: string; onClose: () => v
     const early = new Map<string, LoginState>(); // updates that arrive before the POST returns
     setLogin(null);
     setCode("");
+    setShowCode(false);
 
     const off = ws.addListener((msg) => {
       if (msg.type !== "login.updated" || msg.login.accountId !== accountId) return;
@@ -70,6 +75,11 @@ function LoginFlow({ accountId, onClose }: { accountId: string; onClose: () => v
     };
   }, [accountId, attemptNo]);
 
+  // A rejected code: keep the code box open so you can try again.
+  useEffect(() => {
+    if (login?.message?.includes("didn't work")) setShowCode(true);
+  }, [login?.message]);
+
   async function submitCode(e: FormEvent) {
     e.preventDefault();
     if (!login || !code.trim()) return;
@@ -83,63 +93,79 @@ function LoginFlow({ accountId, onClose }: { accountId: string; onClose: () => v
   }
 
   const status = login?.status ?? "starting";
-  const showLink = !!login?.url && (status === "open-url" || status === "needs-code" || status === "verifying");
 
   return (
     <div className="flex flex-col gap-4">
-      {status === "starting" && <Step icon="spin" text="Starting the login…" />}
+      {status === "starting" && <Step icon="spin" text="Opening the sign-in page in your browser…" />}
 
-      {showLink && login?.url && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium">1. Sign in</p>
-          <div className="flex flex-wrap gap-2">
-            <a href={login.url} target="_blank" rel="noreferrer noopener" className={buttonVariants()}>
-              <ExternalLink className="size-4" /> Open sign-in page
-            </a>
-            <Button
-              variant="outline"
-              onClick={() => {
-                void navigator.clipboard?.writeText(login.url ?? "").then(
-                  () => toast.success("Link copied"),
-                  () => toast.error("Couldn't copy the link"),
-                );
-              }}
-            >
-              <Copy className="size-4" /> Copy link
-            </Button>
-          </div>
-        </div>
+      {status === "open-url" && (
+        <>
+          <Step icon="spin" text="Sign in on the page that opened in your browser. This finishes by itself." />
+          {login?.message?.includes("didn't work") && <p className="text-xs text-destructive">{login.message}</p>}
+
+          {login?.url && (
+            <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3">
+              <p className="text-xs text-muted-foreground">No page opened? Open it yourself:</p>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={login.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  <ExternalLink className="size-4" /> Open sign-in page
+                </a>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(login.url ?? "").then(
+                      () => toast.success("Link copied"),
+                      () => toast.error("Couldn't copy the link"),
+                    );
+                  }}
+                >
+                  <Copy className="size-4" /> Copy link
+                </Button>
+              </div>
+
+              {login.acceptsCode &&
+                (showCode ? (
+                  <form onSubmit={submitCode} className="flex flex-col gap-1.5 pt-1">
+                    <p className="text-xs text-muted-foreground">Paste the code the sign-in page showed you:</p>
+                    <div className="flex gap-2">
+                      <Input
+                        autoFocus
+                        value={code}
+                        onChange={(e) => setCode(e.target.value)}
+                        placeholder="Paste code here"
+                        autoComplete="off"
+                        spellCheck={false}
+                        className="font-mono"
+                      />
+                      <Button type="submit" size="sm" disabled={!code.trim() || submitting}>
+                        {submitting ? <Loader2 className="size-4 animate-spin" /> : null} Submit
+                      </Button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    className="self-start text-xs text-muted-foreground underline underline-offset-2"
+                    onClick={() => setShowCode(true)}
+                  >
+                    The page showed a code instead? Paste it here
+                  </button>
+                ))}
+            </div>
+          )}
+        </>
       )}
 
-      {status === "needs-code" && (
-        <form onSubmit={submitCode} className="flex flex-col gap-2">
-          <p className="text-sm font-medium">2. Paste the code shown after you sign in</p>
-          <div className="flex gap-2">
-            <Input
-              autoFocus
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="Paste code here"
-              autoComplete="off"
-              spellCheck={false}
-              className="font-mono"
-            />
-            <Button type="submit" disabled={!code.trim() || submitting}>
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : null} Submit
-            </Button>
-          </div>
-        </form>
-      )}
-
-      {status === "open-url" && <Step icon="spin" text="Waiting for you to approve the login in the browser…" />}
       {status === "verifying" && <Step icon="spin" text={login?.message ?? "Checking the login…"} />}
-      {status === "success" && <Step icon="ok" text="Logged in." />}
+      {status === "success" && <Step icon="ok" text={login?.message ?? "Logged in."} />}
       {(status === "failed" || status === "cancelled") && (
         <Step icon="fail" text={login?.message ?? (status === "failed" ? "Login failed." : "Login cancelled.")} />
-      )}
-
-      {login?.message && (status === "needs-code" || status === "open-url") && (
-        <p className="text-xs text-muted-foreground">{login.message}</p>
       )}
 
       <div className="flex items-center justify-between gap-2">

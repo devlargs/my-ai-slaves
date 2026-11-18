@@ -62,17 +62,28 @@ describe("LoginService", () => {
     logins.cancel(started.loginId);
   });
 
-  it("Claude: shows the sign-in link, rejects a wrong code, accepts the right one", async () => {
+  it("Claude: the browser sign-in finishes by itself and reports the account", async () => {
+    const { accounts, logins } = await setup();
+    await accounts.create("new-auto-claude", "claude-code");
+    const started = await logins.start("new-auto-claude");
+    const done = await waitForState(logins, started.loginId, (s) => s.status === "success");
+    expect(done.message).toBe("Logged in as new-auto-claude@example.com.");
+    const view = (await accounts.list()).find((a) => a.id === "new-auto-claude");
+    expect(view).toMatchObject({ status: "available", email: "new-auto-claude@example.com", plan: "max" });
+  });
+
+  it("Claude fallback: a pasted code works too, and a wrong one is reported", async () => {
     const { accounts, logins, loggedIn } = await setup();
     await accounts.create("new-claude", "claude-code");
     expect((await accounts.checkAuth("new-claude")).status).toBe("logged-out");
 
     const started = await logins.start("new-claude");
-    const waiting = await waitForState(logins, started.loginId, (s) => s.status === "needs-code");
+    const waiting = await waitForState(logins, started.loginId, (s) => s.status === "open-url");
     expect(waiting.url).toBe("https://claude.com/cai/oauth/authorize?code=true&state=abc");
+    expect(waiting.acceptsCode).toBe(true);
 
     logins.submitCode(started.loginId, "bad");
-    const retry = await waitForState(logins, started.loginId, (s) => s.status === "needs-code" && !!s.message?.includes("didn't work"));
+    const retry = await waitForState(logins, started.loginId, (s) => s.status === "open-url" && !!s.message?.includes("didn't work"));
     expect(retry.message).toContain("Invalid code");
 
     logins.submitCode(started.loginId, "good");
@@ -87,13 +98,15 @@ describe("LoginService", () => {
     const started = await logins.start("work-cursor");
     const done = await waitForState(logins, started.loginId, (s) => s.status === "success");
     expect(done.url).toBe("https://cursor.com/loginDeepControl?challenge=x&mode=login");
+    expect(done.acceptsCode).toBe(false);
+    expect((await accounts.list())[0]).toMatchObject({ email: "test@example.com", plan: "Team: Acme" });
   });
 
   it("cancel stops the login", async () => {
     const { accounts, logins } = await setup();
     await accounts.create("new-claude", "claude-code");
     const started = await logins.start("new-claude");
-    await waitForState(logins, started.loginId, (s) => s.status === "needs-code");
+    await waitForState(logins, started.loginId, (s) => s.status === "open-url");
     expect(logins.cancel(started.loginId).status).toBe("cancelled");
     expect(() => logins.submitCode(started.loginId, "good")).toThrow();
   });

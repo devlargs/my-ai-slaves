@@ -30,6 +30,10 @@ export type AccountView = Account & {
   status: AccountStatus;
   /** Seconds until a limited account frees up; null when not limited. */
   secondsUntilAvailable: number | null;
+  /** Who the CLI is logged in as, from its last status check (kept in memory, never saved). */
+  email: string | null;
+  /** e.g. "max" (Claude) or "Team: Acme" (Cursor). */
+  plan: string | null;
 };
 /** GET /api/accounts → AccountView[] (in Settings-page order) */
 /** POST /api/accounts */
@@ -42,18 +46,19 @@ export interface ReorderRequest {
   ids: string[];
 }
 /**
- * In-app login. The server drives the CLI's own login command in the background and reports:
- *  - "starting"   → waiting for the CLI to produce a sign-in link
- *  - "open-url"   → open `url` and sign in (Cursor finishes by itself after that)
- *  - "needs-code" → open `url`, sign in, then paste the code shown into the app (Claude)
- *  - "verifying"  → code submitted / CLI finished, checking the login
+ * In-app login, same as running the CLI's own login: the CLI opens your browser, you sign in on the
+ * provider's site, and its local callback finishes the login by itself.
+ *  - "starting"  → waiting for the CLI to start the sign-in
+ *  - "open-url"  → sign in in the browser tab that opened (`url` re-opens it). If `acceptsCode`, the
+ *                  CLI also accepts a code pasted back (fallback when the browser can't redirect).
+ *  - "verifying" → checking the login
  *  - "success" | "failed" | "cancelled"
  * POST /api/accounts/:id/login → LoginState (starts a fresh login; updates arrive as `login.updated` over WS)
  * GET  /api/logins/:loginId → LoginState
  * POST /api/logins/:loginId/code (body LoginCodeRequest) → LoginState
  * POST /api/logins/:loginId/cancel → LoginState
  */
-export type LoginStatus = "starting" | "open-url" | "needs-code" | "verifying" | "success" | "failed" | "cancelled";
+export type LoginStatus = "starting" | "open-url" | "verifying" | "success" | "failed" | "cancelled";
 export interface LoginState {
   loginId: string;
   accountId: string;
@@ -61,8 +66,12 @@ export interface LoginState {
   status: LoginStatus;
   /** Sign-in page printed by the CLI. */
   url: string | null;
+  /** Claude: a code from the sign-in page can be pasted instead of the automatic redirect. */
+  acceptsCode: boolean;
   /** Short human message for the current step or the failure reason. */
   message: string | null;
+  /** Logged-in account, once known. */
+  email: string | null;
   /** The CLI's output as plain text (for a collapsible "details" view). */
   output: string;
 }
@@ -83,6 +92,9 @@ export interface UpdateRepoRequest {
   name?: string;
   defaultBranch?: string;
   accountChain?: string[];
+  /** Empty string clears it (falls back to your git config). */
+  committerName?: string;
+  committerEmail?: string;
 }
 /** DELETE /api/repos/:id → { ok: true } (refused with 409 while it has tasks in the queue) */
 
@@ -106,10 +118,11 @@ export interface UpdateKnowledgeRequest {
 export interface PromptPreviewRequest {
   repo: string;
   message: string;
+  attachmentIds?: string[];
 }
 export interface PromptPreviewResponse {
   prompt: string;
-  layers: { name: "global" | "repo" | "message"; included: boolean }[];
+  layers: { name: "global" | "repo" | "message" | "attachments"; included: boolean }[];
 }
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
@@ -123,6 +136,8 @@ export interface CreateTaskRequest {
   repo: string;
   message: string;
   accountOverride?: string | null;
+  /** Ids from POST /api/attachments. */
+  attachmentIds?: string[];
 }
 /** PUT /api/tasks/order (body ReorderRequest, only pending tasks move) */
 /** POST /api/tasks/:id/cancel — pending: removed from queue; running: stopped → interrupted */
@@ -130,7 +145,15 @@ export interface CreateTaskRequest {
 /** POST /api/tasks/:id/reply (body ReplyRequest) — needs-review: resumes the CLI session */
 export interface ReplyRequest {
   message: string;
+  attachmentIds?: string[];
 }
+
+// ── Attachments ─────────────────────────────────────────────────────────────
+/**
+ * POST /api/attachments?name=<file name> with the raw file as the body
+ * (Content-Type: application/octet-stream) → Attachment. One file per request.
+ * GET /api/attachments/:id → the image bytes, only for byte-verified images (previews).
+ */
 /** GET /api/tasks/:id/history → ActivityEntry[] */
 export type TaskHistoryResponse = ActivityEntry[];
 /** GET /api/tasks/:id/diff */

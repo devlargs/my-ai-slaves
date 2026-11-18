@@ -1,0 +1,117 @@
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench (app pages) · theme: Coral
+ * design-system: design.md · designed-as-app · anchor hue: coral 36°
+ * axes: light (+ dark) / geometric-sans (Geist) / warm
+ *
+ * The one source of colour, type, space, radius and motion values. Components reference
+ * these by name; index.css maps them onto Tailwind + the shadcn-style variable names.
+ */
+
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+:root {
+  color-scheme: light;
+
+  /* paper & ink: warm grey, never pure white / black */
+  --color-paper: oklch(98.4% 0.004 75);
+  --color-paper-2: oklch(96.1% 0.006 72);
+  --color-paper-3: oklch(93.4% 0.008 70);
+  --color-surface: oklch(99.6% 0.002 75);
+  --color-ink: oklch(23% 0.012 55);
+  --color-ink-2: oklch(37% 0.012 55);
+  --color-muted: oklch(52% 0.012 60);
+  --color-rule: oklch(91.5% 0.007 70);
+  --color-rule-strong: oklch(85.5% 0.009 65);
+
+  /* the one accent: coral. Fill for the view's main action, live state, focus. <5% of a view. */
+  --color-signal: oklch(57% 0.185 35);
+  --color-signal-hover: oklch(52.5% 0.18 34);
+  --color-signal-ink: oklch(50% 0.17 35);
+  --color-signal-soft: oklch(95.6% 0.028 42);
+  --color-on-signal: oklch(99% 0.006 40);
+  --color-focus: oklch(62% 0.17 38);
+
+  /* status: always paired with a word or an icon */
+  --color-success: oklch(56% 0.13 152);
+  --color-success-soft: oklch(95.6% 0.032 152);
+  --color-success-ink: oklch(42% 0.1 152);
+  --color-warning: oklch(75% 0.15 72);
+  --color-warning-soft: oklch(96.2% 0.045 82);
+  --color-warning-ink: oklch(47% 0.11 62);
+  --color-danger: oklch(55% 0.2 27);
+  --color-danger-soft: oklch(95.6% 0.03 22);
+  --color-danger-ink: oklch(47% 0.17 27);
+
+  /* floating layers only (popover, select, dialog) */
+  --shadow-float: 0 1px 2px oklch(23% 0.012 55 / 0.06), 0 8px 24px -6px oklch(23% 0.012 55 / 0.14);
+  --color-scrim: oklch(23% 0.012 55 / 0.42);
+
+  /* type */
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --text-2xs: 0.6875rem; /* 11px: label-mono, meta */
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem; /* 13px: body */
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --text-title: 1.375rem; /* page titles */
+  --tracking-display: -0.022em;
+  --tracking-label: 0.06em;
+
+  /* space: 4-pt */
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+
+  /* radii: pills for actions, ruler-drawn rectangles for surfaces */
+  --radius-control: 0.5rem; /* fields, selects */
+  --radius-panel: 0.75rem; /* panels, dialogs, task cards */
+  --radius-pill: 999px; /* buttons, badges, chips */
+
+  /* motion: composed and sparse */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-short: 150ms;
+  --dur-medium: 220ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --color-paper: oklch(17.5% 0.006 55);
+    --color-paper-2: oklch(21.5% 0.007 55);
+    --color-paper-3: oklch(25.5% 0.008 55);
+    --color-surface: oklch(20% 0.007 55);
+    --color-ink: oklch(94% 0.006 75);
+    --color-ink-2: oklch(83% 0.008 70);
+    --color-muted: oklch(67% 0.01 65);
+    --color-rule: oklch(28.5% 0.008 55);
+    --color-rule-strong: oklch(36% 0.01 55);
+
+    --color-signal: oklch(70% 0.16 40);
+    --color-signal-hover: oklch(75% 0.15 42);
+    --color-signal-ink: oklch(77% 0.14 42);
+    --color-signal-soft: oklch(27% 0.05 38);
+    --color-on-signal: oklch(18% 0.012 40);
+    --color-focus: oklch(72% 0.15 40);
+
+    --color-success: oklch(70% 0.14 152);
+    --color-success-soft: oklch(26.5% 0.045 152);
+    --color-success-ink: oklch(80% 0.12 152);
+    --color-warning: oklch(80% 0.14 78);
+    --color-warning-soft: oklch(28% 0.05 72);
+    --color-warning-ink: oklch(85% 0.12 80);
+    --color-danger: oklch(67% 0.18 27);
+    --color-danger-soft: oklch(27.5% 0.06 27);
+    --color-danger-ink: oklch(80% 0.12 27);
+
+    --shadow-float: 0 1px 2px oklch(0% 0 0 / 0.3), 0 10px 28px -6px oklch(0% 0 0 / 0.5);
+    --color-scrim: oklch(10% 0.006 55 / 0.6);
+  }
+}

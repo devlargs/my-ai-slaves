@@ -11,6 +11,9 @@ export const Repo = z.object({
   defaultBranch: z.string().min(1),
   /** Ordered account ids; first available one runs the task. */
   accountChain: z.array(z.string()).default([]),
+  /** Author + committer for every commit on this repo's tasks (agent's and the app's). null = your git config. */
+  committerName: z.string().min(1).nullable().default(null),
+  committerEmail: z.email().nullable().default(null),
   createdAt: timestampNow(),
   updatedAt: timestampNow(),
 });

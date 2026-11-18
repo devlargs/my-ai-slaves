@@ -12,6 +12,7 @@ import { PromptAssembler } from "./services/prompt-assembler";
 import { QueueService } from "./services/queue-service";
 import { RepoService } from "./services/repo-service";
 import { WorktreeService } from "./services/worktree-service";
+import { AttachmentStore } from "./storage/attachment-store";
 import { openDataStores } from "./storage/data-stores";
 import { LoginService } from "./login/login-service";
 import { WsHub } from "./ws/hub";
@@ -29,11 +30,12 @@ const hub = new WsHub();
 const accounts = new AccountService(stores, adapters, hub);
 const repos = new RepoService(stores);
 const worktrees = new WorktreeService(stores.paths.worktreesDir);
+const attachments = new AttachmentStore(stores.paths.attachmentsDir);
 const assembler = new PromptAssembler({
   globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
   repoBasePrompt: (repo) => repos.basePromptOf(repo),
 });
-const queue = new QueueService({ stores, accounts, repos, worktrees, assembler, adapters, broadcaster: hub });
+const queue = new QueueService({ stores, accounts, repos, worktrees, assembler, adapters, broadcaster: hub, attachments });
 const logins = new LoginService(stores, accounts, adapters, {
   loginUpdated: (state) => hub.loginUpdated(state),
   onLoggedIn: () => void queue.tick(),
@@ -45,13 +47,13 @@ hub.setSources({
 });
 
 // ── http ────────────────────────────────────────────────────────────────────
-const app = Fastify({ logger: false, bodyLimit: 10 * 1024 * 1024 });
+const app = Fastify({ logger: false, bodyLimit: 10 * 1024 * 1024 }); // attachments have their own 20 MB limit
 app.addHook("onRequest", createRequestGuard(PORT)); // before everything else, including Vite and /ws
 await app.register(fastifyWebsocket);
 app.register(async (scope) => {
   scope.get("/ws", { websocket: true }, (socket) => hub.handle(socket));
 });
-registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins });
+registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments });
 
 let closeVite: (() => Promise<void>) | null = null;
 if (isProduction) {
@@ -90,6 +92,7 @@ try {
 }
 
 await queue.init();
+void accounts.checkAll().then(() => queue.tick()); // fresh login status + emails
 
 console.log(`
   My AI Slaves is running ${isProduction ? "" : "(dev)"}

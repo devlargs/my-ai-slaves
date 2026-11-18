@@ -1,5 +1,6 @@
 export * from "./time";
 export * from "./schemas/common";
+export * from "./schemas/attachment";
 export * from "./schemas/settings";
 export * from "./schemas/accounts";
 export * from "./schemas/repos";

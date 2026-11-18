@@ -1,24 +1,36 @@
 import type { AccountView } from "@my-ai-slaves/shared";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { useNow } from "@/lib/hooks";
-import { formatDuration } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 
 const taskVariants: Record<string, BadgeVariant> = {
-  pending: "secondary",
-  running: "default",
+  pending: "outline",
+  running: "signal",
   "needs-review": "warning",
   interrupted: "destructive",
   done: "success",
   failed: "destructive",
-  discarded: "outline",
-  cancelled: "outline",
+  discarded: "secondary",
+  cancelled: "secondary",
 };
 
-export function TaskStatusBadge({ status }: { status: string }) {
+const taskLabels: Record<string, string> = { "needs-review": "review" };
+
+/** A live coral pulse; the only looping motion in the app. */
+export function LiveDot({ className }: { className?: string }) {
   return (
-    <Badge variant={taskVariants[status] ?? "outline"}>
-      {status === "running" && <span className="size-1.5 animate-pulse rounded-full bg-current" />}
-      {status}
+    <span className={cn("relative inline-flex size-1.5", className)} aria-hidden>
+      <span className="absolute inset-0 animate-ping rounded-full bg-current opacity-60 motion-reduce:hidden" />
+      <span className="relative size-1.5 rounded-full bg-current" />
+    </span>
+  );
+}
+
+export function TaskStatusBadge({ status, className }: { status: string; className?: string }) {
+  return (
+    <Badge variant={taskVariants[status] ?? "outline"} className={className}>
+      {status === "running" && <LiveDot />}
+      {taskLabels[status] ?? status}
     </Badge>
   );
 }
@@ -32,19 +44,36 @@ function secondsLeft(account: AccountView, now: number): number | null {
   return account.secondsUntilAvailable;
 }
 
+const accountTone: Record<string, { variant: BadgeVariant; dot: string; label: string }> = {
+  available: { variant: "success", dot: "bg-success", label: "available" },
+  limited: { variant: "warning", dot: "bg-warning", label: "limited" },
+  "logged-out": { variant: "destructive", dot: "bg-danger", label: "logged out" },
+  unknown: { variant: "outline", dot: "bg-rule-strong", label: "unknown" },
+};
+
 export function AccountStatusBadge({ account }: { account: AccountView }) {
   const now = useNow();
-  if (account.status === "limited") {
-    const left = secondsLeft(account, now);
-    return (
-      <Badge variant="warning" title={account.limitedUntil ?? undefined}>
-        limited{left !== null ? ` · ${formatDuration(left)}` : ""}
-      </Badge>
-    );
-  }
-  const variant: BadgeVariant =
-    account.status === "available" ? "success" : account.status === "logged-out" ? "destructive" : "outline";
-  return <Badge variant={variant}>{account.status}</Badge>;
+  const tone = accountTone[account.status] ?? accountTone.unknown!;
+  const left = account.status === "limited" ? secondsLeft(account, now) : null;
+  return (
+    <Badge variant={tone.variant} title={account.limitedUntil ?? undefined}>
+      {tone.label}
+      {left !== null && <span className="num">· {formatDuration(left)}</span>}
+    </Badge>
+  );
+}
+
+/** Compact form for dense lists: a status dot plus a short word. */
+export function AccountStatusDot({ account }: { account: AccountView }) {
+  const now = useNow();
+  const tone = accountTone[account.status] ?? accountTone.unknown!;
+  const left = account.status === "limited" ? secondsLeft(account, now) : null;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" title={account.limitedUntil ?? undefined}>
+      <span className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} aria-hidden />
+      <span className="num">{left !== null ? formatDuration(left) : tone.label}</span>
+    </span>
+  );
 }
 
 export function ProviderLabel({ provider }: { provider: string }) {

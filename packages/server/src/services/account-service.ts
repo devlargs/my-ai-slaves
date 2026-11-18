@@ -16,6 +16,9 @@ import { effectiveStatus } from "./account-router";
 import { badRequest, type Broadcaster, conflict, notFound } from "./common";
 
 export class AccountService {
+  /** Last status-check result per account (email/plan stay in memory, never written to accounts.json). */
+  private readonly authInfo = new Map<string, { email: string | null; plan: string | null }>();
+
   constructor(
     private readonly stores: DataStores,
     private readonly adapters: AdapterRegistry,
@@ -38,7 +41,8 @@ export class AccountService {
       status === "limited" && account.limitedUntil
         ? Math.max(0, Math.round((new Date(account.limitedUntil).getTime() - now.getTime()) / 1000))
         : null;
-    return { ...account, status, secondsUntilAvailable: seconds };
+    const info = this.authInfo.get(account.id);
+    return { ...account, status, secondsUntilAvailable: seconds, email: info?.email ?? null, plan: info?.plan ?? null };
   }
 
   async listRaw(): Promise<Account[]> {
@@ -90,6 +94,7 @@ export class AccountService {
       file.accounts.push(account);
     });
     await this.publish();
+    void this.checkAuth(account.id).catch(() => undefined); // shows "logged out" right away instead of "unknown"
     return this.toView(account);
   }
 
@@ -109,6 +114,7 @@ export class AccountService {
     await runToCompletion(adapter.logoutCommand(this.context(account), settings), 20000);
     await rm(this.configDirOf(account), { recursive: true, force: true });
 
+    this.authInfo.delete(id);
     await this.stores.accounts.update((file) => {
       file.accounts = file.accounts.filter((a) => a.id !== id);
     });
@@ -136,12 +142,20 @@ export class AccountService {
   async checkAuth(id: string): Promise<AccountView> {
     const account = await this.get(id);
     const settings = await this.stores.settings.read();
-    const state = await this.adapters[account.provider].checkAuth(this.context(account), settings);
+    const info = await this.adapters[account.provider].checkAuth(this.context(account), settings);
+    const state = info.state;
+    if (state === "logged-in") this.authInfo.set(id, { email: info.email, plan: info.plan });
+    else if (state === "logged-out") this.authInfo.delete(id);
     return this.patch(id, (a) => {
       if (state === "logged-out") a.status = "logged-out";
       else if (state === "logged-in") a.status = effectiveStatus(a, this.now()) === "limited" ? "limited" : "available";
       else if (a.status !== "limited") a.status = "unknown";
     });
+  }
+
+  /** Refresh every account's login status (on startup). Never throws. */
+  async checkAll(): Promise<void> {
+    await Promise.all((await this.listRaw()).map((a) => this.checkAuth(a.id).catch(() => undefined)));
   }
 
   async markLimited(id: string, resetsAt: string | null, reason: string): Promise<AccountView> {

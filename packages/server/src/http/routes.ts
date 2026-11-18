@@ -8,7 +8,9 @@ import { CommandError } from "../services/git";
 import { EmptyMessageError, type PromptAssembler } from "../services/prompt-assembler";
 import type { QueueService } from "../services/queue-service";
 import type { RepoService } from "../services/repo-service";
+import { AttachmentError, type AttachmentStore } from "../storage/attachment-store";
 import type { DataStores } from "../storage/data-stores";
+import { ATTACHMENT_LIMITS, PREVIEWABLE_IMAGE_TYPES } from "@my-ai-slaves/shared";
 import type { LoginService } from "../login/login-service";
 
 export interface RouteDeps {
@@ -19,6 +21,7 @@ export interface RouteDeps {
   assembler: PromptAssembler;
   adapters: AdapterRegistry;
   logins: LoginService;
+  attachments: AttachmentStore;
 }
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -34,11 +37,12 @@ const Ids = z.object({ ids: z.array(z.string()) });
 const params = (req: { params: unknown }) => req.params as { id: string };
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
-  const { stores, accounts, repos, queue, assembler, logins } = deps;
+  const { stores, accounts, repos, queue, assembler, logins, attachments } = deps;
 
   app.setErrorHandler((error, _req, reply) => {
     if (error instanceof HttpError) return reply.code(error.status).send({ error: error.message });
     if (error instanceof EmptyMessageError) return reply.code(400).send({ error: error.message });
+    if (error instanceof AttachmentError) return reply.code(error.status).send({ error: error.message });
     if (error instanceof CommandError) return reply.code(500).send({ error: error.message });
     if (error instanceof z.ZodError) {
       return reply.code(400).send({ error: error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
@@ -101,6 +105,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         name: z.string().optional(),
         defaultBranch: z.string().min(1).optional(),
         accountChain: z.array(z.string()).optional(),
+        committerName: z.string().max(200).optional(),
+        committerEmail: z.string().max(200).optional(),
       }),
       req.body,
     );
@@ -120,9 +126,13 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   // ── prompt preview ────────────────────────────────────────────────────────
   app.post("/api/prompt/preview", async (req) => {
-    const body = parseBody(z.object({ repo: z.string(), message: z.string() }), req.body);
+    const body = parseBody(
+      z.object({ repo: z.string(), message: z.string(), attachmentIds: z.array(z.string()).optional() }),
+      req.body,
+    );
     if (!body.message.trim()) return { prompt: "", layers: [] };
-    return assembler.forTask(body.repo, body.message);
+    const files = await attachments.resolve(body.attachmentIds);
+    return assembler.forTask(body.repo, body.message, files.map((a) => attachments.pathOf(a)));
   });
 
   // ── tasks ─────────────────────────────────────────────────────────────────
@@ -130,7 +140,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.post("/api/tasks", async (req) =>
     queue.create(
       parseBody(
-        z.object({ repo: z.string(), message: z.string(), accountOverride: z.string().nullable().optional() }),
+        z.object({
+          repo: z.string(),
+          message: z.string(),
+          accountOverride: z.string().nullable().optional(),
+          attachmentIds: z.array(z.string()).optional(),
+        }),
         req.body,
       ),
     ),
@@ -148,7 +163,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
   app.post("/api/tasks/:id/reply", async (req) => {
-    await queue.reply(params(req).id, parseBody(z.object({ message: z.string() }), req.body).message);
+    const body = parseBody(z.object({ message: z.string(), attachmentIds: z.array(z.string()).optional() }), req.body);
+    await queue.reply(params(req).id, body.message, body.attachmentIds);
     return { ok: true };
   });
   app.get("/api/tasks/:id/history", (req) => stores.activity.forTask(params(req).id));
@@ -165,6 +181,32 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
 
   app.get("/api/history", () => queue.history());
+
+  // ── attachments ───────────────────────────────────────────────────────────
+  // One raw file per request; the name rides in the query string.
+  app.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer", bodyLimit: ATTACHMENT_LIMITS.maxBytes + 1024 },
+    (_req, body, done) => done(null, body),
+  );
+  app.post("/api/attachments", async (req, reply) => {
+    const name = String((req.query as { name?: string }).name ?? "file");
+    if (!Buffer.isBuffer(req.body)) throw badRequest("Send the file as application/octet-stream.");
+    const type = req.headers["x-file-type"];
+    const saved = await attachments.save(req.body, name, typeof type === "string" ? type : undefined);
+    return reply.code(201).send(saved);
+  });
+  // Previews: only byte-verified images, never anything the browser could run.
+  app.get("/api/attachments/:id", async (req, reply) => {
+    const a = await attachments.find(params(req).id);
+    if (!a || !PREVIEWABLE_IMAGE_TYPES.includes(a.mime)) return reply.code(404).send({ error: "Not found" });
+    return reply
+      .header("Content-Type", a.mime)
+      .header("X-Content-Type-Options", "nosniff")
+      .header("Content-Security-Policy", "default-src 'none'; sandbox")
+      .header("Cache-Control", "private, max-age=31536000, immutable")
+      .send(await attachments.read(a));
+  });
 
   // Unknown /api routes → JSON 404 (not the SPA).
   app.all("/api/*", async (_req, reply) => reply.code(404).send({ error: "Not found" }));

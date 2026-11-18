@@ -64,6 +64,8 @@ export class RepoService {
       path: top,
       defaultBranch: await this.detectDefaultBranch(top),
       accountChain: (await this.stores.accounts.read()).accounts.map((a) => a.id),
+      committerName: null,
+      committerEmail: null,
       createdAt: stamp,
       updatedAt: stamp,
     };
@@ -100,6 +102,8 @@ export class RepoService {
       const unknown = patch.accountChain.filter((a) => !known.has(a));
       if (unknown.length) throw badRequest(`Unknown accounts: ${unknown.join(", ")}`);
     }
+    const email = patch.committerEmail?.trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw badRequest(`"${email}" isn't a valid email address.`);
     if (patch.defaultBranch !== undefined) {
       const ok = await gitOk(["rev-parse", "--verify", "--quiet", `${patch.defaultBranch}^{commit}`], repo.path);
       if (!ok) throw badRequest(`Branch "${patch.defaultBranch}" not found in ${repo.path}.`);
@@ -111,6 +115,8 @@ export class RepoService {
       if (patch.name !== undefined) updated.name = patch.name.trim() || updated.name;
       if (patch.defaultBranch !== undefined) updated.defaultBranch = patch.defaultBranch;
       if (patch.accountChain !== undefined) updated.accountChain = [...new Set(patch.accountChain)];
+      if (patch.committerName !== undefined) updated.committerName = patch.committerName.trim() || null;
+      if (patch.committerEmail !== undefined) updated.committerEmail = patch.committerEmail.trim() || null;
       updated.updatedAt = formatLocalIso(this.now());
     });
     return updated as Repo;

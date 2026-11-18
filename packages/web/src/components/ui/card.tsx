@@ -1,16 +1,17 @@
 import type * as React from "react";
 import { cn } from "@/lib/utils";
 
+/** Panels: hairline border, no shadow (depth is reserved for floating layers). */
 export function Card({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("rounded-lg border bg-card text-card-foreground", className)} {...props} />;
+  return <div className={cn("rounded-lg border border-rule bg-card text-card-foreground", className)} {...props} />;
 }
 
 export function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("flex items-center justify-between gap-2 border-b px-4 py-2.5", className)} {...props} />;
+  return <div className={cn("flex min-h-12 items-center justify-between gap-3 border-b border-rule px-4 py-2.5", className)} {...props} />;
 }
 
 export function CardTitle({ className, ...props }: React.ComponentProps<"h3">) {
-  return <h3 className={cn("text-sm font-semibold", className)} {...props} />;
+  return <h3 className={cn("title-display text-sm", className)} {...props} />;
 }
 
 export function CardContent({ className, ...props }: React.ComponentProps<"div">) {

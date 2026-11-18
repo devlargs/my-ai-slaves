@@ -10,6 +10,7 @@ import { PromptAssembler } from "../src/services/prompt-assembler";
 import { QueueService } from "../src/services/queue-service";
 import { RepoService } from "../src/services/repo-service";
 import { WorktreeService } from "../src/services/worktree-service";
+import { AttachmentStore } from "../src/storage/attachment-store";
 import { openDataStores } from "../src/storage/data-stores";
 import { memoryLogger, tempDir } from "./helpers";
 
@@ -61,9 +62,10 @@ async function setup(chain = ["work_1-claude", "work_2-cursor"]) {
     assembler,
     adapters,
     broadcaster: nullBroadcaster,
+    attachments: new AttachmentStore(stores.paths.attachmentsDir),
   });
   await queue.init();
-  return { stores, accounts, repos, queue, repo };
+  return { stores, accounts, repos, queue, repo, attachments: (queue as any).deps.attachments as AttachmentStore };
 }
 
 async function waitFor<T>(fn: () => Promise<T | undefined | null | false>, timeoutMs = 10000): Promise<T> {
@@ -100,6 +102,22 @@ describe("QueueService (fake CLIs, real git)", () => {
 
     const { patch } = await queue.diff(created.id);
     expect(patch).toContain("out-work_1-claude.txt");
+  });
+
+  it("passes attached files to the CLI as paths and readable folders", async () => {
+    const { queue, stores, repo, attachments } = await setup();
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    const file = await attachments.save(png, "screen shot.png", "image/png");
+    expect(file.mime).toBe("image/png");
+    const created = await queue.create({ repo: repo.id, message: "fix what the screenshot shows", attachmentIds: [file.id] });
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+    const started = (await stores.activity.forTask(created.id)).find((e) => e.event === "started");
+    expect(started?.data?.prompt).toBe(
+      `GLOBAL\n\nfix what the screenshot shows\n\nAttached files:\n- ${attachments.pathOf(file)}`,
+    );
+    await expect(queue.create({ repo: repo.id, message: "x", attachmentIds: ["00000000-0000-4000-8000-000000000000"] })).rejects.toThrow(
+      "missing",
+    );
   });
 
   it("falls back to the next account on a usage limit", async () => {
@@ -160,6 +178,24 @@ describe("QueueService (fake CLIs, real git)", () => {
     expect(sh(repo.path, "log", "--format=%s", "-1", "ai/task_0001_keep-me").trim()).toBe("keep me");
     expect(sh(repo.path, "log", "--format=%s", "-1", "main").trim()).toBe("init");
     expect((await queue.history())[0]).toMatchObject({ outcome: "done", branch: "ai/task_0001_keep-me" });
+  });
+
+  it("commits as the repo's committer and strips AI co-author trailers before Keep", async () => {
+    const { queue, repos, repo } = await setup();
+    await repos.update(repo.id, { committerName: "Ralph Example", committerEmail: "ralph@example.com" });
+    const created = await queue.create({ repo: repo.id, message: "COMMIT please" });
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+    await queue.keep(created.id);
+
+    const branch = `ai/${created.id}`;
+    const log = sh(repo.path, "log", "--format=%an <%ae>|%cn <%ce>|%B%x00", `main..${branch}`);
+    const commits = log.split("\0").map((c) => c.trim()).filter(Boolean);
+    expect(commits).toHaveLength(2); // the agent's commit + the leftovers commit
+    for (const c of commits) {
+      expect(c.startsWith("Ralph Example <ralph@example.com>|Ralph Example <ralph@example.com>|")).toBe(true);
+      expect(c).not.toMatch(/co-authored-by/i);
+    }
+    expect(commits.some((c) => c.includes("feat: agent work"))).toBe(true);
   });
 
   it("runs only one task per repo at a time", async () => {

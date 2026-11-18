@@ -1,8 +1,13 @@
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Repo, Task } from "@my-ai-slaves/shared";
 import { badRequest } from "./common";
+import { gitIdentityEnv, type GitIdentity } from "../providers/types";
 import { git, gitOk, run } from "./git";
+import { AI_TRAILER_LINE } from "./strip-ai-trailers.mjs";
+
+const STRIP_SCRIPT = fileURLToPath(new URL("./strip-ai-trailers.mjs", import.meta.url));
 
 type Worktree = NonNullable<Task["worktree"]>;
 
@@ -54,8 +59,8 @@ export class WorktreeService {
     return git(["diff", "--no-color", "--no-ext-diff", wt.baseCommit, "--"], wt.path);
   }
 
-  /** Commit anything the agent left uncommitted, on the ai/ branch. */
-  async commitLeftovers(wt: Worktree, message: string): Promise<boolean> {
+  /** Commit anything the agent left uncommitted, on the ai/ branch, as the repo's committer. */
+  async commitLeftovers(wt: Worktree, message: string, identity?: GitIdentity | null): Promise<boolean> {
     assertAiBranch(wt);
     const current = (await git(["rev-parse", "--abbrev-ref", "HEAD"], wt.path)).trim();
     if (current !== wt.branch) throw new Error(`Worktree is on "${current}", expected "${wt.branch}". Not committing.`);
@@ -63,8 +68,33 @@ export class WorktreeService {
     if (!status.trim()) return false;
     await git(["add", "--all"], wt.path);
     // --no-verify: repo hooks usually need node_modules, which a fresh worktree doesn't have.
-    await git(["commit", "--no-verify", "-m", message], wt.path);
+    await run("git", ["commit", "--no-verify", "-m", message], wt.path, {
+      env: { ...process.env, ...gitIdentityEnv(identity) },
+    });
     return true;
+  }
+
+  /**
+   * Safety net for "no AI attribution": the CLIs are told not to add it, but a repo's own
+   * CLAUDE.md can override that. Rewrites only this task's unpushed ai/ commits, and only if one
+   * actually carries such a line. Authors, committers and dates are kept.
+   */
+  async stripAiTrailers(wt: Worktree): Promise<number> {
+    assertAiBranch(wt);
+    const range = `${wt.baseCommit}..HEAD`;
+    const log = await git(["log", "--format=%H%x00%B%x01", range], wt.path);
+    const dirty = log
+      .split("\x01")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry && entry.split("\x00")[1]?.split("\n").some((l) => AI_TRAILER_LINE.test(l)));
+    if (dirty.length === 0) return 0;
+    await run(
+      "git",
+      ["filter-branch", "-f", "--msg-filter", `${JSON.stringify(process.execPath)} ${JSON.stringify(STRIP_SCRIPT)}`, "--", range],
+      wt.path,
+      { env: { ...process.env, FILTER_BRANCH_SQUELCH_WARNING: "1" } },
+    );
+    return dirty.length;
   }
 
   async remove(repo: Repo, wt: Worktree, options: { deleteBranch: boolean }): Promise<void> {

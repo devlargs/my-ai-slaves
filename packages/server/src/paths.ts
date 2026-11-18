@@ -21,6 +21,7 @@ export function dataPaths(dataDir: string) {
     activityDir: join(dataDir, "activity"),
     cliConfigDir: join(dataDir, "cli-config"),
     worktreesDir: join(dataDir, "worktrees"),
+    attachmentsDir: join(dataDir, "attachments"),
   };
 }
 export type DataPaths = ReturnType<typeof dataPaths>;

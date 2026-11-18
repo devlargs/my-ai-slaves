@@ -10,7 +10,8 @@ const label = basename(process.env.CURSOR_CONFIG_DIR ?? "none");
 const out = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
 
 if (args[0] === "status") {
-  console.log("✓ Logged in as test@example.com");
+  if (args.includes("--format")) out({ status: "ok", isAuthenticated: true, userInfo: { email: "test@example.com", teamName: "Acme" } });
+  else console.log("✓ Logged in as test@example.com");
   process.exit(0);
 }
 if (args[0] === "login") {

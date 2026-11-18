@@ -72,6 +72,7 @@ describe("JsonStore", () => {
       "repo",
       "status",
       "message",
+      "attachments",
       "accountOverride",
       "currentAccount",
       "worktree",

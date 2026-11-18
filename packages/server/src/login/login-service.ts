@@ -41,8 +41,9 @@ export interface LoginEvents {
 }
 
 /**
- * Logs accounts in from the app. The CLI's own login command runs in a hidden pseudo-terminal;
- * we only pick out the sign-in link and, for Claude, pass back the code you paste.
+ * Logs accounts in from the app, like running the CLI's login yourself: the CLI (in a hidden
+ * pseudo-terminal) opens your browser, you sign in on the provider's site, and its local callback
+ * completes the login. We pick out the link (to re-open it) and, for Claude, can pass back a pasted code.
  * Credentials end up in the account's own config dir / Keychain entry, never in our files.
  */
 export class LoginService {
@@ -84,7 +85,9 @@ export class LoginService {
         provider: account.provider,
         status: "starting",
         url: null,
+        acceptsCode: account.provider === "claude-code",
         message: "Starting the login…",
+        email: null,
         output: "",
       },
       pty,
@@ -109,7 +112,9 @@ export class LoginService {
   submitCode(loginId: string, code: string): LoginState {
     const session = this.sessions.get(loginId);
     if (!session) throw notFound("That login session has ended. Start a new one.");
-    if (session.state.status !== "needs-code" || !session.alive) throw conflict("This login isn't waiting for a code.");
+    if (!session.state.acceptsCode || session.state.status !== "open-url" || !session.alive) {
+      throw conflict("This login isn't waiting for a code.");
+    }
     const trimmed = code.trim();
     if (!trimmed) throw conflict("Paste the code shown on the sign-in page.");
 
@@ -151,25 +156,16 @@ export class LoginService {
       // Asked for the code again: the one we sent was rejected.
       const lastLines = text.trim().split("\n").filter((l) => l.trim() && !CODE_PROMPT_LINE.test(l)).slice(-2).join(" ");
       session.promptsAtSubmit = null;
-      this.update(session, { status: "needs-code", url, output, message: `That code didn't work. ${lastLines}`.trim() });
+      this.update(session, { status: "open-url", url, output, message: `That code didn't work. ${lastLines}`.trim() });
       return;
     }
     if (session.state.status === "starting" && url) {
-      if (session.state.provider === "claude-code") {
-        this.update(session, {
-          status: "needs-code",
-          url,
-          output,
-          message: "Open the sign-in page, sign in, then paste the code it shows below.",
-        });
-      } else {
-        this.update(session, {
-          status: "open-url",
-          url,
-          output,
-          message: "Open the sign-in page and approve the login. This window updates by itself when you're done.",
-        });
-      }
+      this.update(session, {
+        status: "open-url",
+        url,
+        output,
+        message: "A sign-in page opened in your browser. Sign in there; this finishes by itself.",
+      });
       return;
     }
     this.update(session, { url, output });
@@ -179,7 +175,7 @@ export class LoginService {
     if (isFinal(session.state.status)) return;
     this.update(session, { status: "verifying", message: "Checking the login…" });
     if (await this.isLoggedIn(session)) {
-      this.finish(session, "success", "Logged in.");
+      this.finish(session, "success", session.state.email ? `Logged in as ${session.state.email}.` : "Logged in.");
       return;
     }
     const tail = plainText(session.raw)
@@ -197,7 +193,7 @@ export class LoginService {
     const tick = async () => {
       if (isFinal(session.state.status) || session.state.status !== "verifying") return;
       if (await this.isLoggedIn(session)) {
-        this.finish(session, "success", "Logged in.");
+        this.finish(session, "success", session.state.email ? `Logged in as ${session.state.email}.` : "Logged in.");
         return;
       }
       if (Date.now() - startedAt < VERIFY_POLL_LIMIT_MS) session.timers.push(setTimeout(() => void tick(), VERIFY_POLL_MS));
@@ -208,7 +204,9 @@ export class LoginService {
   private async isLoggedIn(session: Session): Promise<boolean> {
     try {
       const view = await this.accounts.checkAuth(session.state.accountId); // also saves + broadcasts the status
-      return view.status !== "logged-out" && view.status !== "unknown";
+      const ok = view.status !== "logged-out" && view.status !== "unknown";
+      if (ok) session.state = { ...session.state, email: view.email };
+      return ok;
     } catch {
       return false;
     }

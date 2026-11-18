@@ -16,6 +16,7 @@ import type { AdapterRegistry } from "../providers";
 import { preview } from "../providers/spawn";
 import type { RunHandle, RunResult } from "../providers/types";
 import type { NewActivityEntry } from "../storage/activity-log";
+import type { AttachmentStore } from "../storage/attachment-store";
 import type { DataStores } from "../storage/data-stores";
 import type { AccountService } from "./account-service";
 import { pickAccount } from "./account-router";
@@ -49,8 +50,12 @@ export interface QueueDeps {
   assembler: PromptAssembler;
   adapters: AdapterRegistry;
   broadcaster: Broadcaster;
+  attachments: AttachmentStore;
   now?: () => Date;
 }
+
+/** The repo's committer setting; null fields fall back to your git config. */
+const identityOf = (repo: Repo) => ({ name: repo.committerName, email: repo.committerEmail });
 
 const pushCapped = <T>(list: T[], item: T) => {
   list.push(item);
@@ -170,6 +175,7 @@ export class QueueService {
     if (!override && repo.accountChain.length === 0) {
       throw badRequest(`"${repo.id}" has no accounts in its chain. Add some on the Repos page.`);
     }
+    const attachments = await this.deps.attachments.resolve(req.attachmentIds);
 
     const firstLine = message.trim().split("\n")[0] ?? "";
     const title = firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
@@ -186,6 +192,7 @@ export class QueueService {
         repo: repo.id,
         status: "pending",
         message,
+        attachments,
         accountOverride: override,
         currentAccount: null,
         worktree: null,
@@ -204,7 +211,7 @@ export class QueueService {
       account: override,
       event: "queued",
       detail: `Queued: ${created.title}`,
-      data: { title: created.title, message, accountOverride: override },
+      data: { title: created.title, message, accountOverride: override, attachments },
     });
     await this.publish();
     void this.tick();
@@ -272,18 +279,19 @@ export class QueueService {
     void this.tick();
   }
 
-  async reply(id: string, message: string): Promise<void> {
+  async reply(id: string, message: string, attachmentIds: string[] = []): Promise<void> {
     if (!message.trim()) throw badRequest("The reply is empty.");
     const task = await this.getTask(id);
     if (task.status !== "needs-review" || !task.session) {
       throw conflict("You can reply to a task once it's finished a run and is waiting for review.");
     }
+    const attachments = await this.deps.attachments.resolve(attachmentIds);
     await this.updateTask(id, (t) => {
-      t.replies.push({ at: this.stamp(), message });
+      t.replies.push({ at: this.stamp(), message, attachments });
       t.pendingReply = message;
       t.status = "pending";
     });
-    this.log({ taskId: id, repo: task.repo, account: null, event: "reply", detail: preview(message, 200), data: { message } });
+    this.log({ taskId: id, repo: task.repo, account: null, event: "reply", detail: preview(message, 200), data: { message, attachments } });
     await this.publish();
     void this.tick();
   }
@@ -308,7 +316,8 @@ export class QueueService {
 
   async keep(id: string): Promise<void> {
     const { task, repo, wt } = await this.reviewable(id);
-    await this.deps.worktrees.commitLeftovers(wt, task.title);
+    await this.deps.worktrees.commitLeftovers(wt, task.title, identityOf(repo));
+    await this.deps.worktrees.stripAiTrailers(wt);
     await this.deps.worktrees.remove(repo, wt, { deleteBranch: false });
     await this.removeTask(id);
     this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "kept", detail: `Kept branch ${wt.branch}`, data: { branch: wt.branch } });
@@ -318,7 +327,8 @@ export class QueueService {
 
   async push(id: string): Promise<PushResponse> {
     const { task, repo, wt } = await this.reviewable(id);
-    await this.deps.worktrees.commitLeftovers(wt, task.title);
+    await this.deps.worktrees.commitLeftovers(wt, task.title, identityOf(repo));
+    await this.deps.worktrees.stripAiTrailers(wt);
     const result = await this.deps.worktrees.push(wt, task.title);
     await this.deps.worktrees.remove(repo, wt, { deleteBranch: false });
     await this.removeTask(id);
@@ -488,9 +498,14 @@ export class QueueService {
         });
       }
 
+      const store = this.deps.attachments;
+      const runFiles = isReply ? (task.replies.at(-1)?.attachments ?? []) : task.attachments;
+      const runPaths = runFiles.map((a) => store.pathOf(a));
+      // The session may refer back to earlier files, so every file of the task stays readable.
+      const addDirs = [...task.attachments, ...task.replies.flatMap((r) => r.attachments)].map((a) => store.dirOf(a.id));
       const assembled = isReply
-        ? this.deps.assembler.forReply(task.pendingReply ?? "")
-        : await this.deps.assembler.forTask(repo.id, task.message);
+        ? this.deps.assembler.forReply(task.pendingReply ?? "", runPaths)
+        : await this.deps.assembler.forTask(repo.id, task.message, runPaths);
 
       let resume: { sessionId: string; fromConfigDir: string } | null = null;
       if (isReply && task.session) {
@@ -510,8 +525,17 @@ export class QueueService {
         data: { prompt: assembled.prompt, kind: isReply ? "reply" : "fresh", branch: wt.branch, worktree: wt.path, layers: assembled.layers },
       });
 
-      const handle = this.deps.adapters[account.provider].run(
-        { ...this.deps.accounts.context(account), prompt: assembled.prompt, cwd: wt.path, resume },
+      const adapter = this.deps.adapters[account.provider];
+      await adapter.prepare?.(this.deps.accounts.context(account), settings);
+      const handle = adapter.run(
+        {
+          ...this.deps.accounts.context(account),
+          prompt: assembled.prompt,
+          cwd: wt.path,
+          resume,
+          addDirs: [...new Set(addDirs)],
+          gitIdentity: identityOf(repo),
+        },
         settings,
       );
       const run: LiveRun = { taskId: task.id, repo: repo.id, account, handle, isReply, cancelRequested: false };

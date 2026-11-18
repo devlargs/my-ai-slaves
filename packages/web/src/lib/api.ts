@@ -1,5 +1,6 @@
 import type {
   AccountView,
+  Attachment,
   ActivityEntry,
   CreateAccountRequest,
   CreateTaskRequest,
@@ -95,7 +96,19 @@ export const api = {
   orderTasks: (ids: string[]) => request<unknown>("PUT", "/tasks/order", { ids }),
   cancelTask: (id: string) => request<unknown>("POST", `/tasks/${enc(id)}/cancel`),
   retryTask: (id: string) => request<unknown>("POST", `/tasks/${enc(id)}/retry`),
-  replyTask: (id: string, message: string) => request<unknown>("POST", `/tasks/${enc(id)}/reply`, { message }),
+  replyTask: (id: string, message: string, attachmentIds: string[] = []) =>
+    request<unknown>("POST", `/tasks/${enc(id)}/reply`, { message, attachmentIds }),
+  uploadAttachment: async (file: File): Promise<Attachment> => {
+    const res = await fetch(`/api/attachments?name=${enc(file.name || "pasted-image.png")}`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/octet-stream", "X-File-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    const data = (await res.json().catch(() => null)) as (Attachment & { error?: string }) | null;
+    if (!res.ok || !data) throw new ApiRequestError(res.status, data?.error ?? `Upload failed (${res.status})`);
+    return data;
+  },
   taskHistory: (id: string) => request<ActivityEntry[]>("GET", `/tasks/${enc(id)}/history`),
   taskDiff: (id: string) => request<DiffResponse>("GET", `/tasks/${enc(id)}/diff`),
   keepTask: (id: string) => request<Ok>("POST", `/tasks/${enc(id)}/keep`),

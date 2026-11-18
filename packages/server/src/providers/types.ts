@@ -44,14 +44,43 @@ export interface RunInput extends AccountContext {
   cwd: string;
   /** Continue an earlier CLI session (follow-up reply). */
   resume: { sessionId: string; fromConfigDir: string } | null;
+  /** Extra folders the CLI may read (the task's attachment folders). */
+  addDirs?: string[];
+  /** Author/committer for any commit the agent makes (the repo's setting). */
+  gitIdentity?: GitIdentity | null;
 }
 
-export type AuthState = "logged-in" | "logged-out" | "unknown";
+export interface GitIdentity {
+  name: string | null;
+  email: string | null;
+}
+
+/** GIT_AUTHOR_* / GIT_COMMITTER_* override git config for every git command the agent runs. */
+export function gitIdentityEnv(identity: GitIdentity | null | undefined): Record<string, string> {
+  const env: Record<string, string> = {};
+  if (identity?.name) {
+    env.GIT_AUTHOR_NAME = identity.name;
+    env.GIT_COMMITTER_NAME = identity.name;
+  }
+  if (identity?.email) {
+    env.GIT_AUTHOR_EMAIL = identity.email;
+    env.GIT_COMMITTER_EMAIL = identity.email;
+  }
+  return env;
+}
+
+export interface AuthInfo {
+  state: "logged-in" | "logged-out" | "unknown";
+  email: string | null;
+  plan: string | null;
+}
 
 export interface ProviderAdapter {
   readonly provider: ProviderId;
+  /** One-time setup before a run (e.g. turning off the CLI's commit attribution). */
+  prepare?(ctx: AccountContext, settings: SettingsFile): Promise<void>;
   run(input: RunInput, settings: SettingsFile): RunHandle;
   loginCommand(ctx: AccountContext, settings: SettingsFile): SpawnSpec;
   logoutCommand(ctx: AccountContext, settings: SettingsFile): SpawnSpec;
-  checkAuth(ctx: AccountContext, settings: SettingsFile): Promise<AuthState>;
+  checkAuth(ctx: AccountContext, settings: SettingsFile): Promise<AuthInfo>;
 }

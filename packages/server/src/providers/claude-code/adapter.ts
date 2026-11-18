@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { SettingsFile } from "@my-ai-slaves/shared";
 import { childEnv, runProcess, runToCompletion } from "../spawn";
-import type { AccountContext, AuthState, ProviderAdapter, RunHandle, RunInput, SpawnSpec } from "../types";
+import { type AccountContext, type AuthInfo, gitIdentityEnv, type ProviderAdapter, type RunHandle, type RunInput, type SpawnSpec } from "../types";
 import { ClaudeStreamParser } from "./parse-stream";
 
 const env = (ctx: AccountContext) => childEnv({ CLAUDE_CONFIG_DIR: ctx.configDir });
@@ -28,7 +28,7 @@ async function findTranscript(configDir: string, sessionId: string): Promise<str
 export class ClaudeCodeAdapter implements ProviderAdapter {
   readonly provider = "claude-code" as const;
 
-  buildArgs(input: Pick<RunInput, "resume">, settings: SettingsFile, resumeTarget: string | null): string[] {
+  buildArgs(input: Pick<RunInput, "resume" | "addDirs">, settings: SettingsFile, resumeTarget: string | null): string[] {
     const s = settings.providers["claude-code"];
     const args = [
       "-p",
@@ -40,12 +40,14 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       s.permissionMode,
       "--permission-prompts",
       "none",
-      // Default is true: it would wait out a usage limit instead of letting us fall back to the next account.
+      // autoContinueAtUsageLimit: default true would wait out a limit instead of falling back to the next account.
+      // attribution: false drops the "Co-Authored-By: Claude" trailer and the PR footer (v2.1.281+).
       "--settings",
-      JSON.stringify({ autoContinueAtUsageLimit: false }),
+      JSON.stringify({ autoContinueAtUsageLimit: false, attribution: false }),
     ];
     if (s.model) args.push("--model", s.model);
     if (resumeTarget) args.push("--resume", resumeTarget);
+    for (const dir of input.addDirs ?? []) args.push("--add-dir", dir);
     return args;
   }
 
@@ -71,7 +73,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
         {
           command: s.binary,
           args: this.buildArgs(input, settings, target),
-          env: env(input),
+          env: { ...env(input), ...gitIdentityEnv(input.gitIdentity) },
           cwd: input.cwd,
         },
         input.prompt,
@@ -107,8 +109,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     return {
       command: settings.providers["claude-code"].binary,
       args: ["auth", "login"],
-      // The app shows the sign-in link itself; keep the CLI from opening a second tab.
-      env: { ...env(ctx), BROWSER: "/usr/bin/true" },
+      // The CLI opens your browser and finishes via its own local callback once you sign in.
+      env: env(ctx),
       cwd: ctx.configDir,
     };
   }
@@ -117,19 +119,25 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     return { command: settings.providers["claude-code"].binary, args: ["auth", "logout"], env: env(ctx), cwd: ctx.configDir };
   }
 
-  async checkAuth(ctx: AccountContext, settings: SettingsFile): Promise<AuthState> {
+  async checkAuth(ctx: AccountContext, settings: SettingsFile): Promise<AuthInfo> {
     const out = await runToCompletion({
       command: settings.providers["claude-code"].binary,
-      args: ["auth", "status"],
+      args: ["auth", "status", "--json"],
       env: env(ctx),
       cwd: ctx.configDir,
     });
     try {
-      const status = JSON.parse(out.stdout) as { loggedIn?: boolean };
-      if (typeof status.loggedIn === "boolean") return status.loggedIn ? "logged-in" : "logged-out";
+      const j = JSON.parse(out.stdout) as { loggedIn?: boolean; email?: unknown; subscriptionType?: unknown };
+      if (typeof j.loggedIn === "boolean") {
+        return {
+          state: j.loggedIn ? "logged-in" : "logged-out",
+          email: j.loggedIn && typeof j.email === "string" ? j.email : null,
+          plan: j.loggedIn && typeof j.subscriptionType === "string" ? j.subscriptionType : null,
+        };
+      }
     } catch {
       // fall through
     }
-    return "unknown";
+    return { state: "unknown", email: null, plan: null };
   }
 }

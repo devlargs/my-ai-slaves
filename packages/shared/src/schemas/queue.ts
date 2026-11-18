@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Attachment } from "./attachment";
 import { ProviderId, Timestamp, timestampNow } from "./common";
 
 export const QueuedTaskStatus = z.enum(["pending", "running", "needs-review", "interrupted"]);
@@ -24,6 +25,7 @@ export const TaskSession = z.object({
 export const TaskReply = z.object({
   at: Timestamp,
   message: z.string(),
+  attachments: z.array(Attachment).default([]),
 });
 
 export const Task = z.object({
@@ -32,6 +34,8 @@ export const Task = z.object({
   repo: z.string(),
   status: QueuedTaskStatus,
   message: z.string(),
+  /** Files attached to the task message. */
+  attachments: z.array(Attachment).default([]),
   accountOverride: z.string().nullable().default(null),
   currentAccount: z.string().nullable().default(null),
   worktree: TaskWorktree.nullable().default(null),

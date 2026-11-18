@@ -1,7 +1,7 @@
 import { BellIcon, HistoryIcon, ListOrderedIcon, type LucideIcon, FolderGit2Icon, SettingsIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
-import { AccountStatusBadge } from "@/components/status";
+import { AccountStatusDot, LiveDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useStore, ws } from "@/lib/store";
@@ -52,13 +52,19 @@ export function App() {
   return (
     <div className="flex h-full">
       <Sidebar route={route} />
-      <main className="min-w-0 flex-1 overflow-auto">
+      <main className="scroll-quiet min-w-0 flex-1 overflow-auto">
         {route === "queue" && <QueuePage />}
         {route === "repos" && <ReposPage />}
         {route === "settings" && <SettingsPage />}
         {route === "history" && <HistoryPage />}
       </main>
-      <Toaster position="bottom-right" richColors closeButton />
+      <Toaster
+        position="bottom-right"
+        closeButton
+        toastOptions={{
+          className: "!rounded-lg !border-rule !bg-surface !text-ink !shadow-float !font-sans !text-[13px]",
+        }}
+      />
     </div>
   );
 }
@@ -71,50 +77,99 @@ function Sidebar({ route }: { route: Route }) {
   const review = tasks.filter((t) => t.status === "needs-review").length;
 
   return (
-    <nav className="flex w-52 shrink-0 flex-col border-r bg-sidebar">
-      <div className="px-4 py-3">
-        <div className="text-sm font-semibold">My AI Slaves</div>
-        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          <span className={cn("size-1.5 rounded-full", connected ? "bg-success" : "bg-destructive")} />
-          {connected ? "connected" : "reconnecting…"}
+    <nav aria-label="Main" className="flex w-56 shrink-0 flex-col border-r border-rule bg-sidebar">
+      <div className="flex flex-col gap-1 px-4 pt-4 pb-5">
+        <div className="flex items-center gap-2">
+          <Mark />
+          <span className="title-display text-[15px]">My AI Slaves</span>
+        </div>
+        <div className="flex items-center gap-1.5 pl-7 text-[11px] text-muted-foreground" role="status">
+          {connected ? (
+            <>
+              <LiveDot className="text-success" /> Live
+            </>
+          ) : (
+            <>
+              <span className="size-1.5 rounded-full bg-danger" aria-hidden /> Reconnecting…
+            </>
+          )}
         </div>
       </div>
+
       <div className="flex flex-col gap-0.5 px-2">
-        {NAV.map(({ route: r, label, icon: Icon }) => (
-          <a
-            key={r}
-            href={`#/${r}`}
-            className={cn(
-              "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent",
-              route === r ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground",
-            )}
-          >
-            <Icon className="size-4" />
-            {label}
-            {r === "queue" && (running > 0 || review > 0) && (
-              <span className="ml-auto font-mono text-[11px]">
-                {running > 0 && <span className="text-primary">{running}▶</span>}
-                {review > 0 && <span className="ml-1 text-warning">{review}?</span>}
-              </span>
-            )}
-          </a>
-        ))}
+        {NAV.map(({ route: r, label, icon: Icon }) => {
+          const active = route === r;
+          return (
+            <a
+              key={r}
+              href={`#/${r}`}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex h-8 items-center gap-2.5 rounded-md border px-2.5 text-[13px] transition-colors duration-150",
+                "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-focus)]",
+                active
+                  ? "border-rule bg-surface font-medium text-ink"
+                  : "border-transparent text-ink-2 hover:bg-paper-3 hover:text-ink",
+              )}
+            >
+              <Icon className={cn("size-4", active ? "text-ink" : "text-muted-foreground")} />
+              {label}
+              {r === "queue" && (running > 0 || review > 0) && (
+                <span className="ml-auto flex items-center gap-1">
+                  {running > 0 && (
+                    <span
+                      title={`${running} running`}
+                      className="num inline-flex h-[18px] items-center gap-1 rounded-full bg-signal-soft px-1.5 text-[11px] font-medium text-signal-ink"
+                    >
+                      <LiveDot /> {running}
+                    </span>
+                  )}
+                  {review > 0 && (
+                    <span
+                      title={`${review} waiting for review`}
+                      className="num inline-flex h-[18px] items-center rounded-full bg-warning-soft px-1.5 text-[11px] font-medium text-warning-ink"
+                    >
+                      {review}
+                    </span>
+                  )}
+                </span>
+              )}
+            </a>
+          );
+        })}
       </div>
+
       {accounts.length > 0 && (
-        <div className="mt-4 flex flex-col gap-1 px-4">
-          <div className="text-[11px] font-medium text-muted-foreground uppercase">Accounts</div>
-          {accounts.map((a) => (
-            <div key={a.id} className="flex items-center justify-between gap-1 text-xs">
-              <span className="truncate">{a.label}</span>
-              <AccountStatusBadge account={a} />
-            </div>
-          ))}
+        <div className="mt-6 flex flex-col gap-2 px-4">
+          <div className="label-mono">Accounts</div>
+          <ul className="flex flex-col gap-1.5">
+            {accounts.map((a) => (
+              <li key={a.id} className="flex items-center justify-between gap-2 text-xs">
+                <span className="truncate text-ink-2" title={a.email ?? a.label}>
+                  {a.label}
+                </span>
+                <AccountStatusDot account={a} />
+              </li>
+            ))}
+          </ul>
         </div>
       )}
+
       <div className="mt-auto p-3">
         <NotificationPrompt />
       </div>
     </nav>
+  );
+}
+
+/** Wordmark glyph: three stacked queue bars, the top one coral (the task being worked on). */
+function Mark() {
+  return (
+    <svg viewBox="0 0 20 20" className="size-5 shrink-0" aria-hidden>
+      <rect x="2" y="3" width="16" height="4" rx="2" fill="var(--color-signal)" />
+      <rect x="2" y="8.5" width="12" height="4" rx="2" fill="var(--color-ink)" />
+      <rect x="2" y="14" width="8" height="4" rx="2" fill="var(--color-ink)" opacity="0.35" />
+    </svg>
   );
 }
 
@@ -144,8 +199,8 @@ function NotificationPrompt() {
 function SessionExpired() {
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <div className="max-w-md rounded-lg border bg-card p-6 text-center">
-        <h1 className="text-base font-semibold">Can&apos;t reach the server</h1>
+      <div className="max-w-md rounded-lg border border-rule bg-surface p-6 text-center">
+        <h1 className="title-display text-base">Can&apos;t reach the server</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Make sure <code className="font-mono">npm run dev</code> is running, then reload this page.
         </p>

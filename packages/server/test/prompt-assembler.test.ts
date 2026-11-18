@@ -14,6 +14,7 @@ describe("assemblePrompt", () => {
       { name: "global", included: false },
       { name: "repo", included: false },
       { name: "message", included: true },
+      { name: "attachments", included: false },
     ]);
   });
 
@@ -48,6 +49,18 @@ describe("assemblePrompt", () => {
 
   it("refuses an empty message", () => {
     expect(() => assemblePrompt({ globalBase: "G", repoBase: "R", message: "   " })).toThrow(EmptyMessageError);
+  });
+});
+
+describe("attachments layer", () => {
+  it("lists attached file paths last, only when there are files", () => {
+    const { prompt, layers } = assemblePrompt({ globalBase: "G", repoBase: "", message: "M", attachmentPaths: ["/a/x.png", "/b/y.pdf"] });
+    expect(prompt).toBe("G\n\nM\n\nAttached files:\n- /a/x.png\n- /b/y.pdf");
+    expect(layers.at(-1)).toEqual({ name: "attachments", included: true });
+  });
+
+  it("replies carry their own files", () => {
+    expect(assembleReply("see this", ["/a/x.png"]).prompt).toBe("see this\n\nAttached files:\n- /a/x.png");
   });
 });
 
