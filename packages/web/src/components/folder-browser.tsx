@@ -52,26 +52,26 @@ export function FolderBrowserDialog({
             Go
           </Button>
         </form>
-        <div className="h-80 overflow-auto rounded-md border">
+        <div className="scroll-quiet h-80 overflow-auto rounded-lg border border-rule bg-surface">
           {data?.parent && (
             <button
               type="button"
               onClick={() => void load(data.parent ?? undefined)}
-              className="flex w-full items-center gap-2 border-b px-3 py-1.5 text-left text-sm cursor-pointer hover:bg-accent"
+              className="flex w-full cursor-pointer items-center gap-2 border-b border-rule px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-paper-2"
             >
               <ArrowUpIcon className="size-4 text-muted-foreground" /> ..
             </button>
           )}
-          {data?.dirs.length === 0 && <p className="p-3 text-sm text-muted-foreground">No sub-folders.</p>}
+          {data?.dirs.length === 0 && <p className="p-3 text-[13px] text-muted-foreground">No sub-folders.</p>}
           {data?.dirs.map((d) => (
             <button
               type="button"
               key={d.path}
               onClick={() => void load(d.path)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm cursor-pointer hover:bg-accent"
+              className="flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-paper-2"
             >
               {d.isGitRepo ? (
-                <FolderGit2Icon className="size-4 text-primary" />
+                <FolderGit2Icon className="size-4 text-signal-ink" />
               ) : (
                 <FolderIcon className="size-4 text-muted-foreground" />
               )}

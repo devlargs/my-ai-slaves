@@ -101,10 +101,10 @@ function LoginFlow({ accountId, onClose }: { accountId: string; onClose: () => v
       {status === "open-url" && (
         <>
           <Step icon="spin" text="Sign in on the page that opened in your browser. This finishes by itself." />
-          {login?.message?.includes("didn't work") && <p className="text-xs text-destructive">{login.message}</p>}
+          {login?.message?.includes("didn't work") && <p className="text-xs text-danger-ink">{login.message}</p>}
 
           {login?.url && (
-            <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3">
+            <div className="flex flex-col gap-2 rounded-lg border border-rule bg-paper-2 p-3">
               <p className="text-xs text-muted-foreground">No page opened? Open it yourself:</p>
               <div className="flex flex-wrap gap-2">
                 <a
@@ -189,7 +189,7 @@ function LoginFlow({ accountId, onClose }: { accountId: string; onClose: () => v
       </div>
 
       {showDetails && (
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md border bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-rule bg-paper-2 px-3 py-2.5 font-mono text-[11px] text-muted-foreground">
           {login?.output || "No output yet."}
         </pre>
       )}
@@ -199,10 +199,10 @@ function LoginFlow({ accountId, onClose }: { accountId: string; onClose: () => v
 
 function Step({ icon, text }: { icon: "spin" | "ok" | "fail"; text: string }) {
   return (
-    <div className="flex items-center gap-2 text-sm">
+    <div className="flex items-center gap-2 text-[13px]">
       {icon === "spin" && <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />}
       {icon === "ok" && <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />}
-      {icon === "fail" && <XCircle className="size-4 shrink-0 text-destructive" />}
+      {icon === "fail" && <XCircle className="size-4 shrink-0 text-danger-ink" />}
       <span>{text}</span>
     </div>
   );

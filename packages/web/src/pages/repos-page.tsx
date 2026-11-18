@@ -3,6 +3,7 @@ import { ChevronRightIcon, FolderOpenIcon, FolderGit2Icon, PlusIcon, SaveIcon, T
 import { useEffect, useMemo, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FolderBrowserDialog } from "@/components/folder-browser";
+import { PageHeader } from "@/components/page-header";
 import { FullscreenButton, FullscreenEditor } from "@/components/fullscreen-editor";
 import { SortableList } from "@/components/sortable-list";
 import { AccountStatusBadge, ProviderLabel } from "@/components/status";
@@ -52,14 +53,16 @@ export function ReposPage() {
   const replace = (repo: Repo) => setData((list) => list?.map((r) => (r.id === repo.id ? repo : r)));
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 p-6">
-      <div>
-        <h1 className="text-lg font-semibold">Repositories</h1>
-        <p className="text-sm text-muted-foreground">
-          Tasks run in a separate git worktree on an <code className="font-mono text-xs">ai/…</code> branch. Your main
-          working tree is never touched.
-        </p>
-      </div>
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 py-8">
+      <PageHeader
+        title="Repositories"
+        description={
+          <>
+            Tasks run in a separate git worktree on an <code className="font-mono text-xs text-ink-2">ai/…</code> branch.
+            Your main working tree is never touched.
+          </>
+        }
+      />
 
       <Card>
         <CardContent className="flex flex-col gap-2">
@@ -90,7 +93,7 @@ export function ReposPage() {
 
       <FolderBrowserDialog open={browsing} onOpenChange={setBrowsing} onPick={(p) => void register(p)} />
 
-      {repos?.length === 0 && <p className="text-sm text-muted-foreground">No repositories yet.</p>}
+      {repos?.length === 0 && <p className="text-[13px] text-muted-foreground">No repositories yet.</p>}
       {sorted.length > 1 && (
         <div className="-mb-2 flex justify-end gap-1">
           <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => sorted.forEach((r) => set.add(r.id)))}>
@@ -164,7 +167,7 @@ function RepoCard({
           <ChevronRightIcon
             className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
           />
-          <FolderGit2Icon className="size-4 shrink-0 text-primary" />
+          <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
           <CardTitle className="shrink-0">{repo.name}</CardTitle>
           <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={repo.path}>
             {repo.path}
@@ -175,7 +178,7 @@ function RepoCard({
                 {repo.defaultBranch}
               </Badge>
               <span
-                className={cn("text-[11px]", repo.accountChain.length ? "text-muted-foreground" : "text-destructive")}
+                className={cn("text-[11px]", repo.accountChain.length ? "text-muted-foreground" : "text-danger-ink")}
                 title={repo.accountChain.join(" → ")}
               >
                 {repo.accountChain.length ? repo.accountChain.join(" → ") : "No accounts"}
@@ -186,7 +189,7 @@ function RepoCard({
         <ConfirmButton
           size="sm"
           variant="ghost"
-          className="text-destructive"
+          className="text-muted-foreground hover:bg-danger-soft hover:text-danger-ink"
           title={`Remove ${repo.name}?`}
           description="Unregisters the repository and deletes its base prompt from .data/knowledge. Your repository on disk is not touched."
           confirmLabel="Remove"
@@ -301,7 +304,7 @@ function ChainEditor({ repo, onSave }: { repo: Repo; onSave: (chain: string[]) =
     <div className="flex flex-col gap-1.5">
       <Label>Account chain (first available runs the task)</Label>
       {chain.length === 0 ? (
-        <p className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
+        <p className="rounded-lg border border-dashed border-rule-strong p-2.5 text-xs text-muted-foreground">
           No accounts yet. Tasks for this repo can&apos;t run until you add one.
         </p>
       ) : (
@@ -313,7 +316,7 @@ function ChainEditor({ repo, onSave }: { repo: Repo; onSave: (chain: string[]) =
             const account = byId.get(id);
             const position = chain.indexOf(id) + 1;
             return (
-              <div className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+              <div className="flex items-center gap-2 rounded-lg border border-rule bg-surface px-2.5 py-2 transition-colors hover:border-rule-strong">
                 {handle}
                 <span className="w-4 text-center font-mono text-[11px] text-muted-foreground">{position}</span>
                 <span className="min-w-0 flex-1 truncate font-medium">{id}</span>
@@ -350,7 +353,7 @@ function ChainEditor({ repo, onSave }: { repo: Repo; onSave: (chain: string[]) =
       {accounts.length === 0 && (
         <p className="text-xs text-muted-foreground">
           Add accounts on the{" "}
-          <a href="#/settings" className="text-primary hover:underline">
+          <a href="#/settings" className="text-signal-ink hover:underline">
             Settings
           </a>{" "}
           page first.

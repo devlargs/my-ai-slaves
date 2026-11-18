@@ -30,8 +30,8 @@ export function LiveOutput({ taskId }: { taskId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-end gap-2 pb-2">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex items-center justify-end gap-2 pb-2.5">
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground select-none">
           Raw output
           <Switch checked={raw} onCheckedChange={setRaw} />
         </label>
@@ -42,29 +42,29 @@ export function LiveOutput({ taskId }: { taskId: string }) {
           const el = e.currentTarget;
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
         }}
-        className="min-h-0 flex-1 overflow-auto rounded-md border bg-card"
+        className="scroll-quiet min-h-0 flex-1 overflow-auto rounded-lg border border-rule bg-surface"
       >
         {!live || (live.items.length === 0 && !live.streaming && live.raw.length === 0) ? (
-          <p className="p-3 text-sm text-muted-foreground">No output yet. It streams here while the task runs.</p>
+          <p className="p-4 text-[13px] text-muted-foreground">No output yet. It streams here while the task runs.</p>
         ) : raw ? (
-          <pre className="p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all">
+          <pre className="min-h-full bg-paper-2 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-ink-2">
             {live.raw.map((r, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only
-              <div key={i} className={cn(r.src === "stderr" && "text-destructive")}>
+              <div key={i} className={cn(r.src === "stderr" && "text-danger-ink")}>
                 {r.line}
               </div>
             ))}
           </pre>
         ) : (
-          <div className="flex flex-col gap-1.5 p-2.5">
+          <div className="flex max-w-3xl flex-col gap-2 px-4 py-3.5">
             {live.items.map((item, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only
               <LiveRow key={i} item={item} />
             ))}
             {live.streaming && (
-              <div className="whitespace-pre-wrap text-[13px] leading-relaxed">
+              <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">
                 {live.streaming}
-                <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-foreground/60 align-middle" />
+                <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-signal align-middle motion-reduce:animate-none" />
               </div>
             )}
           </div>
@@ -77,24 +77,24 @@ export function LiveOutput({ taskId }: { taskId: string }) {
 function LiveRow({ item }: { item: LiveItem }) {
   switch (item.type) {
     case "message":
-      return <div className="whitespace-pre-wrap text-[13px] leading-relaxed">{item.text}</div>;
+      return <div className="py-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{item.text}</div>;
     case "tool":
       return (
-        <div className="flex items-start gap-2 rounded bg-muted/60 px-2 py-1 font-mono text-[11px]">
+        <div className="flex items-start gap-2 rounded-md bg-paper-2 px-2.5 py-1.5 font-mono text-[11px] text-ink-2">
           {item.ok === null ? (
             <LoaderIcon className="mt-0.5 size-3 shrink-0 animate-spin text-muted-foreground" />
           ) : item.ok ? (
-            <CheckIcon className="mt-0.5 size-3 shrink-0 text-success" />
+            <CheckIcon className="mt-0.5 size-3 shrink-0 text-success-ink" />
           ) : (
-            <XIcon className="mt-0.5 size-3 shrink-0 text-destructive" />
+            <XIcon className="mt-0.5 size-3 shrink-0 text-danger-ink" />
           )}
           <WrenchIcon className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
-          <span className="font-semibold">{item.tool}</span>
+          <span className="font-medium text-ink">{item.tool}</span>
           <span className="min-w-0 flex-1 truncate text-muted-foreground" title={item.summary}>
             {item.summary}
           </span>
           {item.result && item.ok === false && (
-            <span className="max-w-[40%] truncate text-destructive" title={item.result}>
+            <span className="max-w-[40%] truncate text-danger-ink" title={item.result}>
               {item.result}
             </span>
           )}
@@ -102,21 +102,21 @@ function LiveRow({ item }: { item: LiveItem }) {
       );
     case "file-edit":
       return (
-        <div className="flex items-center gap-2 px-2 font-mono text-[11px] text-primary">
+        <div className="flex items-center gap-2 px-2.5 font-mono text-[11px] text-signal-ink">
           <FilePenIcon className="size-3" />
           {item.path}
         </div>
       );
     case "warning":
       return (
-        <div className="flex items-start gap-2 rounded border border-warning/40 bg-warning/10 px-2 py-1 text-xs">
-          <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
+        <div className="flex items-start gap-2 rounded-md bg-warning-soft px-2.5 py-1.5 text-xs leading-snug text-warning-ink">
+          <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-warning-ink" />
           {item.text}
         </div>
       );
     case "init":
       return (
-        <div className="flex items-center gap-2 px-2 font-mono text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2 px-2.5 font-mono text-[11px] text-muted-foreground">
           <CpuIcon className="size-3" />
           {item.model} · {item.permissionMode}
         </div>

@@ -5,6 +5,7 @@ import { ConfirmButton } from "@/components/confirm-dialog";
 import { SortableList } from "@/components/sortable-list";
 import { AccountStatusBadge, ProviderLabel } from "@/components/status";
 import { LoginDialog } from "@/components/login-dialog";
+import { PageHeader } from "@/components/page-header";
 import { FullscreenButton, FullscreenEditor } from "@/components/fullscreen-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,8 +18,11 @@ import { getState, setAccounts, useStore } from "@/lib/store";
 
 export function SettingsPage() {
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4 p-6">
-      <h1 className="text-lg font-semibold">Settings</h1>
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 py-8">
+      <PageHeader
+        title="Settings"
+        description="Log in your Claude and Cursor accounts, and set what every task starts with."
+      />
       <AccountsCard />
       <GeneralSettingsCard />
     </div>
@@ -75,7 +79,7 @@ function AccountsCard() {
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {accounts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No accounts yet. Add one below and log in.</p>
+          <p className="text-[13px] text-muted-foreground">No accounts yet. Add one below and log in.</p>
         ) : (
           <SortableList
             items={accounts}
@@ -151,7 +155,7 @@ function AccountRow({
 }) {
   const [checking, setChecking] = useState(false);
   return (
-    <div className="flex items-center gap-2 rounded-md border bg-background px-2 py-1.5">
+    <div className="flex items-center gap-2 rounded-lg border border-rule bg-surface px-2.5 py-2 transition-colors hover:border-rule-strong">
       {handle}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
@@ -202,7 +206,7 @@ function AccountRow({
       <ConfirmButton
         size="icon-sm"
         variant="ghost"
-        className="text-destructive"
+        className="text-muted-foreground hover:bg-danger-soft hover:text-danger-ink"
         aria-label={`Delete ${account.label}`}
         title={`Delete ${account.label}?`}
         description={
@@ -213,7 +217,7 @@ function AccountRow({
               chain.
             </p>
             {account.provider === "cursor-agent" && (
-              <p className="font-medium text-destructive">
+              <p className="font-medium text-danger-ink">
                 Cursor keeps one login per Mac, so this also logs out the Cursor CLI (<code>agent</code>) everywhere on
                 this machine.
               </p>
@@ -251,7 +255,7 @@ function GeneralSettingsCard() {
   if (!draft || !data) {
     return (
       <Card>
-        <CardContent className="text-sm text-muted-foreground">Loading settings…</CardContent>
+        <CardContent className="text-[13px] text-muted-foreground">Loading settings…</CardContent>
       </Card>
     );
   }
@@ -351,7 +355,7 @@ function GeneralSettingsCard() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <fieldset className="flex flex-col gap-2 rounded-md border p-3">
+          <fieldset className="flex flex-col gap-2.5 rounded-lg border border-rule p-3.5">
             <legend className="px-1 text-xs font-semibold">Claude Code</legend>
             <Label>Binary</Label>
             <Input value={claude.binary} onChange={(e) => setClaude({ binary: e.target.value })} className="font-mono text-xs" />
@@ -372,7 +376,7 @@ function GeneralSettingsCard() {
               }))}
             />
           </fieldset>
-          <fieldset className="flex flex-col gap-2 rounded-md border p-3">
+          <fieldset className="flex flex-col gap-2.5 rounded-lg border border-rule p-3.5">
             <legend className="px-1 text-xs font-semibold">Cursor Agent</legend>
             <Label>Binary</Label>
             <Input value={cursor.binary} onChange={(e) => setCursor({ binary: e.target.value })} className="font-mono text-xs" />

@@ -1,10 +1,14 @@
 import type { PromptPreviewResponse, Repo, TaskView } from "@my-ai-slaves/shared";
 import {
-  AlertTriangleIcon,
   ActivityIcon,
+  AlertTriangleIcon,
+  CheckIcon,
+  ClockIcon,
+  CornerDownRightIcon,
   FileDiffIcon,
   HistoryIcon,
-  ListOrderedIcon,
+  InboxIcon,
+  MousePointerClickIcon,
   RotateCcwIcon,
   SendIcon,
   SquareIcon,
@@ -12,13 +16,20 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityTimeline } from "@/components/activity-timeline";
+import {
+  AttachButton,
+  AttachmentList,
+  AttachmentTray,
+  DropZone,
+  useAttachments,
+} from "@/components/attachments";
 import { DiffPanel } from "@/components/diff-panel";
 import { LiveOutput } from "@/components/live-output";
+import { PanelHeader } from "@/components/page-header";
 import { SortableList } from "@/components/sortable-list";
 import { TaskStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -50,19 +61,24 @@ export function QueuePage() {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="flex w-[400px] shrink-0 flex-col border-r">
-        <div className="flex items-center gap-2 border-b px-4 py-2.5">
-          <ListOrderedIcon className="size-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">Queue</h2>
-          <span className="text-xs text-muted-foreground">{tasks.length}</span>
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto p-2">
+      <div className="flex w-[420px] shrink-0 flex-col border-r border-rule">
+        <PanelHeader>
+          <h2 className="title-display text-[15px]">Queue</h2>
+          <span className="num rounded-full bg-paper-2 px-1.5 text-[11px] font-medium text-muted-foreground">
+            {tasks.length}
+          </span>
+        </PanelHeader>
+        <div className="scroll-quiet min-h-0 flex-1 overflow-auto px-3 py-3">
           {!tasksLoaded ? (
-            <p className="p-2 text-sm text-muted-foreground">Connecting…</p>
+            <p className="px-1 text-[13px] text-muted-foreground">Connecting…</p>
           ) : tasks.length === 0 ? (
-            <p className="p-2 text-sm text-muted-foreground">
-              Nothing queued. Write a task below and it will run on the next free account.
-            </p>
+            <div className="flex flex-col items-start gap-2 px-1 pt-2">
+              <InboxIcon className="size-5 text-muted-foreground" />
+              <p className="text-[13px] text-ink-2">Nothing queued.</p>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                Write a task below. It runs on the first free account in the repo&apos;s chain.
+              </p>
+            </div>
           ) : (
             <QueueList tasks={tasks} selectedId={selectedId} onSelect={setSelectedId} />
           )}
@@ -73,18 +89,23 @@ export function QueuePage() {
         {selected ? (
           <TaskDetail key={selected.id} task={selected} />
         ) : lastSelected && selectedId === lastSelected.id ? (
-          <div className="p-6 text-sm text-muted-foreground">
+          <div className="p-8 text-[13px] text-muted-foreground">
             <p>
-              <span className="font-medium text-foreground">{lastSelected.title}</span> has left the queue. Its full record
-              is on the History page.
+              <span className="font-medium text-ink">{lastSelected.title}</span> has left the queue. Its full record is
+              on the{" "}
+              <a href="#/history" className="text-signal-ink underline-offset-4 hover:underline">
+                History
+              </a>{" "}
+              page.
             </p>
-            <Button className="mt-3" size="sm" variant="outline" onClick={() => setSelectedId(null)}>
+            <Button className="mt-4" size="sm" variant="outline" onClick={() => setSelectedId(null)}>
               Close
             </Button>
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-            Select a task to see its live output, diff and history.
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+            <MousePointerClickIcon className="size-5 text-muted-foreground" />
+            <p className="text-[13px] text-muted-foreground">Select a task to see its live output, diff and history.</p>
           </div>
         )}
       </div>
@@ -127,28 +148,50 @@ function QueueList({
           onKeyDown={(e) => {
             if (e.key === "Enter") onSelect(task.id);
           }}
+          aria-current={selectedId === task.id ? "true" : undefined}
           className={cn(
-            "flex cursor-pointer items-start gap-2 rounded-md border bg-card px-2 py-2 hover:bg-accent/50",
-            selectedId === task.id && "border-primary/60 ring-1 ring-primary/30",
+            "group flex cursor-pointer items-start gap-2 rounded-lg border bg-surface px-2.5 py-2.5 transition-[border-color,box-shadow] duration-150",
+            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]",
+            selectedId === task.id
+              ? "border-signal/55 ring-3 ring-signal/10"
+              : "border-rule hover:border-rule-strong",
           )}
         >
           <div className="pt-0.5">{handle}</div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span className="min-w-0 flex-1 truncate font-medium" title={task.message}>
+            <div className="flex items-start gap-2">
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink" title={task.message}>
                 {task.title || task.message}
               </span>
-              <TaskStatusBadge status={task.status} />
+              <TaskStatusBadge status={task.status} className="shrink-0" />
             </div>
-            <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-              <span>{task.repo}</span>
-              {task.currentAccount && <span>@{task.currentAccount}</span>}
-              <span className="ml-auto">{formatTime(task.createdAt)}</span>
+            <div className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+              <span className="truncate">{task.repo}</span>
+              {task.currentAccount && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="truncate">{task.currentAccount}</span>
+                </>
+              )}
+              {task.attachments.length > 0 && (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="shrink-0">
+                    {task.attachments.length} file{task.attachments.length === 1 ? "" : "s"}
+                  </span>
+                </>
+              )}
+              <span className="num ml-auto shrink-0">{formatTime(task.createdAt)}</span>
             </div>
-            {task.waitingNote && <div className="mt-1 text-[11px] text-warning">{task.waitingNote}</div>}
+            {task.waitingNote && (
+              <div className="mt-1.5 flex items-start gap-1 text-[11px] leading-snug text-warning-ink">
+                <ClockIcon className="mt-px size-3 shrink-0" /> {task.waitingNote}
+              </div>
+            )}
             {task.pendingReply && (
-              <div className="mt-1 truncate text-[11px] text-muted-foreground" title={task.pendingReply}>
-                Reply queued: {task.pendingReply}
+              <div className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground" title={task.pendingReply}>
+                <CornerDownRightIcon className="size-3 shrink-0" />
+                <span className="truncate">Reply queued: {task.pendingReply}</span>
               </div>
             )}
           </div>
@@ -196,6 +239,7 @@ function Composer() {
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState(false);
+  const files = useAttachments();
 
   // Fall back to the first repo when the remembered one is gone.
   useEffect(() => {
@@ -205,23 +249,27 @@ function Composer() {
 
   const currentRepo = repos?.find((r) => r.id === repo);
   const chainEmpty = currentRepo && currentRepo.accountChain.length === 0 && account === CHAIN;
+  const canSend = Boolean(repo && message.trim()) && !busy && !files.uploading && !files.failed;
 
   const submit = async () => {
-    if (!repo || !message.trim() || busy) return;
+    if (!repo || !canSend) return;
     setBusy(true);
     const task = await attempt(
-      api.createTask({ repo, message, accountOverride: account === CHAIN ? null : account }),
+      api.createTask({ repo, message, accountOverride: account === CHAIN ? null : account, attachmentIds: files.ids }),
       "Task queued",
     );
     setBusy(false);
-    if (task) setMessage("");
+    if (task) {
+      setMessage("");
+      files.clear();
+    }
   };
 
   if (repos && repos.length === 0) {
     return (
-      <div className="border-t p-3 text-sm text-muted-foreground">
+      <div className="m-3 rounded-lg border border-dashed border-rule-strong p-4 text-[13px] text-muted-foreground">
         Register a repository first on the{" "}
-        <a href="#/repos" className="text-primary hover:underline">
+        <a href="#/repos" className="font-medium text-signal-ink underline-offset-4 hover:underline">
           Repos
         </a>{" "}
         page.
@@ -230,65 +278,84 @@ function Composer() {
   }
 
   return (
-    <div className="flex flex-col gap-2 border-t bg-sidebar p-3">
-      <div className="flex gap-2">
-        <Select
-          aria-label="Repository"
-          value={repo}
-          onValueChange={(v) => {
-            setRepo(v);
-            storageSet(REPO_KEY, v);
-          }}
-          placeholder="Repository"
-          options={(repos ?? []).map((r) => ({ value: r.id, label: r.name }))}
-        />
-        <Select
-          aria-label="Account"
-          value={account}
-          onValueChange={setAccount}
-          options={[
-            { value: CHAIN, label: "Use repo chain" },
-            ...accounts.map((a) => ({ value: a.id, label: `${a.label} (${a.status})` })),
-          ]}
-        />
-      </div>
+    <div className="flex flex-col gap-2 border-t border-rule bg-paper p-3">
+      <DropZone attachments={files}>
+        <div className="rounded-lg border border-rule-strong bg-surface transition-[border-color,box-shadow] duration-150 focus-within:border-signal/60 focus-within:ring-3 focus-within:ring-signal/10">
+          <div className="flex gap-1.5 border-b border-rule px-2 py-1.5">
+            <Select
+              aria-label="Repository"
+              value={repo}
+              onValueChange={(v) => {
+                setRepo(v);
+                storageSet(REPO_KEY, v);
+              }}
+              placeholder="Repository"
+              className="h-7 w-auto min-w-0 flex-1 border-transparent bg-transparent text-xs font-medium hover:bg-paper-2"
+              options={(repos ?? []).map((r) => ({ value: r.id, label: r.name }))}
+            />
+            <Select
+              aria-label="Account"
+              value={account}
+              onValueChange={setAccount}
+              className="h-7 w-auto min-w-0 flex-1 border-transparent bg-transparent text-xs hover:bg-paper-2"
+              options={[
+                { value: CHAIN, label: "Repo's account chain" },
+                ...accounts.map((a) => ({ value: a.id, label: `${a.label} · ${a.status}` })),
+              ]}
+            />
+          </div>
+          <textarea
+            aria-label="Task message"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onPaste={files.onPaste}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+            placeholder="Describe the task. Paste or drop screenshots and files."
+            className="block max-h-72 min-h-24 w-full resize-y bg-transparent px-3 py-2.5 text-[13px] leading-relaxed text-ink placeholder:text-muted-foreground/80 focus:outline-none"
+          />
+          {files.files.length > 0 && (
+            <div className="px-2.5 pb-2">
+              <AttachmentTray attachments={files} />
+            </div>
+          )}
+          <div className="flex items-center gap-1 border-t border-rule px-1.5 py-1.5">
+            <AttachButton attachments={files} />
+            <label className="ml-1 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground select-none">
+              <Switch checked={preview} onCheckedChange={setPreview} />
+              Preview prompt
+            </label>
+            <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">
+              <kbd className="font-mono">⌘↵</kbd>
+            </span>
+            <Button size="sm" variant="signal" className="ml-1.5" disabled={!canSend} onClick={() => void submit()}>
+              <SendIcon /> {files.uploading ? "Uploading…" : "Queue"}
+            </Button>
+          </div>
+        </div>
+      </DropZone>
       {chainEmpty && (
-        <div className="flex items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-xs">
-          <AlertTriangleIcon className="size-3.5 text-warning" />
-          This repo has no account chain.{" "}
-          <a href="#/repos" className="text-primary hover:underline">
-            Set one on Repos
-          </a>{" "}
-          or pick an account.
+        <div className="flex items-start gap-1.5 rounded-md bg-warning-soft px-2.5 py-1.5 text-xs text-warning-ink">
+          <AlertTriangleIcon className="mt-px size-3.5 shrink-0" />
+          <span>
+            This repo has no account chain.{" "}
+            <a href="#/repos" className="font-medium underline underline-offset-2">
+              Set one on Repos
+            </a>{" "}
+            or pick an account.
+          </span>
         </div>
       )}
-      <Textarea
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-        placeholder="Describe the task…  (⌘↵ to queue)"
-        className="min-h-24 resize-y bg-background"
-      />
-      {preview && repo && <PromptPreview repo={repo} message={message} />}
-      <div className="flex items-center gap-2">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Switch checked={preview} onCheckedChange={setPreview} />
-          Preview prompt
-        </label>
-        <Button className="ml-auto" disabled={!repo || !message.trim() || busy} onClick={() => void submit()}>
-          <SendIcon /> Queue
-        </Button>
-      </div>
+      {preview && repo && <PromptPreview repo={repo} message={message} attachmentIds={files.ids} />}
     </div>
   );
 }
 
-function PromptPreview({ repo, message }: { repo: string; message: string }) {
+function PromptPreview({ repo, message, attachmentIds }: { repo: string; message: string; attachmentIds: string[] }) {
   const debounced = useDebounced(message, 300);
   const [result, setResult] = useState<PromptPreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -301,7 +368,7 @@ function PromptPreview({ repo, message }: { repo: string; message: string }) {
       return;
     }
     api
-      .previewPrompt({ repo, message: debounced })
+      .previewPrompt({ repo, message: debounced, attachmentIds })
       .then((r) => {
         if (!cancelled) {
           setResult(r);
@@ -314,22 +381,30 @@ function PromptPreview({ repo, message }: { repo: string; message: string }) {
     return () => {
       cancelled = true;
     };
-  }, [repo, debounced]);
+  }, [repo, debounced, attachmentIds.join(",")]);
 
   return (
-    <div className="rounded-md border bg-background">
-      <div className="flex items-center gap-1.5 border-b px-2 py-1">
-        <span className="text-[11px] font-medium text-muted-foreground">Exactly what will be sent</span>
-        <span className="ml-auto flex gap-1">
-          {result?.layers.map((l) => (
-            <Badge key={l.name} variant={l.included ? "default" : "outline"} className={cn(!l.included && "line-through")}>
-              {l.name}
-            </Badge>
-          ))}
+    <div className="overflow-hidden rounded-lg border border-rule bg-surface">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-rule px-2.5 py-1.5">
+        <span className="label-mono">Exactly what will be sent</span>
+        <span className="ml-auto flex flex-wrap gap-1">
+          {result?.layers
+            .filter((l) => l.name !== "attachments" || l.included)
+            .map((l) => (
+              <Badge
+                key={l.name}
+                variant={l.included ? "default" : "outline"}
+                className={cn(!l.included && "line-through decoration-muted-foreground/60")}
+                title={l.included ? "Included" : "Blank, skipped"}
+              >
+                {l.included && <CheckIcon className="size-3" />}
+                {l.name}
+              </Badge>
+            ))}
         </span>
       </div>
-      <pre className="max-h-48 overflow-auto p-2 font-mono text-[11px] whitespace-pre-wrap">
-        {error ? <span className="text-destructive">{error}</span> : result ? result.prompt : "Type a message to preview."}
+      <pre className="scroll-quiet max-h-56 overflow-auto bg-paper-2/50 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-2">
+        {error ? <span className="text-danger-ink">{error}</span> : result ? result.prompt : "Type a message to preview."}
       </pre>
     </div>
   );
@@ -350,24 +425,41 @@ function TaskDetail({ task }: { task: TaskView }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold" title={task.title}>
+      <div className="border-b border-rule px-6 pt-4 pb-0">
+        <div className="flex items-start gap-3">
+          <h2 className="title-display min-w-0 flex-1 truncate text-lg leading-snug" title={task.title}>
             {task.title}
           </h2>
-          <TaskStatusBadge status={task.status} />
+          <TaskStatusBadge status={task.status} className="mt-1 shrink-0" />
         </div>
-        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] text-muted-foreground">
-          <span>{task.id}</span>
-          <span>repo: {task.repo}</span>
-          {task.currentAccount && <span>account: {task.currentAccount}</span>}
-          {task.accountOverride && <span>override: {task.accountOverride}</span>}
-          {task.worktree && <span>branch: {task.worktree.branch}</span>}
-        </div>
-        {task.waitingNote && <div className="mt-1 text-xs text-warning">{task.waitingNote}</div>}
+        <dl className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground">
+          <Meta label="repo" value={task.repo} />
+          {task.currentAccount && <Meta label="account" value={task.currentAccount} />}
+          {task.accountOverride && <Meta label="override" value={task.accountOverride} />}
+          {task.worktree && <Meta label="branch" value={task.worktree.branch} />}
+          <Meta label="id" value={task.id} />
+        </dl>
+        {task.waitingNote && (
+          <div className="mt-2 flex items-start gap-1.5 text-xs text-warning-ink">
+            <ClockIcon className="mt-px size-3.5 shrink-0" /> {task.waitingNote}
+          </div>
+        )}
+        <Tabs value={tab} onValueChange={setTab} className="mt-3">
+          <TabsList className="border-b-0">
+            <TabsTrigger value="live">
+              <ActivityIcon /> Live
+            </TabsTrigger>
+            <TabsTrigger value="diff" disabled={!reviewable}>
+              <FileDiffIcon /> Diff
+            </TabsTrigger>
+            <TabsTrigger value="history">
+              <HistoryIcon /> History
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </div>
-      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col px-4 py-3">
-        <TabsList className="self-start">
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col px-6 py-4">
+        <TabsList className="hidden">
           <TabsTrigger value="live">
             <ActivityIcon /> Live
           </TabsTrigger>
@@ -378,21 +470,31 @@ function TaskDetail({ task }: { task: TaskView }) {
             <HistoryIcon /> History
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="live" className="mt-3 flex min-h-0 flex-col">
+        <TabsContent value="live" className="flex min-h-0 flex-col">
           <LiveOutput taskId={task.id} />
         </TabsContent>
-        <TabsContent value="diff" className="mt-3 flex min-h-0 flex-col">
+        <TabsContent value="diff" className="flex min-h-0 flex-col">
           {reviewable && <DiffPanel task={task} onDone={() => setTab("history")} />}
         </TabsContent>
-        <TabsContent value="history" className="mt-3 min-h-0 overflow-auto">
+        <TabsContent value="history" className="scroll-quiet min-h-0 overflow-auto">
           <TaskHistory taskId={task.id} version={task.updatedAt} />
         </TabsContent>
       </Tabs>
-      <details className="mx-4 mb-2 text-xs">
-        <summary className="cursor-pointer text-muted-foreground">Task message</summary>
-        <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 font-mono text-[11px] whitespace-pre-wrap">
+      <details className="group mx-6 mb-3 rounded-lg border border-rule bg-surface text-xs open:pb-3">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-muted-foreground transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
+          <span className="label-mono">Task message</span>
+          {task.attachments.length > 0 && (
+            <span className="text-[11px]">
+              · {task.attachments.length} file{task.attachments.length === 1 ? "" : "s"}
+            </span>
+          )}
+          <span className="ml-auto text-[11px] group-open:hidden">Show</span>
+          <span className="ml-auto hidden text-[11px] group-open:inline">Hide</span>
+        </summary>
+        <pre className="scroll-quiet mx-3 max-h-40 overflow-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-2">
           {task.message}
         </pre>
+        <AttachmentList files={task.attachments} className="mx-3 mt-2" />
       </details>
       {task.status === "needs-review" && <ReplyBox taskId={task.id} />}
     </div>
@@ -408,30 +510,62 @@ export function TaskHistory({ taskId, version }: { taskId: string; version?: str
 function ReplyBox({ taskId }: { taskId: string }) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const files = useAttachments();
+  const canSend = Boolean(message.trim()) && !busy && !files.uploading && !files.failed;
   const send = async () => {
-    if (!message.trim() || busy) return;
+    if (!canSend) return;
     setBusy(true);
-    const ok = await attempt(api.replyTask(taskId, message), "Reply queued");
+    const ok = await attempt(api.replyTask(taskId, message, files.ids), "Reply queued");
     setBusy(false);
-    if (ok !== undefined) setMessage("");
+    if (ok !== undefined) {
+      setMessage("");
+      files.clear();
+    }
   };
   return (
-    <div className="flex gap-2 border-t bg-sidebar p-3">
-      <Textarea
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            void send();
-          }
-        }}
-        placeholder="Reply to continue this session (e.g. answer its plan)…  ⌘↵"
-        className="min-h-14 bg-background"
-      />
-      <Button className="self-end" disabled={!message.trim() || busy} onClick={() => void send()}>
-        <SendIcon /> Reply
-      </Button>
+    <div className="border-t border-rule bg-paper px-6 py-3">
+      <DropZone attachments={files}>
+        <div className="rounded-lg border border-rule-strong bg-surface transition-[border-color,box-shadow] duration-150 focus-within:border-signal/60 focus-within:ring-3 focus-within:ring-signal/10">
+          <textarea
+            aria-label="Reply"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onPaste={files.onPaste}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            placeholder="Reply to continue this session, e.g. answer its plan or ask for changes."
+            className="block max-h-56 min-h-16 w-full resize-y bg-transparent px-3 py-2.5 text-[13px] leading-relaxed text-ink placeholder:text-muted-foreground/80 focus:outline-none"
+          />
+          {files.files.length > 0 && (
+            <div className="px-2.5 pb-2">
+              <AttachmentTray attachments={files} />
+            </div>
+          )}
+          <div className="flex items-center gap-2 border-t border-rule px-1.5 py-1.5">
+            <AttachButton attachments={files} />
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground" title="The session already has the base prompts from its first run.">
+              Continues the same session. Base prompts aren&apos;t re-sent.
+            </span>
+            <Button size="sm" variant="signal" className="ml-auto" disabled={!canSend} onClick={() => void send()}>
+              <SendIcon /> {files.uploading ? "Uploading…" : "Reply"}
+            </Button>
+          </div>
+        </div>
+      </DropZone>
     </div>
   );
 }
+
+function Meta({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-w-0 gap-1">
+      <dt className="text-muted-foreground/70">{label}</dt>
+      <dd className="truncate text-ink-2">{value}</dd>
+    </div>
+  );
+}
+

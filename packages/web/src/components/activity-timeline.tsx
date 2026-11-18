@@ -6,7 +6,7 @@ import { cn, formatTime } from "@/lib/utils";
 
 const eventVariant: Partial<Record<ActivityEntry["event"], BadgeVariant>> = {
   queued: "secondary",
-  started: "default",
+  started: "signal",
   fallback: "warning",
   "limit-hit": "warning",
   waiting: "warning",
@@ -21,9 +21,9 @@ const eventVariant: Partial<Record<ActivityEntry["event"], BadgeVariant>> = {
 };
 
 export function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
-  if (entries.length === 0) return <p className="text-sm text-muted-foreground">No activity recorded yet.</p>;
+  if (entries.length === 0) return <p className="text-[13px] text-muted-foreground">No activity recorded yet.</p>;
   return (
-    <ol className="flex flex-col gap-1">
+    <ol className="flex flex-col divide-y divide-rule overflow-hidden rounded-lg border border-rule bg-surface">
       {entries.map((entry, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: append-only log
         <TimelineRow key={i} entry={entry} />
@@ -39,33 +39,33 @@ function TimelineRow({ entry }: { entry: ActivityEntry }) {
   const expandable = prompt !== null || (extra !== null && Object.keys(extra).length > 0);
 
   return (
-    <li className="rounded-md border bg-card px-2.5 py-1.5">
+    <li className="px-3 py-2">
       <button
         type="button"
         disabled={!expandable}
         onClick={() => setOpen((o) => !o)}
         className={cn("flex w-full items-start gap-2 text-left", expandable && "cursor-pointer")}
       >
-        <span className="mt-0.5 w-24 shrink-0 font-mono text-[11px] text-muted-foreground">{formatTime(entry.at)}</span>
+        <span className="num mt-0.5 w-24 shrink-0 font-mono text-[11px] text-muted-foreground">{formatTime(entry.at)}</span>
         <Badge variant={eventVariant[entry.event] ?? "outline"} className="mt-px shrink-0">
           {entry.event}
         </Badge>
-        <span className="min-w-0 flex-1 break-words text-[13px]">
+        <span className="min-w-0 flex-1 break-words text-[13px] text-ink">
           {entry.detail}
           {entry.account && <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">@{entry.account}</span>}
         </span>
         {expandable && (
-          <ChevronRightIcon className={cn("mt-0.5 size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
+          <ChevronRightIcon className={cn("mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform duration-150", open && "rotate-90")} />
         )}
       </button>
       {open && prompt !== null && (
         <div className="mt-2">
-          <div className="mb-1 text-[11px] font-medium text-muted-foreground">Prompt sent to the CLI</div>
-          <pre className="max-h-80 overflow-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap">{prompt}</pre>
+          <div className="label-mono mb-1.5">Prompt sent to the CLI</div>
+          <pre className="scroll-quiet max-h-80 overflow-auto rounded-md bg-paper-2 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-2">{prompt}</pre>
         </div>
       )}
       {open && extra && (
-        <pre className="mt-2 max-h-80 overflow-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap">
+        <pre className="scroll-quiet mt-2 max-h-80 overflow-auto rounded-md bg-paper-2 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-2">
           {JSON.stringify(extra, null, 2)}
         </pre>
       )}

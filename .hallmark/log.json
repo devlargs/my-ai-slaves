@@ -1,0 +1,12 @@
+[
+  {
+    "date": "2026-11-18",
+    "scope": "app",
+    "genre": "modern-minimal",
+    "macrostructure": "Workbench (two-pane queue/history, single-column repos/settings)",
+    "theme": "Coral",
+    "theme_axes": "light+dark / geometric-sans (Geist) / warm",
+    "enrichment": "none (product UI)",
+    "brief": "My AI Slaves: local queue for Claude/Cursor CLI tasks; visual redesign, logic and layout unchanged, plus paste/upload attachments"
+  }
+]

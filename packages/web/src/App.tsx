@@ -77,7 +77,7 @@ function Sidebar({ route }: { route: Route }) {
   const review = tasks.filter((t) => t.status === "needs-review").length;
 
   return (
-    <nav aria-label="Main" className="flex w-56 shrink-0 flex-col border-r border-rule bg-sidebar">
+    <nav aria-label="Main" className="flex w-56 shrink-0 flex-col border-r border-rule bg-paper-2">
       <div className="flex flex-col gap-1 px-4 pt-4 pb-5">
         <div className="flex items-center gap-2">
           <Mark />
@@ -86,7 +86,7 @@ function Sidebar({ route }: { route: Route }) {
         <div className="flex items-center gap-1.5 pl-7 text-[11px] text-muted-foreground" role="status">
           {connected ? (
             <>
-              <LiveDot className="text-success" /> Live
+              <LiveDot className="text-success-ink" /> Live
             </>
           ) : (
             <>

@@ -59,7 +59,7 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-1.5">
         {data && (
           <span className="mr-auto flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
@@ -96,6 +96,7 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
         </Button>
         <Button
           size="sm"
+          variant="signal"
           disabled={busy}
           onClick={() =>
             run(async () => {
@@ -112,7 +113,7 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
         <ConfirmButton
           size="sm"
           variant="ghost"
-          className="text-destructive"
+          className="text-muted-foreground hover:bg-danger-soft hover:text-danger-ink"
           title="Discard this task?"
           description={
             <>
@@ -131,13 +132,13 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
       </div>
 
       {push && (
-        <div className="rounded-md border bg-card p-2 text-xs">
+        <div className="rounded-lg border border-rule bg-surface px-3 py-2.5 text-xs">
           {push.url && (
             <a
               href={push.url}
               target="_blank"
               rel="noreferrer"
-              className="mb-1 flex items-center gap-1 font-medium text-primary hover:underline"
+              className="mb-1 flex items-center gap-1 font-medium text-signal-ink hover:underline"
             >
               <ExternalLinkIcon className="size-3.5" /> {push.url}
             </a>
@@ -151,21 +152,21 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
       )}
 
       {loading && !data ? (
-        <p className="text-sm text-muted-foreground">Loading diff…</p>
+        <p className="text-[13px] text-muted-foreground">Loading diff…</p>
       ) : files === null ? (
-        <pre className="min-h-0 flex-1 overflow-auto rounded-md border bg-card p-2 font-mono text-xs">{data?.patch}</pre>
+        <pre className="scroll-quiet min-h-0 flex-1 overflow-auto rounded-lg border border-rule bg-surface p-3 font-mono text-xs">{data?.patch}</pre>
       ) : files.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No changes in the worktree yet.</p>
+        <p className="text-[13px] text-muted-foreground">No changes in the worktree yet.</p>
       ) : (
-        <div className="flex min-h-0 flex-1 gap-2">
-          <ul className="w-56 shrink-0 overflow-auto rounded-md border bg-card p-1 text-xs">
+        <div className="flex min-h-0 flex-1 gap-3">
+          <ul className="scroll-quiet w-56 shrink-0 overflow-auto rounded-lg border border-rule bg-surface p-1.5 text-xs">
             <li>
               <button
                 type="button"
                 onClick={() => setSelected(null)}
                 className={cn(
-                  "w-full rounded px-2 py-1 text-left cursor-pointer hover:bg-accent",
-                  !selected && "bg-accent font-medium",
+                  "w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-ink-2 transition-colors hover:bg-paper-2 hover:text-ink",
+                  !selected && "bg-paper-2 font-medium text-ink",
                 )}
               >
                 All files ({files.length})
@@ -181,23 +182,23 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
                     onClick={() => setSelected(path)}
                     title={path}
                     className={cn(
-                      "flex w-full items-center gap-1 rounded px-2 py-1 text-left cursor-pointer hover:bg-accent",
-                      selected === path && "bg-accent font-medium",
+                      "flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-ink-2 transition-colors hover:bg-paper-2 hover:text-ink",
+                      selected === path && "bg-paper-2 font-medium text-ink",
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate font-mono">{path.split("/").pop()}</span>
-                    <span className="text-success">+{add}</span>
-                    <span className="text-destructive">−{del}</span>
+                    <span className="num text-success-ink">+{add}</span>
+                    <span className="num text-danger-ink">−{del}</span>
                   </button>
                 </li>
               );
             })}
           </ul>
-          <div className="min-h-0 min-w-0 flex-1 overflow-auto rounded-md border bg-card">
+          <div className="scroll-quiet min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-rule bg-surface">
             {visible.map((file) => (
-              <div key={`${file.oldPath}->${file.newPath}`} className="border-b last:border-b-0">
-                <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-muted px-2 py-1 font-mono text-[11px]">
-                  <span className="font-semibold uppercase text-muted-foreground">{file.type}</span>
+              <div key={`${file.oldPath}->${file.newPath}`} className="border-b border-rule last:border-b-0">
+                <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-rule bg-paper-2 px-3 py-1.5 font-mono text-[11px] text-ink-2">
+                  <span className="label-mono">{file.type}</span>
                   {file.type === "rename" ? `${file.oldPath} → ${file.newPath}` : filePath(file)}
                 </div>
                 {file.isBinary ? (
