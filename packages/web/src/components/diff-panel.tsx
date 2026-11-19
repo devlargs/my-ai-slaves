@@ -1,4 +1,4 @@
-import type { DiffResponse, PushResponse, TaskView } from "@my-ai-slaves/shared";
+import type { DiffResponse, TaskView } from "@my-ai-slaves/shared";
 import {
   CopyIcon,
   ExternalLinkIcon,
@@ -20,23 +20,6 @@ function filePath(file: FileData): string {
   return file.type === "delete" ? file.oldPath : file.newPath;
 }
 
-/** A changed file and the repo it's in (cross-repo tasks have several). */
-interface RepoFile {
-  repo: string;
-  file: FileData;
-  /** Unique across repos: "repo/path" when the task has several repos, else the path. */
-  key: string;
-}
-
-function parsePatch(patch: string): FileData[] | null {
-  if (!patch.trim()) return [];
-  try {
-    return parseDiff(patch, { nearbySequences: "zip" });
-  } catch {
-    return null;
-  }
-}
-
 function fileStats(file: FileData) {
   let add = 0;
   let del = 0;
@@ -51,26 +34,20 @@ function fileStats(file: FileData) {
 
 export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void }) {
   const { data, loading, reload } = useApi<DiffResponse>(() => api.taskDiff(task.id), [task.id, task.updatedAt]);
-  const multi = (data?.others.length ?? 0) > 0;
-  // Every repo's changes in one list; with several repos, paths are prefixed with the repo.
-  const files = useMemo((): RepoFile[] | null => {
-    if (!data) return [];
-    const parts = [{ repo: task.repo, patch: data.patch }, ...data.others];
-    const all: RepoFile[] = [];
-    for (const part of parts) {
-      const parsed = parsePatch(part.patch);
-      if (parsed === null) return null;
-      for (const file of parsed) all.push({ repo: part.repo, file, key: multi ? `${part.repo}/${filePath(file)}` : filePath(file) });
+  const files = useMemo(() => {
+    if (!data?.patch.trim()) return [];
+    try {
+      return parseDiff(data.patch, { nearbySequences: "zip" });
+    } catch {
+      return null;
     }
-    return all;
-  }, [data, task.repo, multi]);
-  const rawPatch = data ? [data.patch, ...data.others.map((o) => `# ${o.repo}\n${o.patch}`)].join("\n") : "";
+  }, [data?.patch]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [push, setPush] = useState<PushResponse | null>(null);
+  const [push, setPush] = useState<{ url: string | null; output: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const branchName = data?.branch ?? task.branch?.name ?? null;
-  const visible = files?.filter((f) => !selected || f.key === selected) ?? [];
+  const visible = files?.filter((f) => !selected || filePath(f) === selected) ?? [];
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -88,11 +65,6 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
           <span className="mr-auto flex items-center gap-1 font-mono text-[11px] text-muted-foreground">
             <GitBranchIcon className="size-3" />
             {data.branch} ← {data.baseBranch}@{data.baseCommit.slice(0, 7)}
-            {multi && (
-              <span className="ml-1 font-sans" title={[task.repo, ...data.others.map((o) => o.repo)].join(", ")}>
-                in {data.others.length + 1} repos
-              </span>
-            )}
           </span>
         )}
         <Button size="sm" variant="ghost" onClick={() => void reload()} disabled={loading}>
@@ -145,8 +117,8 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
           title="Discard this task?"
           description={
             <>
-              Deletes branch <code className="font-mono">{task.branch?.name}</code> from{" "}
-              {multi ? `all ${(data?.others.length ?? 0) + 1} repos` : "the repo"}. This can&apos;t be undone.
+              Deletes branch <code className="font-mono">{task.branch?.name}</code> from the repo. This
+              can&apos;t be undone.
             </>
           }
           confirmLabel="Discard"
@@ -171,18 +143,6 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
               <ExternalLinkIcon className="size-3.5" /> {push.url}
             </a>
           )}
-          {push.others.map((o) => (
-            <div key={o.repo} className="mb-1 flex items-center gap-1 text-ink-2">
-              <span className="font-mono text-[11px] text-muted-foreground">{o.repo}:</span>
-              {o.url ? (
-                <a href={o.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 font-medium text-signal-ink hover:underline">
-                  <ExternalLinkIcon className="size-3.5" /> {o.url}
-                </a>
-              ) : (
-                <span>pushed {o.branch}</span>
-              )}
-            </div>
-          ))}
           {push.output && (
             <pre className="max-h-32 overflow-auto font-mono text-[11px] whitespace-pre-wrap text-muted-foreground">
               {push.output}
@@ -194,7 +154,7 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
       {loading && !data ? (
         <p className="text-[13px] text-muted-foreground">Loading diff…</p>
       ) : files === null ? (
-        <pre className="scroll-quiet min-h-0 flex-1 overflow-auto rounded-lg border border-rule bg-surface p-3 font-mono text-xs">{rawPatch}</pre>
+        <pre className="scroll-quiet min-h-0 flex-1 overflow-auto rounded-lg border border-rule bg-surface p-3 font-mono text-xs">{data?.patch}</pre>
       ) : files.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">No changes on this branch yet.</p>
       ) : (
@@ -212,23 +172,21 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
                 All files ({files.length})
               </button>
             </li>
-            {files.map(({ repo, file: f, key }, i) => {
+            {files.map((f) => {
+              const path = filePath(f);
               const { add, del } = fileStats(f);
               return (
-                <li key={`${repo}:${f.oldPath}->${f.newPath}`}>
-                  {multi && repo !== files[i - 1]?.repo && (
-                    <div className="label-mono truncate px-2 pt-2 pb-1 text-[10px] text-muted-foreground">{repo}</div>
-                  )}
+                <li key={`${f.oldPath}->${f.newPath}`}>
                   <button
                     type="button"
-                    onClick={() => setSelected(key)}
-                    title={key}
+                    onClick={() => setSelected(path)}
+                    title={path}
                     className={cn(
                       "flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-ink-2 transition-colors hover:bg-paper-2 hover:text-ink",
-                      selected === key && "bg-paper-2 font-medium text-ink",
+                      selected === path && "bg-paper-2 font-medium text-ink",
                     )}
                   >
-                    <span className="min-w-0 flex-1 truncate font-mono">{filePath(f).split("/").pop()}</span>
+                    <span className="min-w-0 flex-1 truncate font-mono">{path.split("/").pop()}</span>
                     <span className="num text-success-ink">+{add}</span>
                     <span className="num text-danger-ink">−{del}</span>
                   </button>
@@ -237,11 +195,10 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
             })}
           </ul>
           <div className="scroll-quiet min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-rule bg-surface">
-            {visible.map(({ repo, file }) => (
-              <div key={`${repo}:${file.oldPath}->${file.newPath}`} className="border-b border-rule last:border-b-0">
+            {visible.map((file) => (
+              <div key={`${file.oldPath}->${file.newPath}`} className="border-b border-rule last:border-b-0">
                 <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-rule bg-paper-2 px-3 py-1.5 font-mono text-[11px] text-ink-2">
                   <span className="label-mono">{file.type}</span>
-                  {multi && <span className="text-muted-foreground">{repo}/</span>}
                   {file.type === "rename" ? `${file.oldPath} → ${file.newPath}` : filePath(file)}
                 </div>
                 {file.isBinary ? (

@@ -253,8 +253,8 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     expect(calls.some((c) => c.prompt.includes("FRONTEND"))).toBe(false);
     const started = (await stores.activity.forTask(picked.id)).find((e) => e.event === "started");
     expect(started?.data?.repoPrompts).toEqual([
-      { id: "repo-rules", name: "Repo rules" },
-      { id: "backend", name: "Backend" },
+      { repo: repo.id, id: "repo-rules", name: "Repo rules" },
+      { repo: repo.id, id: "backend", name: "Backend" },
     ]);
     await expect(queue.create({ repo: repo.id, message: "x", repoPromptIds: [fe.id, "nope"] })).rejects.toThrow("Unknown repo prompt");
   });
@@ -461,69 +461,71 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     await queue.discard(pending.id);
   });
 
-  it("cross-repo tasks open the other repos too, each on its own ai/ branch", async () => {
+  it("cross-repo tasks open the other repos as they are and send their ticked prompts", async () => {
     const { dir, queue, repos, repo, received, stores } = await setup();
     const other = await repos.register(await makeRepo(dir, "other-repo"));
+    const otherPrompts = await repos.prompts(other.id);
+    await otherPrompts.create("Other rules", "OTHER RULES: branch off develop yourself", { default: true });
+    await otherPrompts.create("Unused", "NOT SENT");
+    // Your checkout there: on your own branch, with uncommitted edits. The app must not touch any of it.
+    sh(other.path, "checkout", "-q", "-b", "feature/mine");
+    await writeFile(join(other.path, "README.md"), "my edits\n");
     await expect(queue.create({ repo: repo.id, message: "x", extraRepos: ["nope"] })).rejects.toThrow('No repo "nope"');
 
     const task = await queue.create({ repo: repo.id, message: "TOUCH-OTHERS check both", extraRepos: [other.id, repo.id] });
-    expect(task.extraRepos).toEqual([{ repo: other.id, branch: null }]);
-    const done = await waitFor(taskWith(queue, task.id, "needs-review"));
+    expect(task.extraRepos).toEqual([{ repo: other.id, promptIds: ["other-rules"] }]);
+    await waitFor(taskWith(queue, task.id, "needs-review"));
 
-    // The CLI runs in the main repo, gets the other one as an extra directory and is told where it is.
+    // The CLI runs in the main repo, gets the other one as an extra directory, its prompts, and where it is.
     const [call] = await received();
     expect(call?.cwd).toBe(repo.path);
     expect(call?.args.join(" ")).toContain(`--add-dir ${other.path}`);
-    expect(call?.prompt).toBe(`${FULL("TOUCH-OTHERS check both")}\n\nOther repositories:\n- other-repo: ${other.path}`);
+    expect(call?.prompt).toBe(
+      `GLOBAL RULES\n\nREPO RULES\n\nOTHER RULES: branch off develop yourself\n\nTOUCH-OTHERS check both\n\nOther repositories:\n- other-repo: ${other.path}`,
+    );
 
-    // Its changes there are committed on the same branch name; both checkouts are back on main.
-    const otherBranch = done.extraRepos[0]?.branch;
-    expect(otherBranch).toMatchObject({ name: done.branch!.name, base: "main", returnTo: "main" });
-    expect(sh(other.path, "show", `${otherBranch!.name}:other-work_1-claude.txt`)).toBe("changed\n");
-    expect([head(repo.path), head(other.path)]).toEqual(["main", "main"]);
-    expect(sh(other.path, "status", "--porcelain")).toBe("");
+    // Nothing was created, switched or committed there: what the agent left is just there, uncommitted.
+    expect(head(other.path)).toBe("feature/mine");
+    expect(sh(other.path, "branch", "--list", "ai/*").trim()).toBe("");
+    expect(sh(other.path, "log", "--format=%s").trim()).toBe("init");
+    expect(sh(other.path, "status", "--porcelain").trimEnd().split("\n").sort()).toEqual([" M README.md", "?? other-work_1-claude.txt"]);
+    // The main repo works as always.
+    expect(head(repo.path)).toBe("main");
+    const started = (await stores.activity.forTask(task.id)).find((e) => e.event === "started");
+    expect(started?.data?.repoPrompts).toEqual([
+      { repo: repo.id, id: "repo-rules", name: "Repo rules" },
+      { repo: other.id, id: "other-rules", name: "Other rules" },
+    ]);
 
-    const diff = await queue.diff(task.id);
-    expect(diff.others).toHaveLength(1);
-    expect(diff.others[0]).toMatchObject({ repo: other.id, branch: otherBranch!.name, repoPath: other.path });
-    expect(diff.others[0]?.patch).toContain("other-work_1-claude.txt");
-
-    // While it runs, both repos are taken.
-    const slow = await queue.create({ repo: repo.id, message: "SLOW look around", extraRepos: [other.id] });
-    await waitFor(taskWith(queue, slow.id, "running"));
-    const waiting = await queue.create({ repo: other.id, message: "other only" });
-    await waitFor(() => queue.list().then((ts) => ts.find((t) => t.id === waiting.id && t.waitingNote?.includes("other task on this repo"))));
-    await queue.discard(slow.id);
-    await waitFor(taskWith(queue, waiting.id, "needs-review"));
-    expect(sh(other.path, "branch", "--list", slow.id.replace(/^/, "ai/")).trim()).toBe("");
-
-    // Mark finished: a branch with commits stays, an untouched one is deleted.
-    const readOnly = await queue.create({ repo: repo.id, message: "just read", extraRepos: [other.id] });
-    const readDone = await waitFor(taskWith(queue, readOnly.id, "needs-review"));
-    await queue.markFinished(readOnly.id);
-    expect(sh(other.path, "branch", "--list", readDone.extraRepos[0]!.branch!.name).trim()).toBe("");
-    expect((await stores.activity.forTask(readOnly.id)).at(-1)?.detail).toContain("other-repo: no changes, branch deleted");
-
-    await queue.keep(task.id);
-    expect(sh(other.path, "branch", "--list", otherBranch!.name).trim()).toBe(otherBranch!.name);
-
-    // A repo in a task's list can't be removed while the task is queued.
-    const held = await queue.create({ repo: repo.id, message: "SLOW hold", extraRepos: [other.id] });
-    await queue.discard(waiting.id);
-    await expect(repos.remove(other.id)).rejects.toThrow("still has 1 task");
-    await queue.discard(held.id);
+    await queue.markFinished(task.id);
+    expect(head(other.path)).toBe("feature/mine");
   });
 
-  it("a cross-repo task waits while one of its other repos has uncommitted changes", async () => {
-    const { dir, queue, repos, repo } = await setup();
+  it("ticks other repos' prompts per repo, and keeps a repo in one running task at a time", async () => {
+    const { dir, queue, repos, repo, received } = await setup();
     const other = await repos.register(await makeRepo(dir, "other-repo"));
-    await writeFile(join(other.path, "README.md"), "edited\n");
-    const task = await queue.create({ repo: repo.id, message: "both", extraRepos: [other.id] });
-    await waitFor(() => queue.list().then((ts) => ts.find((t) => t.id === task.id && t.waitingNote?.includes("other-repo has uncommitted changes"))));
-    expect(head(repo.path)).toBe("main");
-    sh(other.path, "checkout", "--", "README.md");
-    await queue.tick();
-    await waitFor(taskWith(queue, task.id, "needs-review"));
+    const otherPrompts = await repos.prompts(other.id);
+    await otherPrompts.create("Other rules", "OTHER RULES", { default: true });
+    await otherPrompts.create("Deploy notes", "DEPLOY NOTES");
+    await expect(
+      queue.create({ repo: repo.id, message: "x", extraRepos: [other.id], extraRepoPromptIds: { [other.id]: ["nope"] } }),
+    ).rejects.toThrow("Unknown repo prompt(s): nope");
+
+    const slow = await queue.create({
+      repo: repo.id,
+      message: "SLOW look around",
+      extraRepos: [other.id],
+      extraRepoPromptIds: { [other.id]: ["deploy-notes"] },
+    });
+    await waitFor(taskWith(queue, slow.id, "running"));
+    const [call] = await waitFor(async () => ((await received()).length ? received() : null));
+    expect(call?.prompt).toContain("REPO RULES\n\nDEPLOY NOTES\n\nSLOW look around");
+    const waiting = await queue.create({ repo: other.id, message: "other only" });
+    await waitFor(() => queue.list().then((ts) => ts.find((t) => t.id === waiting.id && t.waitingNote?.includes("other task on this repo"))));
+    // A repo in a task's list can't be removed while the task is queued.
+    await expect(repos.remove(other.id)).rejects.toThrow("still has 2 task");
+    await queue.discard(slow.id);
+    await waitFor(taskWith(queue, waiting.id, "needs-review"));
   });
 
   it("moves an old worktree task onto its branch in the repo", async () => {

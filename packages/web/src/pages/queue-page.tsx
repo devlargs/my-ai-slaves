@@ -36,7 +36,7 @@ import {
   repoSection,
   useBoundPrompts,
   usePromptLibrary,
-  useRepoPrompts,
+  useRepoPromptSets,
 } from "@/components/prompt-picker";
 import { PanelHeader } from "@/components/page-header";
 import { RepoPicker, type RepoSelection } from "@/components/repo-picker";
@@ -55,6 +55,9 @@ import { cn, formatTime, storageGet, storageSet } from "@/lib/utils";
 const CHAIN = "__chain__";
 const REPO_KEY = "slaves.lastRepo";
 const EXTRA_REPOS_KEY = "slaves.lastExtraRepos";
+
+const promptCount = (task: TaskView) =>
+  task.promptIds.length + (task.repoPromptIds?.length ?? 0) + task.extraRepos.reduce((n, x) => n + x.promptIds.length, 0);
 
 function storedExtras(): string[] {
   try {
@@ -200,12 +203,12 @@ function QueueList({
                   <span className="truncate">{task.currentAccount}</span>
                 </>
               )}
-              {task.promptIds.length + (task.repoPromptIds?.length ?? 0) > 0 && (
+              {promptCount(task) > 0 && (
                 <>
                   <span aria-hidden>·</span>
                   <span className="shrink-0" title={[...(task.repoPromptIds ?? []), ...task.promptIds].join(", ")}>
-                    {task.promptIds.length + (task.repoPromptIds?.length ?? 0)} prompt
-                    {task.promptIds.length + (task.repoPromptIds?.length ?? 0) === 1 ? "" : "s"}
+                    {promptCount(task)} prompt
+                    {promptCount(task) === 1 ? "" : "s"}
                   </span>
                 </>
               )}
@@ -318,14 +321,16 @@ function Composer() {
   const files = useAttachments();
   const library = usePromptLibrary();
   const bound = useBoundPrompts();
-  const repoPrompts = useRepoPrompts(repo);
-  const repoBound = useBoundPrompts();
-  const sections = [repoSection(repo, repoPrompts, repoBound), librarySection(library, bound)];
-  const tickDefaults = () => repoBound.setIds(repoPrompts.prompts.filter((p) => p.default).map((p) => p.id));
-
-  // Each repo's default prompts come pre-ticked when you switch to it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only when another repo's list arrives
-  useEffect(tickDefaults, [repoPrompts.loadedFor]);
+  // Each ticked repo's prompts (main first); a repo's defaults come pre-ticked when it's added.
+  const taskRepos = repo ? [repo, ...extras] : [];
+  const repoSets = useRepoPromptSets(taskRepos);
+  const sections = [...taskRepos.map((r) => repoSection(r, repoSets.source(r), repoSets.bound(r))), librarySection(library, bound)];
+  const extraRepoPromptIds = Object.fromEntries(
+    extras.flatMap((r) => {
+      const ids = repoSets.tickedFor(r);
+      return ids ? [[r, ids]] : [];
+    }),
+  );
 
   // Fall back to the first repo when the remembered one is gone; drop other repos that can't go with it.
   useEffect(() => {
@@ -354,8 +359,9 @@ function Composer() {
         accountOverride: account === CHAIN ? null : account,
         attachmentIds: files.ids,
         promptIds: bound.ids,
-        repoPromptIds: repoBound.ids,
+        repoPromptIds: repoSets.tickedFor(repo),
         extraRepos: extras,
+        extraRepoPromptIds,
       }),
       "Task queued",
     );
@@ -364,7 +370,7 @@ function Composer() {
       setMessage("");
       files.clear();
       bound.setIds([]);
-      tickDefaults();
+      repoSets.resetToDefaults();
     }
   };
 
@@ -397,7 +403,7 @@ function Composer() {
               ]}
             />
           </div>
-          {bound.ids.length + repoBound.ids.length > 0 && (
+          {bound.ids.length + repoSets.count > 0 && (
             <div className="px-2.5 pt-2">
               <BoundPromptChips sections={sections} />
             </div>
@@ -468,8 +474,9 @@ function Composer() {
           message={message}
           attachmentIds={files.ids}
           promptIds={bound.ids}
-          repoPromptIds={repoBound.ids}
+          repoPromptIds={repoSets.tickedFor(repo)}
           extraRepos={extras}
+          extraRepoPromptIds={extraRepoPromptIds}
         />
       )}
     </div>
@@ -483,13 +490,15 @@ function PromptPreview({
   promptIds,
   repoPromptIds,
   extraRepos,
+  extraRepoPromptIds,
 }: {
   repo: string;
   message: string;
   attachmentIds: string[];
   promptIds: string[];
-  repoPromptIds: string[];
+  repoPromptIds: string[] | undefined;
   extraRepos: string[];
+  extraRepoPromptIds: Record<string, string[]>;
 }) {
   const debounced = useDebounced(message, 300);
   const [result, setResult] = useState<PromptPreviewResponse | null>(null);
@@ -503,7 +512,7 @@ function PromptPreview({
       return;
     }
     api
-      .previewPrompt({ repo, message: debounced, attachmentIds, promptIds, repoPromptIds, extraRepos })
+      .previewPrompt({ repo, message: debounced, attachmentIds, promptIds, repoPromptIds, extraRepos, extraRepoPromptIds })
       .then((r) => {
         if (!cancelled) {
           setResult(r);
@@ -516,7 +525,7 @@ function PromptPreview({
     return () => {
       cancelled = true;
     };
-  }, [repo, debounced, attachmentIds.join(","), promptIds.join(","), repoPromptIds.join(","), extraRepos.join(",")]);
+  }, [repo, debounced, attachmentIds.join(","), promptIds.join(","), repoPromptIds?.join(","), extraRepos.join(","), JSON.stringify(extraRepoPromptIds)]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-rule bg-surface">
@@ -790,7 +799,10 @@ function PromptReceived({ taskId, version }: { taskId: string; version: string }
         ) : has("repo") ? (
           <span className="inline-flex items-center gap-1 text-success-ink">
             <CheckIcon className="size-3" />
-            repo: {(fresh.data.repoPrompts as { name: string }[]).map((p) => p.name).join(", ")}
+            repo:{" "}
+            {(fresh.data.repoPrompts as { repo?: string; name: string }[])
+              .map((p) => (p.repo && p.repo !== fresh.repo ? `${p.repo}: ${p.name}` : p.name))
+              .join(", ")}
           </span>
         ) : (
           <span className="inline-flex items-center gap-1 text-muted-foreground">

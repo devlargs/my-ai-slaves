@@ -34,10 +34,14 @@ export const TaskSession = z.object({
   sessionId: z.string(),
 });
 
-/** Another repo opened in the same run (cross-repo work): it gets its own `ai/<task-id>` branch. */
+/**
+ * Another repo opened in the same run (cross-repo work), as it is: the app never creates, switches or
+ * commits branches there. Its ticked prompts are sent and say how to handle changes in it.
+ */
 export const TaskExtraRepo = z.object({
   repo: z.string(),
-  branch: TaskBranch.nullable().default(null),
+  /** That repo's prompts ticked for this task (ids from knowledge/<repo>.json), sent in its order. */
+  promptIds: z.array(z.string()).default([]),
 });
 
 export const TaskReply = z.object({
@@ -53,7 +57,7 @@ export const Task = z.object({
   title: z.string(),
   /** The main repo: the CLI runs in it, with its account chain and repo prompts. */
   repo: z.string(),
-  /** Other repos on the same machine the run can read and change, each on its own ai/ branch. */
+  /** Other repos on the same machine the run can reach, opened as they are (no branch handling). */
   extraRepos: z.array(TaskExtraRepo).default([]),
   status: QueuedTaskStatus,
   message: z.string(),

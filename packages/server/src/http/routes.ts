@@ -171,6 +171,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         promptIds: z.array(z.string()).optional(),
         repoPromptIds: z.array(z.string()).optional(),
         extraRepos: z.array(z.string()).optional(),
+        extraRepoPromptIds: z.record(z.string(), z.array(z.string())).optional(),
       }),
       req.body,
     );
@@ -182,8 +183,15 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const repoBound = await repoPrompts.resolve(
       body.repoPromptIds === undefined ? await repoPrompts.defaultIds() : await repoPrompts.validate(body.repoPromptIds),
     );
+    const repoBodies = repoBound.prompts.map((p) => p.body);
+    for (const extra of extras) {
+      const list = await repos.prompts(extra.id);
+      const ticked = body.extraRepoPromptIds?.[extra.id];
+      const got = await list.resolve(ticked === undefined ? await list.defaultIds() : await list.validate(ticked));
+      repoBodies.push(...got.prompts.map((p) => p.body));
+    }
     return assembler.forTask(body.message, {
-      repoPrompts: repoBound.prompts.map((p) => p.body),
+      repoPrompts: repoBodies,
       boundPrompts: bound.prompts.map((p) => p.body),
       otherRepos: extras.map((r) => ({ name: r.name, path: r.path })),
       attachmentPaths: files.map((a) => attachments.pathOf(a)),
@@ -203,6 +211,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
           promptIds: z.array(z.string()).optional(),
           repoPromptIds: z.array(z.string()).optional(),
           extraRepos: z.array(z.string()).optional(),
+          extraRepoPromptIds: z.record(z.string(), z.array(z.string())).optional(),
         }),
         req.body,
       ),

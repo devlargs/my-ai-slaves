@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
-/** The repos a task works in: the first is the main one (the CLI runs there), the rest are opened alongside. */
+/** The repos a task works in: the first is the main one (the CLI runs there), the rest are opened as they are. */
 export interface RepoSelection {
   main: string | undefined;
   extras: string[];
@@ -130,9 +130,9 @@ export function RepoPicker({
           })}
         </ul>
         <p className="border-t border-rule px-3 py-2 text-[11px] leading-snug text-muted-foreground">
-          Tick several to work across repos. The task runs in the{" "}
-          <span className="font-medium text-ink-2">main</span> repo with its accounts and prompts; the others are opened
-          alongside it, each on its own ai/ branch.
+          Tick several to work across repos. The task runs in the <span className="font-medium text-ink-2">main</span>{" "}
+          repo. The others are opened as they are: the app doesn&apos;t create, switch or commit anything there. Their ticked
+          prompts say how to handle changes.
         </p>
       </PopoverContent>
     </Popover>

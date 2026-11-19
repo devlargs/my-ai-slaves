@@ -1,6 +1,6 @@
 import type { RepoPrompt, SavedPromptView } from "@my-ai-slaves/shared";
 import { CheckIcon, FolderGit2Icon, LibraryBigIcon, type LucideIcon, XIcon } from "lucide-react";
-import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useState } from "react";
+import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { api } from "@/lib/api";
@@ -55,6 +55,65 @@ export function useRepoPrompts(repo: string | undefined): PromptSource {
   return { prompts: state.prompts, loadedFor: state.repo, reload };
 }
 
+const NO_PROMPTS: RepoPrompt[] = [];
+
+/**
+ * The prompts of every repo ticked for a task (the main one first), and which are ticked from each.
+ * A repo's default prompts come pre-ticked when it's added.
+ */
+export function useRepoPromptSets(repoIds: string[]) {
+  const [lists, setLists] = useState<Record<string, RepoPrompt[]>>({});
+  const [ticked, setTicked] = useState<Record<string, string[]>>({});
+  const requested = useRef(new Set<string>());
+
+  const load = useCallback((repo: string, tickDefaults: boolean) => {
+    api
+      .getRepoPrompts(repo)
+      .then((prompts) => {
+        setLists((prev) => ({ ...prev, [repo]: prompts }));
+        if (tickDefaults) setTicked((prev) => ({ ...prev, [repo]: prompts.filter((p) => p.default).map((p) => p.id) }));
+      })
+      .catch(() => {});
+  }, []);
+
+  const key = repoIds.join(",");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the list of repos
+  useEffect(() => {
+    for (const repo of [...requested.current]) {
+      if (repoIds.includes(repo)) continue;
+      // Dropped: forget its ticks, so adding it again starts from its defaults.
+      requested.current.delete(repo);
+      setTicked(({ [repo]: _, ...rest }) => rest);
+    }
+    for (const repo of repoIds) {
+      if (requested.current.has(repo)) continue;
+      requested.current.add(repo);
+      load(repo, true);
+    }
+  }, [key, load]);
+
+  const source = (repo: string): PromptSource => ({
+    prompts: lists[repo] ?? NO_PROMPTS,
+    loadedFor: lists[repo] ? repo : null,
+    reload: () => load(repo, false),
+  });
+  const bound = (repo: string): BoundPrompts => ({
+    ids: ticked[repo] ?? [],
+    setIds: (update) =>
+      setTicked((prev) => {
+        const current = prev[repo] ?? [];
+        const next = typeof update === "function" ? update(current) : update;
+        return next === current ? prev : { ...prev, [repo]: next };
+      }),
+  });
+  /** Ticked ids per repo; a repo whose list hasn't loaded yet is left out (the server sends its defaults). */
+  const tickedFor = (repo: string): string[] | undefined => (lists[repo] ? (ticked[repo] ?? []) : undefined);
+  const resetToDefaults = () =>
+    setTicked(Object.fromEntries(Object.entries(lists).map(([repo, prompts]) => [repo, prompts.filter((p) => p.default).map((p) => p.id)])));
+  const count = repoIds.reduce((n, repo) => n + (ticked[repo]?.length ?? 0), 0);
+  return { source, bound, tickedFor, resetToDefaults, count };
+}
+
 export interface BoundPrompts {
   ids: string[];
   setIds: Dispatch<SetStateAction<string[]>>;
@@ -79,7 +138,7 @@ export interface PromptSection {
 }
 
 export const repoSection = (repo: string | undefined, source: PromptSource, bound: BoundPrompts): PromptSection => ({
-  key: "repo",
+  key: `repo:${repo ?? ""}`,
   title: repo ? `${repo} prompts` : "Repo prompts",
   icon: FolderGit2Icon,
   source,

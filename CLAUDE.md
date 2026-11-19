@@ -53,7 +53,7 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
 ## Rules that must hold
 
 - **Prompts:** the only text sent to a CLI is global base prompt → the repo prompts ticked for that task
-  (each repo has a list in `knowledge/<repo>.json`, in list order; `default` ones come pre-ticked, and a
+  (main repo first, then each other repo of a cross-repo task; each repo has a list in `knowledge/<repo>.json`, in list order; `default` ones come pre-ticked, and a
   task queued without `repoPromptIds` gets the defaults) → saved prompts bound to that message (from the
   Prompts library, `.data/prompts.json`, in library order) → task message, joined by a blank line, empty
   layers skipped. The only app-written text is two visible path lists: "Other repositories:" (a
@@ -69,10 +69,10 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
   branch. Claude runs with `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and
   Cursor never gets `-w`.
 - **Cross-repo tasks:** a task can tick several repos (`extraRepos`, same machine as the main `repo`).
-  The CLI runs in the main repo (its account chain and repo prompts) and gets the others via `--add-dir`;
-  each other repo gets its own `ai/<task-id>` branch with the same checkout / clean-tree / commit /
-  switch-back rules, and every repo of the task is busy while it runs. Keep / Push / Mark finished keep
-  (or push) other-repo branches with commits and delete empty ones; Discard deletes them all.
+  Only the main repo gets the `ai/<task-id>` branch flow. The other repos are only opened (`--add-dir` +
+  the "Other repositories:" list): the app **never creates, switches, resets or commits branches there**
+  and doesn't require them to be clean. Their ticked repo prompts (sent after the main repo's) say how the
+  agent handles changes in them. A repo is in at most one running task at a time.
 - **Base prompts reach the CLI:** tests assert the exact text the (fake) CLIs receive; each task view shows
   "… received: ✓ global base prompt ✓ repo: <ticked prompts>" from the run's recorded prompt.
 - **Security:** bind 127.0.0.1 only; spawn with argument arrays, never a shell string; scrub
