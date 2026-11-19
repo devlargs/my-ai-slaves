@@ -6,9 +6,10 @@ Guidance for Claude Code when working in this repository.
 
 **My AI Slaves**: a local web app (macOS first) that queues AI coding tasks and runs them through the
 Claude Code CLI and the Cursor Agent CLI, falling back across several logged-in subscriptions when one
-hits a usage limit. Each task checks out its own `ai/<task-id>` branch, created from the repo's base
-branch, **directly in the repo** (no worktrees); afterwards its work is committed on that branch and the
-user's previous branch is checked out again. You review the diff, then keep / push + open a PR / discard.
+hits a usage limit. Each task runs **directly in the repo, exactly as it's checked out**: the app never
+creates, switches, resets, commits or deletes branches, and never makes worktrees. The repo prompts tell
+the agent how to handle changes (branching, commits, MRs). You review what changed, then mark the task
+finished or discard it.
 
 ## Commands
 
@@ -61,18 +62,18 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
   the session and send only the reply (+ its attachments).
 - **Every started run is logged** in activity with its full assembled prompt.
 - **No AI attribution** in commits or PRs: Claude runs with `attribution: false`, Cursor's cli-config sets
-  `attributeCommitsToAgent/attributePRsToAgent: false`, and Keep/Push strip leftover co-author lines.
-  Task commits use the repo's committer name/email when set.
-- **No worktrees, ever.** Tasks run in the repo itself on `ai/<task-id>` (from the repo's base branch).
-  A task only starts when the checkout has no uncommitted changes; after each run the work is committed on
-  its branch and the previous branch is checked out again. Never commit to main/master or any non-`ai/`
-  branch. Claude runs with `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and
-  Cursor never gets `-w`.
+  `attributeCommitsToAgent/attributePRsToAgent: false`. The agent's commits use the repo's committer
+  name/email when set (passed as GIT_* env).
+- **No branches, no worktrees, ever.** The app does **not** create `ai/…` (or any) branches, check out,
+  reset, commit, stash, push or delete anything in a repo: not in the main repo, not in a cross-repo
+  task's other repos. Runs happen in the checkout as it is (no clean-tree requirement); the repo prompts
+  decide how changes are handled. The only git the app runs on a task is read-only (where the checkout
+  is, and the diff since the task started), plus the one-time legacy worktree migration. Claude runs with
+  `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and Cursor never gets `-w`.
 - **Cross-repo tasks:** a task can tick several repos (`extraRepos`, same machine as the main `repo`).
-  Only the main repo gets the `ai/<task-id>` branch flow. The other repos are only opened (`--add-dir` +
-  the "Other repositories:" list): the app **never creates, switches, resets or commits branches there**
-  and doesn't require them to be clean. Their ticked repo prompts (sent after the main repo's) say how the
-  agent handles changes in them. A repo is in at most one running task at a time.
+  The CLI runs in the main repo and gets the others via `--add-dir` + the "Other repositories:" list.
+  Their ticked repo prompts (sent after the main repo's) say how to handle changes in them. A repo is in
+  at most one running task at a time.
 - **Base prompts reach the CLI:** tests assert the exact text the (fake) CLIs receive; each task view shows
   "… received: ✓ global base prompt ✓ repo: <ticked prompts>" from the run's recorded prompt.
 - **Security:** bind 127.0.0.1 only; spawn with argument arrays, never a shell string; scrub

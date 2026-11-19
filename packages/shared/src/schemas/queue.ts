@@ -9,7 +9,17 @@ export type QueuedTaskStatus = z.infer<typeof QueuedTaskStatus>;
 export const TaskStatus = z.enum([...QueuedTaskStatus.options, "done", "failed"]);
 export type TaskStatus = z.infer<typeof TaskStatus>;
 
-/** The task's branch in the repository itself (no worktrees). */
+/**
+ * Where the repo's checkout was when the task started (read-only: the app never switches branches).
+ * Its diff shows what changed since.
+ */
+export const TaskCheckout = z.object({
+  /** The branch that was checked out (or the commit, when detached). */
+  ref: z.string().min(1),
+  commit: z.string().min(1),
+});
+
+/** Legacy: the `ai/<task-id>` branch older versions created. Only read (diff); never touched. */
 export const TaskBranch = z.object({
   /** `ai/<task-id>` */
   name: z.string().min(1),
@@ -72,6 +82,9 @@ export const Task = z.object({
   repoPromptIds: z.array(z.string()).nullable().default(null),
   accountOverride: z.string().nullable().default(null),
   currentAccount: z.string().nullable().default(null),
+  /** Where the checkout was when the task's first run started. */
+  checkout: TaskCheckout.nullable().default(null),
+  /** Legacy (older versions created an ai/ branch per task); kept only so its diff can be shown. */
   branch: TaskBranch.nullable().default(null),
   /** Legacy (pre-branch) field; migrated and removed on startup. */
   worktree: LegacyTaskWorktree.nullable().optional(),

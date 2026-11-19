@@ -63,9 +63,8 @@ export function ReposPage() {
         title="Repositories"
         description={
           <>
-            Each task checks out its own <code className="font-mono text-xs text-ink-2">ai/…</code> branch, created from the
-            repo&apos;s base branch, right in your checkout. When it finishes, its work is committed there and your
-            previous branch is checked out again.
+            Tasks run in each repo exactly as it&apos;s checked out. The app never creates, switches or commits
+            branches: the repo&apos;s prompts tell the agent how to handle changes.
           </>
         }
       />
@@ -386,7 +385,7 @@ function RepoCard({
         <fieldset disabled={unreachable} className={cn("grid min-w-0 gap-5 md:grid-cols-2", unreachable && "opacity-55")}>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`branch-${repo.id}`}>Base branch (new task branches start here)</Label>
+            <Label htmlFor={`branch-${repo.id}`}>Base branch (a task&apos;s diff compares to it when the agent moves to another branch)</Label>
             <form
               className="flex gap-2"
               onSubmit={(e) => {

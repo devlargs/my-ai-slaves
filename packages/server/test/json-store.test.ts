@@ -78,6 +78,7 @@ describe("JsonStore", () => {
       "repoPromptIds",
       "accountOverride",
       "currentAccount",
+      "checkout",
       "branch",
       "session",
       "replies",

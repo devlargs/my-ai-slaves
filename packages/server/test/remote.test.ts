@@ -7,7 +7,7 @@ import { createAdapters } from "../src/providers";
 import { listRemoteHosts } from "../src/remote/hosts";
 import { assertHost, runOn, shq } from "../src/remote/machine";
 import { AccountService } from "../src/services/account-service";
-import { BranchService } from "../src/services/branch-service";
+import { RepoGit } from "../src/services/repo-git";
 import { nullBroadcaster } from "../src/services/common";
 import { PromptAssembler } from "../src/services/prompt-assembler";
 import { PromptLibrary } from "../src/services/prompt-library";
@@ -81,7 +81,7 @@ async function setup() {
     stores,
     accounts,
     repos,
-    branches: new BranchService(),
+    git: new RepoGit(),
     assembler: new PromptAssembler({
       globalBasePrompt: async () => "GLOBAL",
     }),
@@ -147,7 +147,9 @@ describe("repos on an SSH host", () => {
     const [call] = await received();
     expect(call?.cwd).toBe(repoPath);
     expect(call?.prompt).toBe("GLOBAL\n\nREPO\n\nfix the api");
-    expect(sh(repoPath, "show", `${done.branch!.name}:out-none.txt`)).toBe("GLOBAL\n\nREPO\n\nfix the api");
+    // Run in the checkout as it is: the file is just there, no branch was made.
+    expect(sh(repoPath, "status", "--porcelain").trim()).toBe("?? out-none.txt");
+    expect(sh(repoPath, "branch", "--list", "ai/*").trim()).toBe("");
     expect(head(repoPath)).toBe("master");
     expect((await queue.diff(task.id)).patch).toContain("out-none.txt");
   });

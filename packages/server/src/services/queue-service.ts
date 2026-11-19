@@ -5,7 +5,6 @@ import {
   type DiffResponse,
   formatLocalIso,
   type HistoryItem,
-  type PushResponse,
   type RawLine,
   type Repo,
   type StreamEvent,
@@ -24,14 +23,12 @@ import { badRequest, type Broadcaster, conflict, notFound, shortTime, slugify } 
 import type { PromptAssembler } from "./prompt-assembler";
 import type { PromptLibrary } from "./prompt-library";
 import type { RepoService } from "./repo-service";
-import { type BranchService, DirtyRepoError, type TaskBranch } from "./branch-service";
+import type { RepoGit } from "./repo-git";
 
 const LIVE_BUFFER_LIMIT = 5000;
 const MAX_TIMER_MS = 60 * 60 * 1000;
 
 interface LiveRun {
-  /** The task branch is checked out in the repo (so the run must be settled afterwards). */
-  checkedOut: boolean;
   taskId: string;
   repo: string;
   /** Every repo the run reaches (the main one + the task's other repos): busy until it ends. */
@@ -51,7 +48,7 @@ export interface QueueDeps {
   stores: DataStores;
   accounts: AccountService;
   repos: RepoService;
-  branches: BranchService;
+  git: RepoGit;
   assembler: PromptAssembler;
   adapters: AdapterRegistry;
   broadcaster: Broadcaster;
@@ -71,12 +68,11 @@ const pushCapped = <T>(list: T[], item: T) => {
 /**
  * Owns queue.json and every task run.
  * - 1 running task per repo, `maxParallelTasks` overall, pending tasks start in queue order.
- * - Each run checks out `ai/<task-id>` (from the repo's base branch) in the repo itself; afterwards the
- *   work is committed on that branch and the previous branch is checked out again.
- * - Cross-repo tasks: the task's other repos are opened as they are. The app never creates, switches or
- *   commits branches in them; their ticked prompts tell the agent how to handle changes there.
- * - Usage limit / logged out mid-run → mark the account, reset the task branch, re-run the same prompt on
- *   the next account in the chain (or wait until one frees up).
+ * - Runs happen in the repo exactly as it's checked out. The app never creates, switches, resets, commits
+ *   or deletes branches (in the main repo or a cross-repo task's other repos): the ticked repo prompts
+ *   tell the agent how to handle changes. It only records where the checkout was, to show a diff.
+ * - Usage limit / logged out mid-run → mark the account and re-run the same prompt on the next account
+ *   in the chain (or wait until one frees up).
  */
 export class QueueService {
   private readonly live = new Map<string, LiveRun>();
@@ -121,14 +117,6 @@ export class QueueService {
       }
     });
     for (const task of interrupted) {
-      // Commit what it left on its branch and give the repo back to you.
-      const repo = (await this.deps.repos.list()).find((r) => r.id === task.repo);
-      if (repo && task.branch) {
-        const settled = await this.deps.branches
-          .settle(repo, task.branch, `${task.title} (interrupted)`, identityOf(repo))
-          .catch((e: Error) => ({ committed: false, warning: e.message }));
-        if (settled.warning) this.log({ taskId: task.id, repo: task.repo, account: null, event: "warning", detail: settled.warning });
-      }
       this.log({
         taskId: task.id,
         repo: task.repo,
@@ -154,7 +142,7 @@ export class QueueService {
       const repo = repos.find((r) => r.id === task.repo);
       if (repo) {
         try {
-          await this.deps.branches.removeLegacyWorktree(repo, wt.path, `${task.title} (moved off worktree)`, identityOf(repo));
+          await this.deps.git.removeLegacyWorktree(repo, wt.path, `${task.title} (moved off worktree)`, identityOf(repo));
         } catch (e) {
           console.error(`[queue] couldn't move ${task.id} off its worktree (left as is): ${(e as Error).message}`);
           continue;
@@ -263,6 +251,7 @@ export class QueueService {
         repoPromptIds,
         accountOverride: override,
         currentAccount: null,
+        checkout: null,
         branch: null,
         session: null,
         replies: [],
@@ -318,7 +307,6 @@ export class QueueService {
       });
       this.log({ taskId: id, repo: task.repo, account: null, event: "cancelled", detail: "Queued reply cancelled." });
     } else {
-      if (task.branch) await this.deps.branches.deleteBranch(await this.deps.repos.get(task.repo), task.branch);
       await this.removeTask(id);
       this.log({ taskId: id, repo: task.repo, account: null, event: "cancelled", detail: "Cancelled before it ran." });
       this.deps.broadcaster.taskStatus(id, "failed", "Cancelled");
@@ -327,13 +315,12 @@ export class QueueService {
     void this.tick();
   }
 
-  /** Start over from the base commit with the original message. */
+  /** Run the original message again in a new session. The repo is left as it is. */
   async retry(id: string): Promise<void> {
     const task = await this.getTask(id);
     if (task.status !== "interrupted" && task.status !== "needs-review") {
       throw conflict(`Only interrupted or needs-review tasks can be retried (this one is ${task.status}).`);
     }
-    if (task.branch) await this.deps.branches.resetToBase(await this.deps.repos.get(task.repo), task.branch);
     await this.updateTask(id, (t) => {
       t.status = "pending";
       t.session = null;
@@ -342,7 +329,7 @@ export class QueueService {
       t.currentAccount = null;
     });
     this.buffers.delete(id);
-    this.log({ taskId: id, repo: task.repo, account: null, event: "queued", detail: "Retry: starting over from the base commit." });
+    this.log({ taskId: id, repo: task.repo, account: null, event: "queued", detail: "Retry: running the task again in a new session." });
     await this.publish();
     void this.tick();
   }
@@ -367,92 +354,45 @@ export class QueueService {
 
   // ── review actions ───────────────────────────────────────────────────────
 
-  private async reviewable(id: string): Promise<{ task: Task; repo: Repo; br: TaskBranch }> {
-    const task = await this.getTask(id);
-    if (task.status !== "needs-review" && task.status !== "interrupted") {
-      throw conflict(`This task is ${task.status}; review actions need a finished or interrupted task.`);
-    }
-    if (!task.branch) throw conflict("This task has no branch yet.");
-    return { task, repo: await this.deps.repos.get(task.repo), br: task.branch };
-  }
-
+  /** What changed in the checkout since the task started. Read-only. */
   async diff(id: string): Promise<DiffResponse> {
     const task = await this.getTask(id);
-    if (!task.branch) throw conflict("This task has no branch yet.");
     const repo = await this.deps.repos.get(task.repo);
-    const br = task.branch;
-    return { patch: await this.deps.branches.diff(repo, br), branch: br.name, baseBranch: br.base, baseCommit: br.baseCommit, repoPath: repo.path };
+    if (task.checkout) {
+      const changes = await this.deps.git.changesSince(repo, task.checkout);
+      return { ...changes, startedOn: task.checkout, repoPath: repo.path };
+    }
+    if (task.branch) {
+      // A task from an older version that still has its ai/ branch: shown, never touched.
+      return { patch: await this.deps.git.legacyDiff(repo, task.branch), ref: task.branch.name, from: task.branch.baseCommit, startedOn: null, repoPath: repo.path };
+    }
+    throw conflict("This task hasn't run yet.");
   }
 
-  async keep(id: string): Promise<void> {
-    const { task, repo, br } = await this.reviewable(id);
-    await this.deps.branches.stripAiTrailers(repo, br);
-    await this.removeTask(id);
-    this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "kept", detail: `Kept branch ${br.name}`, data: { branch: br.name } });
-    this.deps.broadcaster.taskStatus(id, "done", `Kept branch ${br.name}`);
-    await this.publish();
-  }
-
-  async push(id: string): Promise<PushResponse> {
-    const { task, repo, br } = await this.reviewable(id);
-    await this.deps.branches.stripAiTrailers(repo, br);
-    const result = await this.deps.branches.push(repo, br, task.title);
-    await this.removeTask(id);
-    this.log({
-      taskId: id,
-      repo: task.repo,
-      account: task.currentAccount,
-      event: "pushed",
-      detail: result.url ? `Pushed ${br.name}: ${result.url}` : `Pushed ${br.name}`,
-      data: { branch: br.name, url: result.url, output: result.output },
-    });
-    this.deps.broadcaster.taskStatus(id, "done", `Pushed ${br.name}`);
-    await this.publish();
-    return result;
-  }
-
-  /**
-   * You're done with it: off the queue, into History as done. A branch with commits stays (with any
-   * AI co-author lines stripped); an empty one (the work landed elsewhere) is deleted, losing nothing.
-   */
+  /** You're done with it: off the queue, into History as done. Nothing in the repo is touched. */
   async markFinished(id: string): Promise<void> {
     const task = await this.getTask(id);
     if (task.status !== "needs-review" && task.status !== "interrupted") {
       throw conflict(`This task is ${task.status}; only a task waiting for review or interrupted can be marked finished.`);
     }
-    let detail = "Marked finished.";
-    if (task.branch) {
-      const repo = await this.deps.repos.get(task.repo);
-      const commits = await this.deps.branches.commitCount(repo, task.branch);
-      if (commits === 0) {
-        await this.deps.branches.deleteBranch(repo, task.branch);
-        detail = `Marked finished. Branch ${task.branch.name} had no commits, so it was deleted.`;
-      } else if (commits !== null) {
-        await this.deps.branches.stripAiTrailers(repo, task.branch);
-        detail = `Marked finished. Branch ${task.branch.name} kept (${commits} commit${commits === 1 ? "" : "s"}).`;
-      }
-    }
     await this.removeTask(id);
-    this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "marked-finished", detail, data: { branch: task.branch?.name ?? null } });
-    this.deps.broadcaster.taskStatus(id, "done", detail);
+    this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "marked-finished", detail: "Marked finished." });
+    this.deps.broadcaster.taskStatus(id, "done", "Marked finished");
     await this.publish();
   }
 
-  /** Remove a task from the queue in any state. A running task is stopped first. */
+  /** Remove a task from the queue in any state. A running task is stopped first. The repo is left as it is. */
   async discard(id: string): Promise<void> {
     let task = await this.getTask(id);
     const wasRunning = task.status === "running";
     if (wasRunning) task = await this.stopForDiscard(id);
-    if (task.branch) await this.deps.branches.deleteBranch(await this.deps.repos.get(task.repo), task.branch);
     await this.removeTask(id);
     this.log({
       taskId: id,
       repo: task.repo,
       account: task.currentAccount,
       event: "discarded",
-      detail: task.branch
-        ? `${wasRunning ? "Stopped and discarded" : "Discarded"}: branch ${task.branch.name} deleted.`
-        : "Discarded before it ran.",
+      detail: wasRunning ? "Stopped and discarded. The repo was left as it is." : "Discarded. The repo was left as it is.",
     });
     this.deps.broadcaster.taskStatus(id, "done", "Discarded");
     await this.publish();
@@ -512,7 +452,7 @@ export class QueueService {
         message: String(queued?.data?.message ?? ""),
         outcome: outcomes[terminal.event] as HistoryItem["outcome"],
         lastAccount: [...entries].reverse().find((e) => e.account)?.account ?? null,
-        branch: (started?.data?.branch as string | undefined) ?? null,
+        branch: ((started?.data?.ref ?? started?.data?.branch) as string | undefined) ?? null,
         queuedAt: entries[0]?.at ?? terminal.at,
         endedAt: terminal.at,
       });
@@ -559,7 +499,7 @@ export class QueueService {
         notes.set(task.id, `Waiting for a free slot (${running} of ${settings.maxParallelTasks} running).`);
         continue;
       }
-      // A task elsewhere switches branches in its repo, so a repo is only in one running task at a time.
+      // Two agents in one checkout would trip over each other: a repo is in one running task at a time.
       const taskRepos = [task.repo, ...task.extraRepos.map((x) => x.repo)];
       const busy = taskRepos.find((id) => busyRepos.has(id));
       if (busy) {
@@ -580,19 +520,6 @@ export class QueueService {
       const availability = this.deps.repos.availabilityOf(repo.id);
       if (availability?.state === "unreachable") {
         notes.set(task.id, `Unable to load ${repo.name} at this time (${availability.message ?? "unreachable"}). Retrying automatically.`);
-        continue;
-      }
-      // Tasks switch branches in your checkout, so they only start on a clean working tree.
-      let clean: boolean | null = null;
-      try {
-        clean = await this.deps.branches.isClean(repo);
-      } catch (error) {
-        this.deps.repos.markUnreachable(repo, error);
-        notes.set(task.id, `Unable to load ${repo.name} at this time. Retrying automatically.`);
-        continue;
-      }
-      if (!clean) {
-        notes.set(task.id, `${repo.name} has uncommitted changes. Commit or stash them; tasks switch branches in your checkout.`);
         continue;
       }
       const isReply = task.pendingReply !== null && task.session !== null;
@@ -650,7 +577,6 @@ export class QueueService {
     const buffer: OutputBuffer = isReply ? (this.buffers.get(task.id) ?? { events: [], raw: [] }) : { events: [], raw: [] };
     this.buffers.set(task.id, buffer);
 
-    let checkedOut = false;
     const repoList = await this.deps.repos.list();
     const extras = task.extraRepos.flatMap((x) => {
       const r = repoList.find((e) => e.id === x.repo);
@@ -662,12 +588,13 @@ export class QueueService {
         t.status = "running";
         t.currentAccount = account.id;
       });
-      // Fresh runs (first run, retry, fallback) start the branch from the base commit; replies continue it.
-      const br = await this.deps.branches.checkoutForRun(repo, task.id, task.branch, !isReply);
-      checkedOut = true;
-      await this.updateTask(task.id, (t) => {
-        t.branch = br;
-      });
+      // Where the checkout is (read only, never switched): the diff shows what changed since the first run.
+      const where = await this.deps.git.where(repo).catch(() => null);
+      if (!task.checkout && where) {
+        await this.updateTask(task.id, (t) => {
+          t.checkout = where;
+        });
+      }
 
       // Attached files: on this Mac they're read in place; for a remote repo they're copied to the server.
       const allFiles = [...task.attachments, ...task.replies.flatMap((r) => r.attachments)];
@@ -747,8 +674,8 @@ export class QueueService {
         data: {
           prompt: assembled.prompt,
           kind: isReply ? "reply" : "fresh",
-          branch: br.name,
-          baseBranch: br.base,
+          ref: where?.ref ?? null,
+          commit: where?.commit ?? null,
           cwd: repo.path,
           extraRepos: extras.map((x) => ({ repo: x.repo.id, path: x.repo.path })),
           layers: assembled.layers,
@@ -771,7 +698,6 @@ export class QueueService {
         settings,
       );
       const run: LiveRun = {
-        checkedOut: true,
         taskId: task.id,
         repo: repo.id,
         repos: heldRepos,
@@ -796,19 +722,9 @@ export class QueueService {
         .catch((error) => console.error(`[queue] finishing ${task.id}: ${(error as Error).stack ?? error}`));
     } catch (error) {
       this.live.delete(task.id);
-      if (error instanceof DirtyRepoError) {
-        // You changed files between the check and the checkout: just wait again.
-        await this.updateTask(task.id, (t) => {
-          t.status = "pending";
-          t.currentAccount = null;
-        });
-        this.waitingNotes.set(task.id, error.message);
-        await this.publish();
-        return;
-      }
-      // Couldn't start (base branch missing, CLI setup…). Treat as a failed run.
+      // Couldn't start (CLI setup…). Treat as a failed run.
       await this.finishRun(
-        { checkedOut, taskId: task.id, repo: repo.id, repos: heldRepos, account, handle: null as never, isReply, cancelRequested: false },
+        { taskId: task.id, repo: repo.id, repos: heldRepos, account, handle: null as never, isReply, cancelRequested: false },
         { outcome: "failed", exitCode: null, message: (error as Error).message, stderrTail: "" },
       );
     }
@@ -844,16 +760,6 @@ export class QueueService {
     const base = { taskId: task.id, repo: task.repo, account: account.id };
     const repo = (await this.deps.repos.list()).find((r) => r.id === task.repo);
 
-    // Commit what the agent left on the task branch and check your previous branch out again.
-    if (run.checkedOut && repo && task.branch) {
-      const reply = run.isReply ? (task.replies.at(-1)?.message ?? "").trim().split("\n")[0] : "";
-      const message = reply ? `${task.title}: ${reply}`.slice(0, 120) : task.title;
-      const settled = await this.deps.branches
-        .settle(repo, task.branch, message, identityOf(repo))
-        .catch((e: Error) => ({ committed: false, warning: `Couldn't commit or switch back: ${e.message}` }));
-      if (settled.warning) this.log({ ...base, event: "warning", detail: settled.warning });
-    }
-
     switch (result.outcome) {
       case "success": {
         await this.updateTask(task.id, (t) => {
@@ -888,8 +794,8 @@ export class QueueService {
           this.log({ ...base, event: "warning", detail: `${account.id} is logged out (${reason}). Log in again on the Settings page.` });
         }
 
-        // Fresh runs start over on the next account; replies keep their session and wait for a same-CLI account.
-        if (!run.isReply && repo && task.branch) await this.deps.branches.resetToBase(repo, task.branch);
+        // Fresh runs start over on the next account (the repo is left as it is); replies keep their
+        // session and wait for a same-CLI account.
         await this.updateTask(task.id, (t) => {
           t.status = "pending";
           t.currentAccount = null;
@@ -938,7 +844,6 @@ export class QueueService {
           this.log({ ...base, event: "warning", detail: `Reply run failed: ${result.message}`, data });
           this.deps.broadcaster.taskStatus(task.id, "needs-review", `Reply failed: ${result.message}`);
         } else {
-          if (repo && task.branch) await this.deps.branches.deleteBranch(repo, task.branch);
           await this.removeTask(task.id);
           this.log({ ...base, event: "failed", detail: result.message.slice(0, 500), data });
           this.deps.broadcaster.taskStatus(task.id, "failed", result.message);

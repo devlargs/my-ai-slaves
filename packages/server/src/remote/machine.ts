@@ -93,7 +93,7 @@ export function runOn(
   command: string,
   args: string[],
   cwd: string | null,
-  options: { timeoutMs?: number; extraEnv?: Record<string, string> } = {},
+  options: { timeoutMs?: number; extraEnv?: Record<string, string>; okExitCodes?: number[] } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   const inv = localInvocation(host, { command, args, cwd, env: options.extraEnv });
   return new Promise((resolve, reject) => {
@@ -107,8 +107,11 @@ export function runOn(
         maxBuffer: 64 * 1024 * 1024,
       },
       (error, stdout, stderr) => {
-        if (error) {
-          const code = typeof error.code === "number" ? error.code : null;
+        const code = error && typeof error.code === "number" ? error.code : null;
+        // Some commands use a non-zero exit for a normal answer (e.g. `git diff --no-index` = "differs").
+        if (error && code !== null && options.okExitCodes?.includes(code)) {
+          resolve({ stdout: String(stdout), stderr: String(stderr) });
+        } else if (error) {
           const label = host ? `${command} on ${host}` : command;
           reject(new CommandError(`${label} ${args[0] ?? ""}`.trim(), String(stderr) || error.message, code));
         } else resolve({ stdout: String(stdout), stderr: String(stderr) });

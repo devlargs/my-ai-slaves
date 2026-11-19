@@ -239,7 +239,7 @@ function QueueList({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                title="Stop (its work so far is committed on its branch; you can retry or discard)"
+                title="Stop (what it changed so far stays in the repo; you can retry or discard)"
                 aria-label="Stop"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -267,7 +267,7 @@ function QueueList({
               <Button
                 size="icon-sm"
                 variant="ghost"
-                title="Retry from scratch"
+                title="Run it again in a new session (the repo is left as it is)"
                 aria-label="Retry"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -282,7 +282,7 @@ function QueueList({
                 size="icon-sm"
                 variant="ghost"
                 className="text-muted-foreground hover:bg-success-soft hover:text-success-ink"
-                title="Mark as finished: off the queue, into History as done. Its branch stays if it has commits."
+                title="Mark as finished: off the queue, into History as done. Nothing in the repo is touched."
                 aria-label={`Mark ${task.title} as finished`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -558,7 +558,7 @@ function PromptPreview({
 
 function TaskDetail({ task }: { task: TaskView }) {
   useTaskSubscription(task.id);
-  const reviewable = Boolean(task.branch) && (task.status === "needs-review" || task.status === "interrupted");
+  const reviewable = Boolean(task.checkout || task.branch) && (task.status === "needs-review" || task.status === "interrupted");
   const [tab, setTab] = useState(task.status === "needs-review" ? "diff" : "live");
 
   useEffect(() => {
@@ -581,7 +581,8 @@ function TaskDetail({ task }: { task: TaskView }) {
           {task.extraRepos.length > 0 && <Meta label="also" value={task.extraRepos.map((x) => x.repo).join(", ")} />}
           {task.currentAccount && <Meta label="account" value={task.currentAccount} />}
           {task.accountOverride && <Meta label="override" value={task.accountOverride} />}
-          {task.branch && <Meta label="branch" value={`${task.branch.name} ← ${task.branch.base}`} />}
+          {task.checkout && <Meta label="started on" value={`${task.checkout.ref}@${task.checkout.commit.slice(0, 7)}`} />}
+          {!task.checkout && task.branch && <Meta label="old branch" value={task.branch.name} />}
           <Meta label="id" value={task.id} />
         </dl>
         {task.waitingNote && (
@@ -720,15 +721,7 @@ function ReplyBox({ taskId }: { taskId: string }) {
 
 /** Remove a task in any state, after confirming what is lost. Running tasks are stopped first. */
 export function DiscardTaskButton({ task, withLabel = false }: { task: TaskView; withLabel?: boolean }) {
-  const branch = task.branch?.name;
-  const what = branch ? (
-    <>
-      deletes branch <code className="font-mono text-xs text-ink">{branch}</code> from the repo, so any unpushed
-      changes on it are lost
-    </>
-  ) : (
-    "removes it from the queue"
-  );
+  const what = "removes it from the queue. Nothing in the repo is touched: its changes stay where the agent left them";
   return (
     // Stops clicks and keys (also from the dialog, which React bubbles through) from selecting the card.
     <span

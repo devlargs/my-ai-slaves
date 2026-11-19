@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createAdapters } from "../src/providers";
 import { AccountService } from "../src/services/account-service";
-import { BranchService } from "../src/services/branch-service";
+import { RepoGit } from "../src/services/repo-git";
 import { nullBroadcaster } from "../src/services/common";
 import { PromptAssembler } from "../src/services/prompt-assembler";
 import { PromptLibrary } from "../src/services/prompt-library";
@@ -21,6 +21,8 @@ const FAKE_CURSOR = join(fixtures, "fake-cursor.mjs");
 
 const sh = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" });
 const head = (cwd: string) => sh(cwd, "rev-parse", "--abbrev-ref", "HEAD").trim();
+/** The app must never create ai/ (or any) branches. */
+const aiBranches = (cwd: string) => sh(cwd, "branch", "--list", "ai/*").trim();
 
 async function makeRepo(dir: string, name = "my-repo"): Promise<string> {
   const repo = join(dir, name);
@@ -79,7 +81,7 @@ async function setup(chain = ["work_1-claude", "work_2-cursor"]) {
     stores,
     accounts,
     repos,
-    branches: new BranchService(),
+    git: new RepoGit(),
     assembler,
     adapters,
     broadcaster: nullBroadcaster,
@@ -105,30 +107,32 @@ const taskWith = (queue: QueueService, id: string, status: string) => () =>
 
 const FULL = (message: string) => `GLOBAL RULES\n\nREPO RULES\n\n${message}`;
 
-describe("QueueService: branches in the repo itself (no worktrees)", () => {
-  it("runs on ai/<task-id> from the base branch, commits there, and switches back", async () => {
+describe("QueueService: runs in the repo as it is (no branches, no worktrees)", () => {
+  it("runs in the repo as it's checked out: no branch created, switched or committed", async () => {
     const { queue, stores, repo, received } = await setup();
     const created = await queue.create({ repo: repo.id, message: "add a greeting" });
     expect(created.id).toBe("task_0001_add-a-greeting");
 
     const done = await waitFor(taskWith(queue, created.id, "needs-review"));
-    expect(done.branch).toMatchObject({ name: "ai/task_0001_add-a-greeting", base: "main", returnTo: "main" });
+    expect(done.branch).toBeNull();
+    expect(done.checkout).toEqual({ ref: "main", commit: sh(repo.path, "rev-parse", "HEAD").trim() });
 
     // The CLI ran in the repo folder itself and received global + repo base prompts + the message.
     const [call] = await received();
     expect(call?.cwd).toBe(repo.path);
     expect(call?.prompt).toBe(FULL("add a greeting"));
 
-    // The work is committed on the task branch; your checkout is back on main and clean.
-    expect(sh(repo.path, "show", "ai/task_0001_add-a-greeting:out-work_1-claude.txt")).toBe(FULL("add a greeting"));
+    // What the agent left is just there, uncommitted; no branch, no commit, no worktree.
     expect(head(repo.path)).toBe("main");
-    expect(sh(repo.path, "status", "--porcelain")).toBe("");
+    expect(aiBranches(repo.path)).toBe("");
+    expect(sh(repo.path, "log", "--format=%s").trim()).toBe("init");
+    expect(sh(repo.path, "status", "--porcelain").trim()).toBe("?? out-work_1-claude.txt");
     expect(sh(repo.path, "worktree", "list").trim().split("\n")).toHaveLength(1);
-    expect(sh(repo.path, "log", "-1", "--format=%s", "main").trim()).toBe("init");
 
     const started = (await stores.activity.forTask(created.id)).find((e) => e.event === "started");
     expect(started?.data?.prompt).toBe(FULL("add a greeting"));
     expect(started?.data?.cwd).toBe(repo.path);
+    expect(started?.data?.ref).toBe("main");
     expect(started?.data?.layers).toEqual([
       { name: "global", included: true },
       { name: "repo", included: true },
@@ -138,33 +142,35 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
       { name: "attachments", included: false },
     ]);
 
-    const { patch } = await queue.diff(created.id);
-    expect(patch).toContain("out-work_1-claude.txt");
+    // The diff shows what changed in the checkout since the task started, new files included.
+    const diff = await queue.diff(created.id);
+    expect(diff).toMatchObject({ ref: "main", startedOn: done.checkout, repoPath: repo.path });
+    expect(diff.patch).toContain("out-work_1-claude.txt");
   });
 
-  it("switches back to whatever branch you were on", async () => {
+  it("stays on whatever branch you're on, and the diff follows commits the agent makes", async () => {
     const { queue, repo } = await setup();
     sh(repo.path, "checkout", "-q", "-b", "feature/mine");
-    const created = await queue.create({ repo: repo.id, message: "small fix" });
+    const created = await queue.create({ repo: repo.id, message: "COMMIT small fix" });
     const done = await waitFor(taskWith(queue, created.id, "needs-review"));
     expect(head(repo.path)).toBe("feature/mine");
-    // ...but the task branch still starts from the base branch, not from your branch.
-    expect(sh(repo.path, "merge-base", "main", done.branch!.name).trim()).toBe(sh(repo.path, "rev-parse", "main").trim());
+    expect(done.checkout?.ref).toBe("feature/mine");
+    expect(aiBranches(repo.path)).toBe("");
+    // The agent committed by itself (its prompts said so); the app made no commit of its own.
+    expect(sh(repo.path, "log", "--format=%s", "main..feature/mine").trim()).toBe("feat: agent work");
+    const { patch } = await queue.diff(created.id);
+    expect(patch).toContain("out-work_1-claude.txt");
+    expect(patch).toContain("leftover.txt");
   });
 
-  it("waits while your checkout has uncommitted changes", async () => {
+  it("doesn't wait for or touch your uncommitted changes", async () => {
     const { queue, repo } = await setup();
     await writeFile(join(repo.path, "README.md"), "my unsaved work\n");
     const created = await queue.create({ repo: repo.id, message: "do something" });
-    const waiting = await waitFor(async () => (await queue.list()).find((t) => t.id === created.id && t.waitingNote));
-    expect(waiting.status).toBe("pending");
-    expect(waiting.waitingNote).toContain("uncommitted changes");
-    expect(head(repo.path)).toBe("main");
-
-    sh(repo.path, "commit", "-qam", "my work");
-    await queue.tick();
     await waitFor(taskWith(queue, created.id, "needs-review"));
+    expect(await readFile(join(repo.path, "README.md"), "utf8")).toBe("my unsaved work\n");
     expect(head(repo.path)).toBe("main");
+    expect(aiBranches(repo.path)).toBe("");
   });
 
   it("passes attached files to the CLI as paths", async () => {
@@ -272,6 +278,7 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
         promptIds: [],
         repoPromptIds: null,
         extraRepos: [],
+        checkout: null,
         accountOverride: null,
         currentAccount: null,
         branch: null,
@@ -319,37 +326,37 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     expect(calls.map((c) => `${c.cli}:${c.label}`)).toEqual(["claude:work_1-claude", "cursor:work_2-cursor"]);
     expect(calls.every((c) => c.prompt === FULL("LIMIT:work_1-claude please"))).toBe(true);
 
-    // Started over: only the second account's work is on the branch.
-    const files = sh(repo.path, "ls-tree", "--name-only", done.branch!.name);
-    expect(files).toContain("out-work_2-cursor.txt");
-    expect(files).not.toContain("out-work_1-claude.txt");
+    // Nothing was reset between accounts; no branch was made.
+    expect(sh(repo.path, "status", "--porcelain")).toContain("out-work_2-cursor.txt");
     expect(head(repo.path)).toBe("main");
+    expect(aiBranches(repo.path)).toBe("");
 
     expect((await accounts.list()).find((a) => a.id === "work_1-claude")?.status).toBe("limited");
     const history = await stores.activity.forTask(created.id);
     expect(history.find((e) => e.event === "fallback")?.detail).toBe("work_1-claude hit usage limit, retrying on work_2-cursor");
   });
 
-  it("removes a failed task and its branch, keeps it in history", async () => {
+  it("removes a failed task, keeps it in history", async () => {
     const { queue, repo } = await setup();
     const created = await queue.create({ repo: repo.id, message: "FAIL now" });
     await waitFor(async () => (await queue.list()).length === 0);
     expect((await queue.history())[0]).toMatchObject({ taskId: created.id, outcome: "failed" });
-    expect(sh(repo.path, "branch", "--list", "ai/*")).toBe("");
+    expect(aiBranches(repo.path)).toBe("");
     expect(head(repo.path)).toBe("main");
   });
 
-  it("cancelling a running task leaves it interrupted and your checkout on main", async () => {
+  it("cancelling a running task leaves it interrupted, on your branch", async () => {
     const { queue, repo } = await setup();
     const created = await queue.create({ repo: repo.id, message: "SLOW job" });
     await waitFor(async () => queue.replay(created.id).events.length > 0);
-    expect(head(repo.path)).toBe("ai/task_0001_slow-job");
+    expect(head(repo.path)).toBe("main");
     await queue.cancel(created.id);
     await waitFor(taskWith(queue, created.id, "interrupted"));
     expect(head(repo.path)).toBe("main");
+    expect(aiBranches(repo.path)).toBe("");
   });
 
-  it("replies continue the same session on the same branch, without re-sending base prompts", async () => {
+  it("replies continue the same session, without re-sending base prompts", async () => {
     const { queue, repo, received } = await setup();
     const created = await queue.create({ repo: repo.id, message: "first" });
     const first = await waitFor(taskWith(queue, created.id, "needs-review"));
@@ -360,30 +367,20 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     });
     expect(second.session?.sessionId).toBe(first.session?.sessionId);
     expect((await received()).map((c) => c.prompt)).toEqual([FULL("first"), "now the follow-up"]);
-    expect(sh(repo.path, "log", "--format=%s", `main..${second.branch!.name}`).trim().split("\n")).toEqual([
-      "first: now the follow-up",
-      "first",
-    ]);
     expect(head(repo.path)).toBe("main");
+    expect(sh(repo.path, "log", "--format=%s").trim()).toBe("init");
   });
 
-  it("commits as the repo's committer and strips AI co-author lines on Keep, even with your own edits pending", async () => {
+  it("the agent's own commits use the repo's committer", async () => {
     const { queue, repos, repo } = await setup();
     await repos.update(repo.id, { committerName: "Ralph Example", committerEmail: "ralph@example.com" });
     const created = await queue.create({ repo: repo.id, message: "COMMIT please" });
     await waitFor(taskWith(queue, created.id, "needs-review"));
-
-    await writeFile(join(repo.path, "README.md"), "you are editing\n"); // must not block or be touched
-    await queue.keep(created.id);
-    expect(await readFile(join(repo.path, "README.md"), "utf8")).toBe("you are editing\n");
-
-    const log = sh(repo.path, "log", "--format=%an <%ae>|%cn <%ce>|%B%x00", `main..ai/${created.id}`);
-    const commits = log.split("\0").map((c) => c.trim()).filter(Boolean);
-    expect(commits).toHaveLength(2); // the agent's commit + what it left uncommitted
-    for (const c of commits) {
-      expect(c.startsWith("Ralph Example <ralph@example.com>|Ralph Example <ralph@example.com>|")).toBe(true);
-      expect(c).not.toMatch(/co-authored-by/i);
-    }
+    expect(sh(repo.path, "log", "-1", "--format=%an <%ae>|%cn <%ce>").trim()).toBe(
+      "Ralph Example <ralph@example.com>|Ralph Example <ralph@example.com>",
+    );
+    // The app commits nothing itself: what the agent didn't commit stays uncommitted.
+    expect(sh(repo.path, "status", "--porcelain").trim()).toBe("?? leftover.txt");
   });
 
   it("runs only one task per repo at a time", async () => {
@@ -400,14 +397,12 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     expect(head(repo.path)).toBe("main");
   });
 
-  it("tasks running when the server stopped come back interrupted, and the repo goes back to your branch", async () => {
+  it("tasks running when the server stopped come back interrupted; the repo is left as it is", async () => {
     const { stores, queue, repo } = await setup();
     const created = await queue.create({ repo: repo.id, message: "SLOW crash" });
     await waitFor(async () => queue.replay(created.id).events.length > 0);
     await queue.shutdown();
     await waitFor(taskWith(queue, created.id, "interrupted"));
-    // Simulate a hard crash mid-run: still marked running, still on the task branch with edits.
-    sh(repo.path, "checkout", "-q", "ai/task_0001_slow-crash");
     await writeFile(join(repo.path, "half-done.txt"), "partial\n");
     await stores.queue.update((q) => {
       q.tasks[0]!.status = "running";
@@ -416,7 +411,7 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     await fresh.init();
     expect((await fresh.list())[0]?.status).toBe("interrupted");
     expect(head(repo.path)).toBe("main");
-    expect(sh(repo.path, "show", "ai/task_0001_slow-crash:half-done.txt")).toBe("partial\n");
+    expect(sh(repo.path, "status", "--porcelain").trim()).toBe("?? half-done.txt");
   });
 
   it("discards tasks in any state, stopping a running one first", async () => {
@@ -429,32 +424,24 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
     await queue.discard(running.id);
 
     expect(await queue.list()).toEqual([]);
-    expect(sh(repo.path, "branch", "--list", "ai/*")).toBe("");
+    expect(aiBranches(repo.path)).toBe("");
     expect(head(repo.path)).toBe("main");
     const outcomes = Object.fromEntries((await queue.history()).map((h) => [h.taskId, h.outcome]));
     expect(outcomes).toEqual({ [running.id]: "discarded", [pending.id]: "discarded" });
     expect((await stores.activity.forTask(running.id)).at(-1)?.detail).toContain("Stopped and discarded");
   });
 
-  it("marks a reviewed task finished: keeps a branch with commits, deletes an empty one", async () => {
+  it("marks a reviewed task finished without touching the repo", async () => {
     const { queue, repo, stores } = await setup();
-    const withWork = await queue.create({ repo: repo.id, message: "real work" });
-    const done1 = await waitFor(taskWith(queue, withWork.id, "needs-review"));
-    const elsewhere = await queue.create({ repo: repo.id, message: "pushed to another branch" });
-    const done2 = await waitFor(taskWith(queue, elsewhere.id, "needs-review"));
-    // Its work landed somewhere else: the task branch has nothing on top of its base.
-    sh(repo.path, "branch", "-f", done2.branch!.name, done2.branch!.baseCommit);
-
-    await queue.markFinished(withWork.id);
-    await queue.markFinished(elsewhere.id);
-
+    const created = await queue.create({ repo: repo.id, message: "COMMIT real work" });
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+    const before = sh(repo.path, "log", "--all", "--format=%H %D");
+    await queue.markFinished(created.id);
     expect(await queue.list()).toEqual([]);
-    expect(sh(repo.path, "branch", "--list", "ai/*").trim()).toBe(done1.branch!.name);
-    expect(head(repo.path)).toBe("main");
-    const outcomes = Object.fromEntries((await queue.history()).map((h) => [h.taskId, h.outcome]));
-    expect(outcomes).toEqual({ [withWork.id]: "done", [elsewhere.id]: "done" });
-    expect((await stores.activity.forTask(withWork.id)).at(-1)?.detail).toContain("kept (1 commit)");
-    expect((await stores.activity.forTask(elsewhere.id)).at(-1)?.detail).toContain("had no commits, so it was deleted");
+    expect(sh(repo.path, "log", "--all", "--format=%H %D")).toBe(before);
+    expect(sh(repo.path, "status", "--porcelain").trim()).toBe("?? leftover.txt");
+    expect((await queue.history())[0]).toMatchObject({ taskId: created.id, outcome: "done" });
+    expect((await stores.activity.forTask(created.id)).at(-1)?.detail).toBe("Marked finished.");
 
     const pending = await queue.create({ repo: repo.id, message: "SLOW still going" });
     await expect(queue.markFinished(pending.id)).rejects.toThrow("only a task waiting for review");
@@ -545,6 +532,7 @@ describe("QueueService: branches in the repo itself (no worktrees)", () => {
         promptIds: [],
         repoPromptIds: null,
         extraRepos: [],
+        checkout: null,
         accountOverride: null,
         currentAccount: "work_1-claude",
         branch: null,

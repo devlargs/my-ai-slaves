@@ -12,7 +12,7 @@ import { PromptAssembler } from "./services/prompt-assembler";
 import { PromptLibrary } from "./services/prompt-library";
 import { QueueService } from "./services/queue-service";
 import { RepoService } from "./services/repo-service";
-import { BranchService } from "./services/branch-service";
+import { RepoGit } from "./services/repo-git";
 import { AttachmentStore } from "./storage/attachment-store";
 import { openDataStores } from "./storage/data-stores";
 import { LoginService } from "./login/login-service";
@@ -31,13 +31,13 @@ const adapters = createAdapters();
 const hub = new WsHub();
 const accounts = new AccountService(stores, adapters, hub);
 const repos = new RepoService(stores);
-const branches = new BranchService();
+const git = new RepoGit();
 const attachments = new AttachmentStore(stores.paths.attachmentsDir);
 const prompts = new PromptLibrary(stores);
 const assembler = new PromptAssembler({
   globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
 });
-const queue = new QueueService({ stores, accounts, repos, branches, assembler, adapters, broadcaster: hub, attachments, prompts });
+const queue = new QueueService({ stores, accounts, repos, git, assembler, adapters, broadcaster: hub, attachments, prompts });
 const logins = new LoginService(stores, accounts, adapters, {
   loginUpdated: (state) => hub.loginUpdated(state),
   onLoggedIn: () => void queue.tick(),

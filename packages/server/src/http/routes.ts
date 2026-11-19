@@ -239,11 +239,6 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
   app.get("/api/tasks/:id/history", (req) => stores.activity.forTask(params(req).id));
   app.get("/api/tasks/:id/diff", (req) => queue.diff(params(req).id));
-  app.post("/api/tasks/:id/keep", async (req) => {
-    await queue.keep(params(req).id);
-    return { ok: true };
-  });
-  app.post("/api/tasks/:id/push", (req) => queue.push(params(req).id));
   app.post("/api/tasks/:id/finish", async (req) => {
     await queue.markFinished(params(req).id);
     return { ok: true };

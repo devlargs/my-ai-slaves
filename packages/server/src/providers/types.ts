@@ -43,7 +43,7 @@ export interface AccountContext {
 export interface RunInput extends AccountContext {
   /** Fully assembled prompt, sent verbatim. */
   prompt: string;
-  /** Working directory: the repository itself (checked out on the task branch). */
+  /** Working directory: the repository itself, as it is checked out. */
   cwd: string;
   /** Continue an earlier CLI session (follow-up reply). */
   resume: { sessionId: string; fromConfigDir: string | null } | null;

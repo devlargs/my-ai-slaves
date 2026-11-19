@@ -184,7 +184,7 @@ export interface CreateTaskRequest {
 }
 /** PUT /api/tasks/order (body ReorderRequest, only pending tasks move) */
 /** POST /api/tasks/:id/cancel — pending: removed from queue; running: stopped → interrupted */
-/** POST /api/tasks/:id/retry — interrupted/needs-review: task branch reset to the base commit, back to pending */
+/** POST /api/tasks/:id/retry — interrupted/needs-review: back to pending, runs again in a new session (the repo is left as it is) */
 /** POST /api/tasks/:id/reply (body ReplyRequest) — needs-review: resumes the CLI session */
 export interface ReplyRequest {
   message: string;
@@ -220,21 +220,18 @@ export interface UpdatePromptRequest {
 export type TaskHistoryResponse = ActivityEntry[];
 /** GET /api/tasks/:id/diff */
 export interface DiffResponse {
-  /** Unified diff of the task branch vs the base commit it was created from. */
+  /** What changed in the checkout since the task started (committed, uncommitted and new files). */
   patch: string;
-  branch: string;
-  baseBranch: string;
-  baseCommit: string;
-  /** The repository the branch lives in. */
+  /** The branch checked out now (or the commit, when detached). */
+  ref: string;
+  /** The commit the changes are compared to. */
+  from: string;
+  /** Where the checkout was when the task started; null for a task from an older version (legacy ai/ branch). */
+  startedOn: { ref: string; commit: string } | null;
   repoPath: string;
 }
-/** POST /api/tasks/:id/keep → { ok: true } — the ai/ branch stays in the repo, task → done */
-/** POST /api/tasks/:id/push → PushResponse — commit leftovers, push, open PR/MR when gh/glab is available, task → done */
-export interface PushResponse {
-  url: string | null;
-  output: string;
-}
-/** POST /api/tasks/:id/discard (body { confirm: true }) → { ok: true } — stops it if running, deletes its ai/ branch */
+/** POST /api/tasks/:id/finish → { ok: true } — off the queue, into History as done; nothing in the repo is touched */
+/** POST /api/tasks/:id/discard (body { confirm: true }) → { ok: true } — stops it if running, off the queue; nothing in the repo is touched */
 
 // ── History ─────────────────────────────────────────────────────────────────
 /** GET /api/history → HistoryItem[] (newest first; tasks no longer in the queue) */
