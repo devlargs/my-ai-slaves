@@ -68,6 +68,11 @@ process.stdin.on("end", async () => {
 
   out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Work" } }, parent_tool_use_id: null });
   out({ type: "assistant", message: { content: [{ type: "text", text: "Working on it" }] }, parent_tool_use_id: null });
+  if (prompt.includes("MARKDOWN")) {
+    // A report like real agents write: headings, a table, lists, inline code.
+    const md = "I looked at it without changing anything.\n\n## Repos that need fixing\n\n| Repo | Needs a fix? | Why |\n|---|---|---|\n| **api** | **Yes** | Sends the wrong `regionId`. |\n| **web** | Probably not | Already shows it. |\n\n## Root cause\n- `utils/map.ts:57` fills both ids.\n- On submit only `regionId` is sent.\n\n```ts\nconst payload = { regionId: data.regionId };\n```";
+    out({ type: "assistant", message: { content: [{ type: "text", text: md }] }, parent_tool_use_id: null });
+  }
   const file = join(process.cwd(), `out-${label}.txt`);
   out({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Write", input: { file_path: file, content: prompt } }] }, parent_tool_use_id: null });
   writeFileSync(file, prompt);

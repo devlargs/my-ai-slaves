@@ -8,6 +8,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Markdown } from "@/components/markdown";
 import { Switch } from "@/components/ui/switch";
 import { type LiveItem, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -62,9 +63,9 @@ export function LiveOutput({ taskId }: { taskId: string }) {
               <LiveRow key={i} item={item} />
             ))}
             {live.streaming && (
-              <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">
-                {live.streaming}
-                <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-signal align-middle motion-reduce:animate-none" />
+              <div>
+                <Markdown>{live.streaming}</Markdown>
+                <span className="mt-1 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-signal align-middle motion-reduce:animate-none" />
               </div>
             )}
           </div>
@@ -77,7 +78,7 @@ export function LiveOutput({ taskId }: { taskId: string }) {
 function LiveRow({ item }: { item: LiveItem }) {
   switch (item.type) {
     case "message":
-      return <div className="py-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{item.text}</div>;
+      return <Markdown className="py-0.5">{item.text}</Markdown>;
     case "tool":
       return (
         <div className="flex items-start gap-2 rounded-md bg-paper-2 px-2.5 py-1.5 font-mono text-[11px] text-ink-2">

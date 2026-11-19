@@ -1,6 +1,7 @@
 import type { ActivityEntry } from "@my-ai-slaves/shared";
 import { ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
+import { Markdown } from "@/components/markdown";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { cn, formatTime } from "@/lib/utils";
 
@@ -35,9 +36,16 @@ export function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
 
 function TimelineRow({ entry }: { entry: ActivityEntry }) {
   const prompt = entry.event === "started" && typeof entry.data?.prompt === "string" ? entry.data.prompt : null;
-  const extra = entry.data && !prompt ? entry.data : null;
+  // The agent's messages and final result are markdown: shown rendered, not as JSON.
+  const agentText =
+    entry.event === "message" && typeof entry.data?.text === "string"
+      ? entry.data.text
+      : entry.event === "finished" && typeof entry.data?.result === "string" && entry.data.result.trim()
+        ? entry.data.result
+        : null;
+  const extra = entry.data && !prompt && agentText === null ? entry.data : null;
   const [open, setOpen] = useState(false);
-  const expandable = prompt !== null || (extra !== null && Object.keys(extra).length > 0);
+  const expandable = prompt !== null || agentText !== null || (extra !== null && Object.keys(extra).length > 0);
 
   return (
     <li className="px-3 py-2">
@@ -63,6 +71,11 @@ function TimelineRow({ entry }: { entry: ActivityEntry }) {
         <div className="mt-2">
           <div className="label-mono mb-1.5">Prompt sent to the CLI</div>
           <pre className="scroll-quiet max-h-80 overflow-auto rounded-md bg-paper-2 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-ink-2">{prompt}</pre>
+        </div>
+      )}
+      {open && agentText !== null && (
+        <div className="scroll-quiet mt-2 max-h-[32rem] overflow-auto rounded-md border border-rule bg-paper px-3 py-2.5">
+          <Markdown>{agentText}</Markdown>
         </div>
       )}
       {open && extra && (
