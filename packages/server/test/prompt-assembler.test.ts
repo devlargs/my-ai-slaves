@@ -15,8 +15,20 @@ describe("assemblePrompt", () => {
       { name: "repo", included: false },
       { name: "prompts", included: false },
       { name: "message", included: true },
+      { name: "repos", included: false },
       { name: "attachments", included: false },
     ]);
+  });
+
+  it("lists a cross-repo task's other repos after the message, before attached files", () => {
+    const { prompt, layers } = assemblePrompt({
+      globalBase: "G",
+      message: "M",
+      otherRepos: [{ name: "api", path: "/code/api" }, { name: "web", path: "/code/web" }],
+      attachmentPaths: ["/tmp/a.png"],
+    });
+    expect(prompt).toBe("G\n\nM\n\nOther repositories:\n- api: /code/api\n- web: /code/web\n\nAttached files:\n- /tmp/a.png");
+    expect(layers.find((l) => l.name === "repos")).toEqual({ name: "repos", included: true });
   });
 
   it("orders global → repo → message, joined by one blank line", () => {

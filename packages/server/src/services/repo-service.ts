@@ -40,6 +40,24 @@ export class RepoService {
     return repo;
   }
 
+  /**
+   * The other repos of a cross-repo task: registered, not the main one, and on the same machine
+   * (one CLI run reaches them all). Returned in the order given, duplicates dropped.
+   */
+  async extras(main: Repo, ids: string[] | undefined): Promise<Repo[]> {
+    const wanted = [...new Set(ids ?? [])].filter((id) => id !== main.id);
+    const extras: Repo[] = [];
+    for (const id of wanted) {
+      const repo = await this.get(id);
+      if ((repo.host ?? null) !== (main.host ?? null)) {
+        const where = (r: Repo) => (r.host ? `on ${r.host}` : "on this Mac");
+        throw badRequest(`${repo.name} is ${where(repo)} but ${main.name} is ${where(main)}. A task's repos must be on the same machine.`);
+      }
+      extras.push(repo);
+    }
+    return extras;
+  }
+
   /** Repos with their last known reachability; stale ones are re-checked in the background. */
   async listViews(): Promise<RepoView[]> {
     const repos = await this.list();
@@ -233,7 +251,7 @@ export class RepoService {
 
   async remove(id: string): Promise<void> {
     await this.get(id);
-    const tasks = (await this.stores.queue.read()).tasks.filter((t) => t.repo === id);
+    const tasks = (await this.stores.queue.read()).tasks.filter((t) => t.repo === id || t.extraRepos.some((x) => x.repo === id));
     if (tasks.length) throw conflict(`"${id}" still has ${tasks.length} task(s) in the queue. Finish or discard them first.`);
     await this.stores.repos.update((file) => {
       file.repos = file.repos.filter((r) => r.id !== id);

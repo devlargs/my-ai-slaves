@@ -1,11 +1,18 @@
 /**
  * Builds the exact text sent to a CLI: no headings, no role text, no wrapper. The output is the
- * non-empty layers (global base → ticked repo prompts → bound saved prompts → message → attachments),
- * unchanged, joined by one blank line. The only app-written text is the list of attached file
- * paths, and only when you attach files.
+ * non-empty layers (global base → ticked repo prompts → bound saved prompts → message → other repos →
+ * attachments), unchanged, joined by one blank line. The only app-written text is the two path lists:
+ * the other repos' folders (only when a task spans several repos) and attached files (only when you
+ * attach some).
  */
 
-export type PromptLayerName = "global" | "repo" | "prompts" | "message" | "attachments";
+export type PromptLayerName = "global" | "repo" | "prompts" | "message" | "repos" | "attachments";
+
+/** Another repo opened in the same run. */
+export interface OtherRepo {
+  name: string;
+  path: string;
+}
 
 export interface PromptLayers {
   /** `settings.json` → `basePrompt` */
@@ -16,6 +23,8 @@ export interface PromptLayers {
   boundPrompts?: string[];
   /** What you typed for this task. */
   message: string;
+  /** The task's other repos (cross-repo work): the CLI has to be told where they are. */
+  otherRepos?: OtherRepo[];
   /** Absolute paths of files you attached (pasted / uploaded). */
   attachmentPaths?: string[];
 }
@@ -35,6 +44,14 @@ export function attachmentsLayer(paths: string[]): string {
   return paths.length ? `Attached files:\n${paths.map((p) => `- ${p}`).join("\n")}` : "";
 }
 
+/**
+ * App-written too, and only when a task spans several repos: where the other repos are. The CLI runs
+ * in the main repo and gets each of these as an extra directory. A visible layer in "Preview prompt".
+ */
+export function otherReposLayer(repos: OtherRepo[]): string {
+  return repos.length ? `Other repositories:\n${repos.map((r) => `- ${r.name}: ${r.path}`).join("\n")}` : "";
+}
+
 /** A layer that is empty or only whitespace is skipped entirely. */
 const isBlank = (text: string) => text.trim() === "";
 
@@ -52,6 +69,7 @@ export function assemblePrompt({
   repoPrompts = [],
   boundPrompts = [],
   message,
+  otherRepos = [],
   attachmentPaths = [],
 }: PromptLayers): AssembledPrompt {
   if (isBlank(message)) throw new EmptyMessageError();
@@ -60,6 +78,7 @@ export function assemblePrompt({
     ["repo", joinBound(repoPrompts)],
     ["prompts", joinBound(boundPrompts)],
     ["message", message],
+    ["repos", otherReposLayer(otherRepos)],
     ["attachments", attachmentsLayer(attachmentPaths)],
   ];
   return {
@@ -86,6 +105,7 @@ export function assembleReply(message: string, attachmentPaths: string[] = [], b
       { name: "repo", included: false },
       { name: "prompts", included: bound !== "" },
       { name: "message", included: true },
+      { name: "repos", included: false },
       { name: "attachments", included: files !== "" },
     ],
   };
@@ -100,12 +120,9 @@ export class PromptAssembler {
   constructor(private readonly sources: BasePromptSources) {}
 
   /** `repoPrompts` / `boundPrompts`: the current text of the prompts ticked for this task. */
-  async forTask(
-    message: string,
-    { repoPrompts = [], boundPrompts = [], attachmentPaths = [] }: { repoPrompts?: string[]; boundPrompts?: string[]; attachmentPaths?: string[] } = {},
-  ): Promise<AssembledPrompt> {
+  async forTask(message: string, layers: Omit<PromptLayers, "globalBase" | "message"> = {}): Promise<AssembledPrompt> {
     const globalBase = await this.sources.globalBasePrompt();
-    return assemblePrompt({ globalBase, repoPrompts, boundPrompts, message, attachmentPaths });
+    return assemblePrompt({ ...layers, globalBase, message });
   }
 
   forReply(message: string, attachmentPaths: string[] = [], boundPrompts: string[] = []): AssembledPrompt {

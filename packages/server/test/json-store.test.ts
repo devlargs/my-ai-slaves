@@ -70,6 +70,7 @@ describe("JsonStore", () => {
       "id",
       "title",
       "repo",
+      "extraRepos",
       "status",
       "message",
       "attachments",

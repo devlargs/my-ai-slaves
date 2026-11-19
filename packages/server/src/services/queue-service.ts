@@ -34,6 +34,8 @@ interface LiveRun {
   checkedOut: boolean;
   taskId: string;
   repo: string;
+  /** Every repo the run holds (the main one + the task's other repos): busy until it ends. */
+  repos: string[];
   account: Account;
   handle: RunHandle;
   isReply: boolean;
@@ -60,6 +62,14 @@ export interface QueueDeps {
 
 /** The repo's committer setting; null fields fall back to your git config. */
 const identityOf = (repo: Repo) => ({ name: repo.committerName, email: repo.committerEmail });
+
+/** A cross-repo task's other repo, resolved, with its branch (null before its first run). */
+interface ExtraRepo {
+  repo: Repo;
+  br: TaskBranch | null;
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const pushCapped = <T>(list: T[], item: T) => {
   list.push(item);
@@ -125,6 +135,7 @@ export class QueueService {
           .catch((e: Error) => ({ committed: false, warning: e.message }));
         if (settled.warning) this.log({ taskId: task.id, repo: task.repo, account: null, event: "warning", detail: settled.warning });
       }
+      await this.settleExtras(task, `${task.title} (interrupted)`);
       this.log({
         taskId: task.id,
         repo: task.repo,
@@ -215,6 +226,69 @@ export class QueueService {
     this.waitingNotes.delete(id);
   }
 
+  /** The task's other repos that are still registered, with their branches. */
+  private async extrasOf(task: Task): Promise<ExtraRepo[]> {
+    if (task.extraRepos.length === 0) return [];
+    const repos = await this.deps.repos.list();
+    return task.extraRepos.flatMap((x) => {
+      const repo = repos.find((r) => r.id === x.repo);
+      return repo ? [{ repo, br: x.branch }] : [];
+    });
+  }
+
+  /** The other repos that have a branch, for actions that only touch existing branches. */
+  private async extraBranchesOf(task: Task): Promise<{ repo: Repo; br: TaskBranch }[]> {
+    return (await this.extrasOf(task)).flatMap((x) => (x.br ? [{ repo: x.repo, br: x.br }] : []));
+  }
+
+  /** After a run: commit each other repo's work on its branch and check its previous branch out again. */
+  private async settleExtras(task: Task, message: string): Promise<void> {
+    for (const { repo, br } of await this.extraBranchesOf(task)) {
+      const settled = await this.deps.branches
+        .settle(repo, br, message, identityOf(repo))
+        .catch((e: Error) => ({ committed: false, warning: `${repo.name}: couldn't commit or switch back: ${e.message}` }));
+      if (settled.warning) this.log({ taskId: task.id, repo: task.repo, account: null, event: "warning", detail: settled.warning });
+    }
+  }
+
+  private async resetExtras(task: Task): Promise<void> {
+    for (const { repo, br } of await this.extraBranchesOf(task)) await this.deps.branches.resetToBase(repo, br);
+  }
+
+  private async deleteExtras(task: Task): Promise<void> {
+    for (const { repo, br } of await this.extraBranchesOf(task)) await this.deps.branches.deleteBranch(repo, br);
+  }
+
+  /**
+   * Keep / Push / Mark finished for the other repos: a branch the agent left commits on is kept
+   * (AI co-author lines stripped) and, when pushing, pushed with its own PR/MR; an empty one (the
+   * repo was only read) is deleted.
+   */
+  private async wrapUpExtras(task: Task, push: boolean): Promise<{ notes: string[]; pushed: PushResponse["others"]; output: string[] }> {
+    const notes: string[] = [];
+    const pushed: PushResponse["others"] = [];
+    const output: string[] = [];
+    for (const { repo, br } of await this.extraBranchesOf(task)) {
+      const commits = await this.deps.branches.commitCount(repo, br);
+      if (commits === null) continue;
+      if (commits === 0) {
+        await this.deps.branches.deleteBranch(repo, br);
+        notes.push(`${repo.name}: no changes, branch deleted`);
+        continue;
+      }
+      await this.deps.branches.stripAiTrailers(repo, br);
+      if (push) {
+        const result = await this.deps.branches.push(repo, br, task.title);
+        pushed.push({ repo: repo.id, branch: br.name, url: result.url });
+        if (result.output) output.push(`── ${repo.name} ──\n${result.output}`);
+        notes.push(`${repo.name}: pushed ${br.name}${result.url ? ` (${result.url})` : ""}`);
+      } else {
+        notes.push(`${repo.name}: kept ${br.name} (${plural(commits, "commit")})`);
+      }
+    }
+    return { notes, pushed, output };
+  }
+
   // ── commands ─────────────────────────────────────────────────────────────
 
   async create(req: CreateTaskRequest): Promise<TaskView> {
@@ -231,6 +305,7 @@ export class QueueService {
     // Not given (API, scripts) = the repo's default prompts, as the composer pre-ticks them.
     const repoPrompts = await this.deps.repos.prompts(repo.id);
     const repoPromptIds = req.repoPromptIds === undefined ? await repoPrompts.defaultIds() : await repoPrompts.validate(req.repoPromptIds);
+    const extras = await this.deps.repos.extras(repo, req.extraRepos);
 
     const firstLine = message.trim().split("\n")[0] ?? "";
     const title = firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
@@ -245,6 +320,7 @@ export class QueueService {
         id,
         title,
         repo: repo.id,
+        extraRepos: extras.map((r) => ({ repo: r.id, branch: null })),
         status: "pending",
         message,
         attachments,
@@ -268,7 +344,15 @@ export class QueueService {
       account: override,
       event: "queued",
       detail: `Queued: ${created.title}`,
-      data: { title: created.title, message, accountOverride: override, attachments, promptIds, repoPromptIds },
+      data: {
+        title: created.title,
+        message,
+        accountOverride: override,
+        attachments,
+        promptIds,
+        repoPromptIds,
+        extraRepos: extras.map((r) => r.id),
+      },
     });
     await this.publish();
     void this.tick();
@@ -308,6 +392,7 @@ export class QueueService {
       this.log({ taskId: id, repo: task.repo, account: null, event: "cancelled", detail: "Queued reply cancelled." });
     } else {
       if (task.branch) await this.deps.branches.deleteBranch(await this.deps.repos.get(task.repo), task.branch);
+      await this.deleteExtras(task);
       await this.removeTask(id);
       this.log({ taskId: id, repo: task.repo, account: null, event: "cancelled", detail: "Cancelled before it ran." });
       this.deps.broadcaster.taskStatus(id, "failed", "Cancelled");
@@ -323,6 +408,7 @@ export class QueueService {
       throw conflict(`Only interrupted or needs-review tasks can be retried (this one is ${task.status}).`);
     }
     if (task.branch) await this.deps.branches.resetToBase(await this.deps.repos.get(task.repo), task.branch);
+    await this.resetExtras(task);
     await this.updateTask(id, (t) => {
       t.status = "pending";
       t.session = null;
@@ -370,14 +456,39 @@ export class QueueService {
     if (!task.branch) throw conflict("This task has no branch yet.");
     const repo = await this.deps.repos.get(task.repo);
     const br = task.branch;
-    return { patch: await this.deps.branches.diff(repo, br), branch: br.name, baseBranch: br.base, baseCommit: br.baseCommit, repoPath: repo.path };
+    const others = await Promise.all(
+      (await this.extraBranchesOf(task)).map(async (x) => ({
+        repo: x.repo.id,
+        patch: await this.deps.branches.diff(x.repo, x.br),
+        branch: x.br.name,
+        baseBranch: x.br.base,
+        baseCommit: x.br.baseCommit,
+        repoPath: x.repo.path,
+      })),
+    );
+    return {
+      patch: await this.deps.branches.diff(repo, br),
+      branch: br.name,
+      baseBranch: br.base,
+      baseCommit: br.baseCommit,
+      repoPath: repo.path,
+      others,
+    };
   }
 
   async keep(id: string): Promise<void> {
     const { task, repo, br } = await this.reviewable(id);
     await this.deps.branches.stripAiTrailers(repo, br);
+    const extras = await this.wrapUpExtras(task, false);
     await this.removeTask(id);
-    this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "kept", detail: `Kept branch ${br.name}`, data: { branch: br.name } });
+    this.log({
+      taskId: id,
+      repo: task.repo,
+      account: task.currentAccount,
+      event: "kept",
+      detail: [`Kept branch ${br.name}`, ...extras.notes].join(". "),
+      data: { branch: br.name },
+    });
     this.deps.broadcaster.taskStatus(id, "done", `Kept branch ${br.name}`);
     await this.publish();
   }
@@ -386,18 +497,22 @@ export class QueueService {
     const { task, repo, br } = await this.reviewable(id);
     await this.deps.branches.stripAiTrailers(repo, br);
     const result = await this.deps.branches.push(repo, br, task.title);
+    const extras = await this.wrapUpExtras(task, true);
+    const output = [extras.output.length ? `── ${repo.name} ──\n${result.output}` : result.output, ...extras.output]
+      .filter(Boolean)
+      .join("\n\n");
     await this.removeTask(id);
     this.log({
       taskId: id,
       repo: task.repo,
       account: task.currentAccount,
       event: "pushed",
-      detail: result.url ? `Pushed ${br.name}: ${result.url}` : `Pushed ${br.name}`,
-      data: { branch: br.name, url: result.url, output: result.output },
+      detail: [result.url ? `Pushed ${br.name}: ${result.url}` : `Pushed ${br.name}`, ...extras.notes].join(". "),
+      data: { branch: br.name, url: result.url, output, others: extras.pushed },
     });
     this.deps.broadcaster.taskStatus(id, "done", `Pushed ${br.name}`);
     await this.publish();
-    return result;
+    return { url: result.url, output, others: extras.pushed };
   }
 
   /**
@@ -418,9 +533,11 @@ export class QueueService {
         detail = `Marked finished. Branch ${task.branch.name} had no commits, so it was deleted.`;
       } else if (commits !== null) {
         await this.deps.branches.stripAiTrailers(repo, task.branch);
-        detail = `Marked finished. Branch ${task.branch.name} kept (${commits} commit${commits === 1 ? "" : "s"}).`;
+        detail = `Marked finished. Branch ${task.branch.name} kept (${plural(commits, "commit")}).`;
       }
     }
+    const extras = await this.wrapUpExtras(task, false);
+    if (extras.notes.length) detail = `${detail} ${extras.notes.join(". ")}.`;
     await this.removeTask(id);
     this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "marked-finished", detail, data: { branch: task.branch?.name ?? null } });
     this.deps.broadcaster.taskStatus(id, "done", detail);
@@ -433,6 +550,7 @@ export class QueueService {
     const wasRunning = task.status === "running";
     if (wasRunning) task = await this.stopForDiscard(id);
     if (task.branch) await this.deps.branches.deleteBranch(await this.deps.repos.get(task.repo), task.branch);
+    await this.deleteExtras(task);
     await this.removeTask(id);
     this.log({
       taskId: id,
@@ -538,7 +656,7 @@ export class QueueService {
     const now = this.now();
 
     let running = this.live.size;
-    const busyRepos = new Set([...this.live.values()].map((r) => r.repo));
+    const busyRepos = new Set([...this.live.values()].flatMap((r) => r.repos));
     const notes = new Map<string, string>();
     let wakeAt: number | null = null;
 
@@ -548,8 +666,10 @@ export class QueueService {
         notes.set(task.id, `Waiting for a free slot (${running} of ${settings.maxParallelTasks} running).`);
         continue;
       }
-      if (busyRepos.has(task.repo)) {
-        notes.set(task.id, "Waiting for the other task on this repo to finish.");
+      const taskRepos = [task.repo, ...task.extraRepos.map((x) => x.repo)];
+      const busy = taskRepos.find((id) => busyRepos.has(id));
+      if (busy) {
+        notes.set(task.id, busy === task.repo ? "Waiting for the other task on this repo to finish." : `Waiting for the other task on ${busy} to finish.`);
         continue;
       }
       const repo = repos.find((r) => r.id === task.repo);
@@ -557,23 +677,9 @@ export class QueueService {
         notes.set(task.id, `Repo "${task.repo}" is no longer registered.`);
         continue;
       }
-      // A repo that can't be reached right now (SSH host down, folder gone): wait, it's re-checked.
-      const availability = this.deps.repos.availabilityOf(repo.id);
-      if (availability?.state === "unreachable") {
-        notes.set(task.id, `Unable to load ${repo.name} at this time (${availability.message ?? "unreachable"}). Retrying automatically.`);
-        continue;
-      }
-      // Tasks switch branches in your checkout, so they only start on a clean working tree.
-      let clean: boolean | null = null;
-      try {
-        clean = await this.deps.branches.isClean(repo);
-      } catch (error) {
-        this.deps.repos.markUnreachable(repo, error);
-        notes.set(task.id, `Unable to load ${repo.name} at this time. Retrying automatically.`);
-        continue;
-      }
-      if (!clean) {
-        notes.set(task.id, `${repo.name} has uncommitted changes. Commit or stash them; tasks switch branches in your checkout.`);
+      const blocked = await this.notReady(taskRepos, repos);
+      if (blocked) {
+        notes.set(task.id, blocked);
         continue;
       }
       const isReply = task.pendingReply !== null && task.session !== null;
@@ -593,7 +699,7 @@ export class QueueService {
         continue;
       }
       running += 1;
-      busyRepos.add(task.repo);
+      for (const id of taskRepos) busyRepos.add(id);
       await this.startRun(task, repo, pick.account, isReply);
     }
 
@@ -611,6 +717,31 @@ export class QueueService {
     }
   }
 
+  /**
+   * Why a task's repos can't take a run right now (null = they can): one is gone, can't be reached,
+   * or has uncommitted changes (tasks switch branches in your checkout).
+   */
+  private async notReady(ids: string[], repos: Repo[]): Promise<string | null> {
+    for (const id of ids) {
+      const repo = repos.find((r) => r.id === id);
+      if (!repo) return `Repo "${id}" is no longer registered.`;
+      // A repo that can't be reached right now (SSH host down, folder gone): wait, it's re-checked.
+      const availability = this.deps.repos.availabilityOf(repo.id);
+      if (availability?.state === "unreachable") {
+        return `Unable to load ${repo.name} at this time (${availability.message ?? "unreachable"}). Retrying automatically.`;
+      }
+      let clean: boolean;
+      try {
+        clean = await this.deps.branches.isClean(repo);
+      } catch (error) {
+        this.deps.repos.markUnreachable(repo, error);
+        return `Unable to load ${repo.name} at this time. Retrying automatically.`;
+      }
+      if (!clean) return `${repo.name} has uncommitted changes. Commit or stash them; tasks switch branches in your checkout.`;
+    }
+    return null;
+  }
+
   // ── running ──────────────────────────────────────────────────────────────
 
   private async startRun(task: Task, repo: Repo, account: Account, isReply: boolean): Promise<void> {
@@ -619,6 +750,8 @@ export class QueueService {
     this.buffers.set(task.id, buffer);
 
     let checkedOut = false;
+    const extras = await this.extrasOf(task);
+    const heldRepos = [repo.id, ...extras.map((x) => x.repo.id)];
     try {
       await this.updateTask(task.id, (t) => {
         t.status = "running";
@@ -630,6 +763,23 @@ export class QueueService {
       await this.updateTask(task.id, (t) => {
         t.branch = br;
       });
+      // The other repos get the same branch name, each from its own base branch.
+      const switched: { repo: Repo; br: TaskBranch }[] = [];
+      try {
+        for (const x of extras) {
+          const xbr = await this.deps.branches.checkoutForRun(x.repo, task.id, x.br, !isReply);
+          switched.push({ repo: x.repo, br: xbr });
+          await this.updateTask(task.id, (t) => {
+            const entry = t.extraRepos.find((e) => e.repo === x.repo.id);
+            if (entry) entry.branch = xbr;
+          });
+        }
+      } catch (error) {
+        // Nothing has run yet: give every repo already switched its previous branch back.
+        for (const done of [...switched, { repo, br }].reverse()) await this.deps.branches.settle(done.repo, done.br, task.title).catch(() => {});
+        checkedOut = false;
+        throw error;
+      }
 
       // Attached files: on this Mac they're read in place; for a remote repo they're copied to the server.
       const allFiles = [...task.attachments, ...task.replies.flatMap((r) => r.attachments)];
@@ -637,7 +787,7 @@ export class QueueService {
       const runFiles = isReply ? (task.replies.at(-1)?.attachments ?? []) : task.attachments;
       const runPaths = runFiles.map((a) => located.get(a.id)?.path as string);
       // The session may refer back to earlier files, so every file of the task stays readable.
-      const addDirs = allFiles.map((a) => located.get(a.id)?.dir as string);
+      const addDirs = [...extras.map((x) => x.repo.path), ...allFiles.map((a) => located.get(a.id)?.dir as string)];
       // Bound saved prompts: their current text, read now (like the base prompts).
       const boundIds = isReply ? (task.replies.at(-1)?.promptIds ?? []) : task.promptIds;
       const bound = await this.deps.prompts.resolve(boundIds);
@@ -670,6 +820,7 @@ export class QueueService {
         : await this.deps.assembler.forTask(task.message, {
             repoPrompts: repoBound.prompts.map((p) => p.body),
             boundPrompts: boundBodies,
+            otherRepos: extras.map((x) => ({ name: x.repo.name, path: x.repo.path })),
             attachmentPaths: runPaths,
           });
 
@@ -694,6 +845,7 @@ export class QueueService {
           branch: br.name,
           baseBranch: br.base,
           cwd: repo.path,
+          extraRepos: extras.map((x) => ({ repo: x.repo.id, path: x.repo.path })),
           layers: assembled.layers,
           boundPrompts: bound.prompts.map((p) => ({ id: p.id, name: p.name })),
           repoPrompts: repoBound.prompts.map((p) => ({ id: p.id, name: p.name })),
@@ -713,7 +865,16 @@ export class QueueService {
         },
         settings,
       );
-      const run: LiveRun = { checkedOut: true, taskId: task.id, repo: repo.id, account, handle, isReply, cancelRequested: false };
+      const run: LiveRun = {
+        checkedOut: true,
+        taskId: task.id,
+        repo: repo.id,
+        repos: heldRepos,
+        account,
+        handle,
+        isReply,
+        cancelRequested: false,
+      };
       this.live.set(task.id, run);
 
       handle.onStream((event) => this.onEvent(run, event, buffer));
@@ -742,7 +903,7 @@ export class QueueService {
       }
       // Couldn't start (base branch missing, CLI setup…). Treat as a failed run.
       await this.finishRun(
-        { checkedOut, taskId: task.id, repo: repo.id, account, handle: null as never, isReply, cancelRequested: false },
+        { checkedOut, taskId: task.id, repo: repo.id, repos: heldRepos, account, handle: null as never, isReply, cancelRequested: false },
         { outcome: "failed", exitCode: null, message: (error as Error).message, stderrTail: "" },
       );
     }
@@ -786,6 +947,7 @@ export class QueueService {
         .settle(repo, task.branch, message, identityOf(repo))
         .catch((e: Error) => ({ committed: false, warning: `Couldn't commit or switch back: ${e.message}` }));
       if (settled.warning) this.log({ ...base, event: "warning", detail: settled.warning });
+      await this.settleExtras(task, message);
     }
 
     switch (result.outcome) {
@@ -824,6 +986,7 @@ export class QueueService {
 
         // Fresh runs start over on the next account; replies keep their session and wait for a same-CLI account.
         if (!run.isReply && repo && task.branch) await this.deps.branches.resetToBase(repo, task.branch);
+        if (!run.isReply) await this.resetExtras(task);
         await this.updateTask(task.id, (t) => {
           t.status = "pending";
           t.currentAccount = null;
@@ -873,6 +1036,7 @@ export class QueueService {
           this.deps.broadcaster.taskStatus(task.id, "needs-review", `Reply failed: ${result.message}`);
         } else {
           if (repo && task.branch) await this.deps.branches.deleteBranch(repo, task.branch);
+          await this.deleteExtras(task);
           await this.removeTask(task.id);
           this.log({ ...base, event: "failed", detail: result.message.slice(0, 500), data });
           this.deps.broadcaster.taskStatus(task.id, "failed", result.message);

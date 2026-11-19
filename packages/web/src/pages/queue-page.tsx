@@ -39,6 +39,7 @@ import {
   useRepoPrompts,
 } from "@/components/prompt-picker";
 import { PanelHeader } from "@/components/page-header";
+import { RepoPicker, type RepoSelection } from "@/components/repo-picker";
 import { SortableList } from "@/components/sortable-list";
 import { TaskStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,16 @@ import { cn, formatTime, storageGet, storageSet } from "@/lib/utils";
 
 const CHAIN = "__chain__";
 const REPO_KEY = "slaves.lastRepo";
+const EXTRA_REPOS_KEY = "slaves.lastExtraRepos";
+
+function storedExtras(): string[] {
+  try {
+    const list: unknown = JSON.parse(storageGet(EXTRA_REPOS_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 export function QueuePage() {
   const tasks = useStore((s) => s.tasks);
@@ -179,7 +190,10 @@ function QueueList({
               <TaskStatusBadge status={task.status} className="shrink-0" />
             </div>
             <div className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-              <span className="truncate">{task.repo}</span>
+              <span className="truncate" title={[task.repo, ...task.extraRepos.map((x) => x.repo)].join(" + ")}>
+                {task.repo}
+                {task.extraRepos.length > 0 && ` +${task.extraRepos.length}`}
+              </span>
               {task.currentAccount && (
                 <>
                   <span aria-hidden>·</span>
@@ -289,6 +303,14 @@ function Composer() {
   const { data: repos } = useApi<RepoView[]>(() => api.getRepos(), []);
   const accounts = useStore((s) => s.accounts);
   const [repo, setRepo] = useState<string | undefined>(() => storageGet(REPO_KEY) ?? undefined);
+  // Cross-repo work: other repos (same machine) opened alongside the main one.
+  const [extras, setExtras] = useState<string[]>(storedExtras);
+  const selectRepos = ({ main, extras: next }: RepoSelection) => {
+    setRepo(main);
+    setExtras(next);
+    if (main) storageSet(REPO_KEY, main);
+    storageSet(EXTRA_REPOS_KEY, JSON.stringify(next));
+  };
   const [account, setAccount] = useState<string>(CHAIN);
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState(false);
@@ -305,14 +327,20 @@ function Composer() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: only when another repo's list arrives
   useEffect(tickDefaults, [repoPrompts.loadedFor]);
 
-  // Fall back to the first repo when the remembered one is gone.
+  // Fall back to the first repo when the remembered one is gone; drop other repos that can't go with it.
   useEffect(() => {
     if (!repos) return;
-    if (!repo || !repos.some((r) => r.id === repo)) setRepo(repos[0]?.id);
-  }, [repos, repo]);
+    const main = repos.find((r) => r.id === repo) ?? repos[0];
+    if (main?.id !== repo) setRepo(main?.id);
+    const valid = extras.filter((id) => {
+      const r = repos.find((x) => x.id === id);
+      return r && r.id !== main?.id && (r.host ?? null) === (main?.host ?? null);
+    });
+    if (valid.length !== extras.length) setExtras(valid);
+  }, [repos, repo, extras]);
 
   const currentRepo = repos?.find((r) => r.id === repo);
-  const repoDown = currentRepo?.availability.state === "unreachable";
+  const downRepo = repos?.find((r) => (r.id === repo || extras.includes(r.id)) && r.availability.state === "unreachable");
   const chainEmpty = currentRepo && currentRepo.accountChain.length === 0 && account === CHAIN;
   const canSend = Boolean(repo && message.trim()) && !busy && !files.uploading && !files.failed;
 
@@ -327,6 +355,7 @@ function Composer() {
         attachmentIds: files.ids,
         promptIds: bound.ids,
         repoPromptIds: repoBound.ids,
+        extraRepos: extras,
       }),
       "Task queued",
     );
@@ -356,20 +385,7 @@ function Composer() {
       <DropZone attachments={files}>
         <div className="rounded-lg border border-rule-strong bg-surface transition-[border-color,box-shadow] duration-150 focus-within:border-signal/60 focus-within:ring-3 focus-within:ring-signal/10">
           <div className="flex gap-1.5 border-b border-rule px-2 py-1.5">
-            <Select
-              aria-label="Repository"
-              value={repo}
-              onValueChange={(v) => {
-                setRepo(v);
-                storageSet(REPO_KEY, v);
-              }}
-              placeholder="Repository"
-              className="h-7 w-auto min-w-0 flex-1 border-transparent bg-transparent text-xs font-medium hover:bg-paper-2"
-              options={(repos ?? []).map((r) => ({
-                value: r.id,
-                label: `${r.name}${r.host ? ` · ${r.host}` : ""}${r.availability.state === "unreachable" ? " (unreachable)" : ""}`,
-              }))}
-            />
+            <RepoPicker repos={repos ?? []} value={{ main: repo, extras }} onChange={selectRepos} />
             <Select
               aria-label="Account"
               value={account}
@@ -424,12 +440,12 @@ function Composer() {
           </div>
         </div>
       </DropZone>
-      {repoDown && (
+      {downRepo && (
         <div className="flex items-start gap-1.5 rounded-md bg-warning-soft px-2.5 py-1.5 text-xs text-warning-ink">
           <AlertTriangleIcon className="mt-px size-3.5 shrink-0" />
           <span>
-            Unable to load {currentRepo?.name} at this time
-            {currentRepo?.availability.message ? ` (${currentRepo.availability.message})` : ""}. You can still queue: the task
+            Unable to load {downRepo.name} at this time
+            {downRepo.availability.message ? ` (${downRepo.availability.message})` : ""}. You can still queue: the task
             waits and starts once the repo is reachable.
           </span>
         </div>
@@ -453,6 +469,7 @@ function Composer() {
           attachmentIds={files.ids}
           promptIds={bound.ids}
           repoPromptIds={repoBound.ids}
+          extraRepos={extras}
         />
       )}
     </div>
@@ -465,12 +482,14 @@ function PromptPreview({
   attachmentIds,
   promptIds,
   repoPromptIds,
+  extraRepos,
 }: {
   repo: string;
   message: string;
   attachmentIds: string[];
   promptIds: string[];
   repoPromptIds: string[];
+  extraRepos: string[];
 }) {
   const debounced = useDebounced(message, 300);
   const [result, setResult] = useState<PromptPreviewResponse | null>(null);
@@ -484,7 +503,7 @@ function PromptPreview({
       return;
     }
     api
-      .previewPrompt({ repo, message: debounced, attachmentIds, promptIds, repoPromptIds })
+      .previewPrompt({ repo, message: debounced, attachmentIds, promptIds, repoPromptIds, extraRepos })
       .then((r) => {
         if (!cancelled) {
           setResult(r);
@@ -497,7 +516,7 @@ function PromptPreview({
     return () => {
       cancelled = true;
     };
-  }, [repo, debounced, attachmentIds.join(","), promptIds.join(","), repoPromptIds.join(",")]);
+  }, [repo, debounced, attachmentIds.join(","), promptIds.join(","), repoPromptIds.join(","), extraRepos.join(",")]);
 
   return (
     <div className="overflow-hidden rounded-lg border border-rule bg-surface">
@@ -505,7 +524,7 @@ function PromptPreview({
         <span className="label-mono">Exactly what will be sent</span>
         <span className="ml-auto flex flex-wrap gap-1">
           {result?.layers
-            .filter((l) => (l.name !== "attachments" && l.name !== "prompts" && l.name !== "repo") || l.included)
+            .filter((l) => !["attachments", "prompts", "repo", "repos"].includes(l.name) || l.included)
             .map((l) => (
               <Badge
                 key={l.name}
@@ -550,6 +569,7 @@ function TaskDetail({ task }: { task: TaskView }) {
         </div>
         <dl className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground">
           <Meta label="repo" value={task.repo} />
+          {task.extraRepos.length > 0 && <Meta label="also" value={task.extraRepos.map((x) => x.repo).join(", ")} />}
           {task.currentAccount && <Meta label="account" value={task.currentAccount} />}
           {task.accountOverride && <Meta label="override" value={task.accountOverride} />}
           {task.branch && <Meta label="branch" value={`${task.branch.name} ← ${task.branch.base}`} />}
@@ -785,6 +805,7 @@ function PromptReceived({ taskId, version }: { taskId: string; version: string }
           </span>
         )}
         {layer("message", "your message")}
+        {has("repos") && layer("repos", "other repos' paths")}
         {has("attachments") && layer("attachments", "attached files")}
         <button
           type="button"

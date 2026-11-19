@@ -34,6 +34,12 @@ export const TaskSession = z.object({
   sessionId: z.string(),
 });
 
+/** Another repo opened in the same run (cross-repo work): it gets its own `ai/<task-id>` branch. */
+export const TaskExtraRepo = z.object({
+  repo: z.string(),
+  branch: TaskBranch.nullable().default(null),
+});
+
 export const TaskReply = z.object({
   at: Timestamp,
   message: z.string(),
@@ -45,7 +51,10 @@ export const TaskReply = z.object({
 export const Task = z.object({
   id: z.string().regex(/^task_\d{4,}_[a-z0-9-]*$/),
   title: z.string(),
+  /** The main repo: the CLI runs in it, with its account chain and repo prompts. */
   repo: z.string(),
+  /** Other repos on the same machine the run can read and change, each on its own ai/ branch. */
+  extraRepos: z.array(TaskExtraRepo).default([]),
   status: QueuedTaskStatus,
   message: z.string(),
   /** Files attached to the task message. */

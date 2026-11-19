@@ -150,10 +150,12 @@ export interface PromptPreviewRequest {
   promptIds?: string[];
   /** The repo's prompts to send; omitted = the repo's default ones. */
   repoPromptIds?: string[];
+  /** Other repos opened in the same run. */
+  extraRepos?: string[];
 }
 export interface PromptPreviewResponse {
   prompt: string;
-  layers: { name: "global" | "repo" | "prompts" | "message" | "attachments"; included: boolean }[];
+  layers: { name: "global" | "repo" | "prompts" | "message" | "repos" | "attachments"; included: boolean }[];
 }
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
@@ -173,6 +175,8 @@ export interface CreateTaskRequest {
   promptIds?: string[];
   /** The repo's prompts to send (ids from GET /api/repos/:id/prompts); omitted = the repo's default ones. */
   repoPromptIds?: string[];
+  /** Other repos (same machine as `repo`) the run can read and change, each on its own ai/ branch. */
+  extraRepos?: string[];
 }
 /** PUT /api/tasks/order (body ReorderRequest, only pending tasks move) */
 /** POST /api/tasks/:id/cancel — pending: removed from queue; running: stopped → interrupted */
@@ -219,12 +223,24 @@ export interface DiffResponse {
   baseCommit: string;
   /** The repository the branch lives in. */
   repoPath: string;
+  /** The task's other repos, each with its own branch and diff. */
+  others: RepoDiff[];
+}
+export interface RepoDiff {
+  repo: string;
+  patch: string;
+  branch: string;
+  baseBranch: string;
+  baseCommit: string;
+  repoPath: string;
 }
 /** POST /api/tasks/:id/keep → { ok: true } — the ai/ branch stays in the repo, task → done */
 /** POST /api/tasks/:id/push → PushResponse — commit leftovers, push, open PR/MR when gh/glab is available, task → done */
 export interface PushResponse {
   url: string | null;
   output: string;
+  /** The task's other repos that had commits, pushed too. */
+  others: { repo: string; branch: string; url: string | null }[];
 }
 /** POST /api/tasks/:id/discard (body { confirm: true }) → { ok: true } — stops it if running, deletes its ai/ branch */
 

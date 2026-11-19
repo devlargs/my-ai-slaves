@@ -170,10 +170,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         attachmentIds: z.array(z.string()).optional(),
         promptIds: z.array(z.string()).optional(),
         repoPromptIds: z.array(z.string()).optional(),
+        extraRepos: z.array(z.string()).optional(),
       }),
       req.body,
     );
     if (!body.message.trim()) return { prompt: "", layers: [] };
+    const extras = await repos.extras(await repos.get(body.repo), body.extraRepos);
     const files = await attachments.resolve(body.attachmentIds);
     const bound = await prompts.resolve(await prompts.validate(body.promptIds));
     const repoPrompts = await repos.prompts(body.repo);
@@ -183,6 +185,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return assembler.forTask(body.message, {
       repoPrompts: repoBound.prompts.map((p) => p.body),
       boundPrompts: bound.prompts.map((p) => p.body),
+      otherRepos: extras.map((r) => ({ name: r.name, path: r.path })),
       attachmentPaths: files.map((a) => attachments.pathOf(a)),
     });
   });
@@ -199,6 +202,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
           attachmentIds: z.array(z.string()).optional(),
           promptIds: z.array(z.string()).optional(),
           repoPromptIds: z.array(z.string()).optional(),
+          extraRepos: z.array(z.string()).optional(),
         }),
         req.body,
       ),

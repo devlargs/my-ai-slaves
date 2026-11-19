@@ -56,8 +56,8 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
   (each repo has a list in `knowledge/<repo>.json`, in list order; `default` ones come pre-ticked, and a
   task queued without `repoPromptIds` gets the defaults) → saved prompts bound to that message (from the
   Prompts library, `.data/prompts.json`, in library order) → task message, joined by a blank line, empty
-  layers skipped. The single exception is the visible "Attached files:"
-  path list when files are attached. Never add hidden system/role/wrapper text anywhere. Replies resume
+  layers skipped. The only app-written text is two visible path lists: "Other repositories:" (a
+  cross-repo task's other repos, after the message) and "Attached files:" (when files are attached). Never add hidden system/role/wrapper text anywhere. Replies resume
   the session and send only the reply (+ its attachments).
 - **Every started run is logged** in activity with its full assembled prompt.
 - **No AI attribution** in commits or PRs: Claude runs with `attribution: false`, Cursor's cli-config sets
@@ -68,6 +68,11 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
   its branch and the previous branch is checked out again. Never commit to main/master or any non-`ai/`
   branch. Claude runs with `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and
   Cursor never gets `-w`.
+- **Cross-repo tasks:** a task can tick several repos (`extraRepos`, same machine as the main `repo`).
+  The CLI runs in the main repo (its account chain and repo prompts) and gets the others via `--add-dir`;
+  each other repo gets its own `ai/<task-id>` branch with the same checkout / clean-tree / commit /
+  switch-back rules, and every repo of the task is busy while it runs. Keep / Push / Mark finished keep
+  (or push) other-repo branches with commits and delete empty ones; Discard deletes them all.
 - **Base prompts reach the CLI:** tests assert the exact text the (fake) CLIs receive; each task view shows
   "… received: ✓ global base prompt ✓ repo: <ticked prompts>" from the run's recorded prompt.
 - **Security:** bind 127.0.0.1 only; spawn with argument arrays, never a shell string; scrub
