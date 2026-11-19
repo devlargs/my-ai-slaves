@@ -8,7 +8,12 @@ export type StreamEvent =
   | { kind: "tool-start"; callId: string; tool: string; summary: string }
   | { kind: "tool-end"; callId: string; ok: boolean; summary: string }
   | { kind: "file-edit"; path: string }
-  | { kind: "warning"; text: string };
+  | { kind: "warning"; text: string }
+  /**
+   * What you sent at the start of a run (the task message, or a reply), so the live output reads as a
+   * conversation. Added by the app, never sent to the CLI.
+   */
+  | { kind: "user"; text: string; reply: boolean; attachments: string[]; prompts: string[] };
 
 export interface RawLine {
   src: "stdout" | "stderr";

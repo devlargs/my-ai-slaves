@@ -708,6 +708,16 @@ export class QueueService {
       };
       this.live.set(task.id, run);
 
+      // Your side of the conversation, shown in the live output right where this run starts.
+      const sent: StreamEvent = {
+        kind: "user",
+        text: isReply ? (task.pendingReply ?? "") : task.message,
+        reply: isReply,
+        attachments: runFiles.map((a) => a.name),
+        prompts: isReply ? bound.prompts.map((p) => p.name) : [...repoSent.map((p) => p.name), ...bound.prompts.map((p) => p.name)],
+      };
+      pushCapped(buffer.events, sent);
+      this.deps.broadcaster.taskEvent(task.id, sent);
       handle.onStream((event) => this.onEvent(run, event, buffer));
       handle.onRaw((raw) => {
         pushCapped(buffer.raw, raw);

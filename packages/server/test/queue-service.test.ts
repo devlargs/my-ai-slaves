@@ -367,6 +367,15 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     });
     expect(second.session?.sessionId).toBe(first.session?.sessionId);
     expect((await received()).map((c) => c.prompt)).toEqual([FULL("first"), "now the follow-up"]);
+    // Your side shows in the live output, in order, right where each run started (never sent to the CLI).
+    const events = queue.replay(created.id).events;
+    expect(events.filter((e) => e.kind === "user")).toEqual([
+      { kind: "user", text: "first", reply: false, attachments: [], prompts: ["Repo rules"] },
+      { kind: "user", text: "now the follow-up", reply: true, attachments: [], prompts: [] },
+    ]);
+    const replyAt = events.findIndex((e) => e.kind === "user" && e.reply);
+    expect(events.slice(0, replyAt).some((e) => e.kind === "message")).toBe(true);
+    expect(events.slice(replyAt).some((e) => e.kind === "message")).toBe(true);
     expect(head(repo.path)).toBe("main");
     expect(sh(repo.path, "log", "--format=%s").trim()).toBe("init");
   });

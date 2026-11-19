@@ -3,7 +3,9 @@ import {
   CheckIcon,
   CpuIcon,
   FilePenIcon,
+  LibraryBigIcon,
   LoaderIcon,
+  PaperclipIcon,
   WrenchIcon,
   XIcon,
 } from "lucide-react";
@@ -77,6 +79,29 @@ export function LiveOutput({ taskId }: { taskId: string }) {
 
 function LiveRow({ item }: { item: LiveItem }) {
   switch (item.type) {
+    case "user":
+      return (
+        <div className="my-1.5 ml-auto flex w-fit max-w-[85%] min-w-0 flex-col gap-1.5 rounded-lg border border-signal/25 bg-signal-soft/50 px-3 py-2">
+          <span className="label-mono text-[10px] text-signal-ink">{item.reply ? "Your reply" : "Your task"}</span>
+          <Markdown>{item.text}</Markdown>
+          {(item.prompts.length > 0 || item.attachments.length > 0) && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              {item.prompts.length > 0 && (
+                <span className="flex min-w-0 items-center gap-1" title="Prompts sent with it">
+                  <LibraryBigIcon className="size-3 shrink-0" />
+                  <span className="truncate">{item.prompts.join(", ")}</span>
+                </span>
+              )}
+              {item.attachments.length > 0 && (
+                <span className="flex min-w-0 items-center gap-1" title="Attached files">
+                  <PaperclipIcon className="size-3 shrink-0" />
+                  <span className="truncate">{item.attachments.join(", ")}</span>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      );
     case "message":
       return <Markdown className="py-0.5">{item.text}</Markdown>;
     case "tool":

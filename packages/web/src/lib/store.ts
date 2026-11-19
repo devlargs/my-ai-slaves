@@ -16,7 +16,8 @@ export type LiveItem =
   | { type: "message"; text: string }
   | { type: "tool"; callId: string; tool: string; summary: string; ok: boolean | null; result: string | null }
   | { type: "file-edit"; path: string }
-  | { type: "warning"; text: string };
+  | { type: "warning"; text: string }
+  | { type: "user"; text: string; reply: boolean; attachments: string[]; prompts: string[] };
 
 export interface LiveState {
   items: LiveItem[];
@@ -59,6 +60,10 @@ function applyEvent(live: LiveState, event: StreamEvent): LiveState {
       break;
     case "warning":
       items.push({ type: "warning", text: event.text });
+      break;
+    case "user":
+      flushStreaming();
+      items.push({ type: "user", text: event.text, reply: event.reply, attachments: event.attachments, prompts: event.prompts });
       break;
     case "init":
       items.push({ type: "init", model: event.model, permissionMode: event.permissionMode, sessionId: event.sessionId });
