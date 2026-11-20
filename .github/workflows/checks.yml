@@ -1,0 +1,39 @@
+name: Checks
+
+# Audit, typecheck and tests, run by Release before anything is built, so a commit
+# that fails them never ships to the installed apps. No concurrency group here:
+# the calling workflow owns that.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to check out. Empty means the commit that triggered the caller.
+        type: string
+        default: ""
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Only what ships in the app, and only high or critical advisories: a
+      # dev-only or low-severity finding shouldn't hold a release back.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test

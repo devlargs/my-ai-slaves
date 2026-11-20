@@ -1,0 +1,162 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    # A docs or CI commit shouldn't mint a version, publish an installer and
+    # prompt the installed app to update. Code changes still release automatically.
+    paths-ignore:
+      - "**.md"
+      - ".github/**"
+      - ".vscode/**"
+      - "LICENSE"
+  # Ship a release for an ignored-path commit (or re-run a failed one) on demand.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One release at a time, and a run that has started is never cancelled:
+# stopping one between the version-bump push and the GitHub Release would leave
+# a bumped package.json with no release, so the next run would skip a number. A
+# newer push waits for the running release instead. GitHub keeps only the newest
+# waiting run, which is fine: every run releases the tip of main (see the
+# version job), so the newest one covers the pushes it replaced.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Works out the next patch version once, so the macOS and Windows builds stamp
+  # the same number. Nothing is committed until the checks and both builds have
+  # succeeded.
+  #
+  # It reads the branch tip, not the commit that triggered the run: a run that
+  # waited behind another release has to see that release's version bump, or it
+  # would compute the same version again. Every later job uses the commit
+  # resolved here, so the checks, both builds and the tag all cover one commit.
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Compute next patch version
+        id: version
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          CURRENT=$(node -p "require('./package.json').version")
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          echo "version=$MAJOR.$MINOR.$((PATCH + 1))" >> "$GITHUB_OUTPUT"
+
+  # The in-app updater offers every release, so a commit that fails these must not ship.
+  checks:
+    needs: version
+    uses: ./.github/workflows/checks.yml
+    with:
+      ref: ${{ needs.version.outputs.sha }}
+
+  build:
+    needs: [version, checks]
+    strategy:
+      matrix:
+        include:
+          # One DMG per CPU (arm64 for Apple Silicon, x64 for Intel), both built
+          # on the Apple Silicon runner. The in-app updater picks the one ending
+          # in -<arch>.dmg for the Mac it runs on.
+          - os: macos-latest
+            platform: mac
+            files: |
+              packages/desktop/release/My-AI-Slaves-arm64.dmg
+              packages/desktop/release/My-AI-Slaves-x64.dmg
+          - os: windows-latest
+            platform: win
+            files: |
+              packages/desktop/release/My-AI-Slaves-Setup.exe
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # The packaged app reports the root package.json version, which the
+      # updater compares against the latest release tag.
+      - name: Set version
+        shell: bash
+        run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package
+        run: npm run desktop:dist -- --${{ matrix.platform }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Apple Developer ID: don't go looking for one in the keychain.
+          # scripts/after-pack.cjs ad-hoc signs the macOS app instead.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.platform }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+
+      # Pushed with GITHUB_TOKEN, so this commit doesn't start another release.
+      - name: Commit version bump
+        run: |
+          npm version "$VERSION" --no-git-tag-version
+          git config user.name "Ralph Largo"
+          git config user.email "devlargs@gmail.com"
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to v$VERSION"
+          # Main may have moved while the builds ran. Only this job changes the
+          # version field, so the bump rebases cleanly on top of those commits,
+          # and the run they queued releases them next.
+          git pull --rebase
+          git push
+
+      # GitHub records a sha256 digest for every uploaded asset; the in-app
+      # updater verifies each download against it before installing.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: v${{ env.VERSION }}
+          generate_release_notes: true
+          files: |
+            release/My-AI-Slaves-arm64.dmg
+            release/My-AI-Slaves-x64.dmg
+            release/My-AI-Slaves-Setup.exe
