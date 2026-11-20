@@ -9,10 +9,11 @@ import {
   PlusIcon,
   RefreshCwIcon,
   ServerIcon,
+  TagIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FolderBrowserDialog } from "@/components/folder-browser";
 import { PageHeader } from "@/components/page-header";
@@ -60,6 +61,26 @@ export function ReposPage() {
     if (repos) setRepoNames(repos);
   }, [repos]);
 
+  // Filter by label (e.g. personal vs company); remembered across visits.
+  const [filter, setFilter] = useState<string | null>(() => storageGet(FILTER_KEY));
+  const pickFilter = (next: string | null) => {
+    setFilter(next);
+    storageSet(FILTER_KEY, next ?? "");
+  };
+  const allLabels = useMemo(() => collectLabels(repos ?? []), [repos]);
+  const activeFilter =
+    filter === NO_LABEL
+      ? NO_LABEL
+      : (allLabels.find((l) => l.label.toLowerCase() === filter?.toLowerCase())?.label ?? null);
+  const unlabelled = sorted.filter((r) => r.labels.length === 0).length;
+  const shown = sorted.filter((r) =>
+    activeFilter === null
+      ? true
+      : activeFilter === NO_LABEL
+        ? r.labels.length === 0
+        : r.labels.some((l) => l.toLowerCase() === activeFilter.toLowerCase()),
+  );
+
   const replace = (repo: Repo) => setData((list) => list?.map((r) => (r.id === repo.id ? { ...r, ...repo } : r)));
 
   return (
@@ -82,20 +103,43 @@ export function ReposPage() {
       />
 
       {repos?.length === 0 && <p className="text-[13px] text-muted-foreground">No repositories yet.</p>}
-      {sorted.length > 1 && (
-        <div className="-mb-2 flex justify-end gap-1">
-          <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => sorted.forEach((r) => set.add(r.id)))}>
-            Expand all
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => set.clear())}>
-            Collapse all
-          </Button>
+      {(allLabels.length > 0 || sorted.length > 1) && (
+        <div className="-mb-2 flex flex-wrap items-center gap-1">
+          {allLabels.length > 0 && (
+            <div className="mr-auto flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Filter by label">
+              <FilterChip active={activeFilter === null} onClick={() => pickFilter(null)} count={sorted.length}>
+                All
+              </FilterChip>
+              {allLabels.map(({ label, count }) => (
+                <FilterChip key={label} active={activeFilter === label} onClick={() => pickFilter(label)} count={count}>
+                  <TagIcon className="size-3" />
+                  {label}
+                </FilterChip>
+              ))}
+              {unlabelled > 0 && (
+                <FilterChip active={activeFilter === NO_LABEL} onClick={() => pickFilter(NO_LABEL)} count={unlabelled}>
+                  No label
+                </FilterChip>
+              )}
+            </div>
+          )}
+          {shown.length > 1 && (
+            <span className="ml-auto flex gap-1">
+              <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => shown.forEach((r) => set.add(r.id)))}>
+                Expand all
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => set.clear())}>
+                Collapse all
+              </Button>
+            </span>
+          )}
         </div>
       )}
-      {sorted.map((repo) => (
+      {shown.map((repo) => (
         <RepoCard
           key={repo.id}
           repo={repo}
+          allLabels={allLabels.map((l) => l.label)}
           expanded={expanded.has(repo.id)}
           onToggle={() => toggle(repo.id)}
           onChange={replace}
@@ -256,6 +300,134 @@ function RegisterRepoCard({ onRegistered }: { onRegistered: (repo: RepoView) => 
 }
 
 const EXPANDED_KEY = "slaves.expandedRepos";
+const FILTER_KEY = "slaves.repoLabelFilter";
+/** Filter value for repos without any label (labels can't contain control characters, so no clash). */
+const NO_LABEL = "\u0000none";
+const SUGGESTED_LABELS = ["Personal", "Company"];
+
+/** Every label in use (first spelling wins, case-insensitive), with how many repos have it. */
+function collectLabels(repos: Repo[]): { label: string; count: number }[] {
+  const byKey = new Map<string, { label: string; count: number }>();
+  for (const repo of repos) {
+    for (const label of repo.labels) {
+      const entry = byKey.get(label.toLowerCase());
+      if (entry) entry.count++;
+      else byKey.set(label.toLowerCase(), { label, count: 1 });
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }));
+}
+
+function FilterChip({
+  active,
+  count,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  count: number;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      className={cn(
+        "flex h-6 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]",
+        active ? "border-ink bg-ink text-paper" : "border-rule bg-surface text-ink-2 hover:border-rule-strong hover:text-ink",
+      )}
+    >
+      {children}
+      <span className={cn("num text-[10px]", active ? "text-paper/70" : "text-muted-foreground")}>{count}</span>
+    </button>
+  );
+}
+
+/** Add / remove a repo's labels. Saves on every change; suggests labels other repos already use. */
+function LabelsEditor({
+  repo,
+  allLabels,
+  onSave,
+}: {
+  repo: Repo;
+  allLabels: string[];
+  onSave: (labels: string[]) => Promise<unknown>;
+}) {
+  const [draft, setDraft] = useState("");
+  const has = (label: string) => repo.labels.some((l) => l.toLowerCase() === label.toLowerCase());
+  const suggestions = (allLabels.length ? allLabels : SUGGESTED_LABELS).filter((l) => !has(l));
+  const add = async (raw: string) => {
+    const label = raw.trim().replace(/\s+/g, " ");
+    if (!label || has(label)) return setDraft("");
+    // Reuse the spelling other repos already have, so "company" and "Company" stay one label.
+    const existing = allLabels.find((l) => l.toLowerCase() === label.toLowerCase());
+    if (await onSave([...repo.labels, existing ?? label])) setDraft("");
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={`labels-${repo.id}`}>Labels</Label>
+      {repo.labels.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {repo.labels.map((label) => (
+            <Badge key={label} variant="default" className="gap-1 pr-1">
+              <TagIcon className="size-3 text-muted-foreground" />
+              {label}
+              <button
+                type="button"
+                aria-label={`Remove label ${label}`}
+                onClick={() => void onSave(repo.labels.filter((l) => l !== label))}
+                className="flex size-4 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-paper hover:text-ink"
+              >
+                <XIcon className="size-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void add(draft);
+        }}
+      >
+        <Input
+          id={`labels-${repo.id}`}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add a label, e.g. Personal or Company"
+          maxLength={40}
+        />
+        <Button type="submit" variant="outline" disabled={!draft.trim()}>
+          <PlusIcon /> Add
+        </Button>
+      </form>
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground">Quick add:</span>
+          {suggestions.map((label) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => void add(label)}
+              className="flex h-5 cursor-pointer items-center gap-1 rounded-full border border-dashed border-rule-strong px-2 text-[11px] text-ink-2 transition-colors hover:border-ink hover:text-ink"
+            >
+              <PlusIcon className="size-3" />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      <span className="text-[11px] text-muted-foreground">
+        Only for keeping track here (filter the list above); never sent to the agent.
+      </span>
+    </div>
+  );
+}
 
 function loadExpanded(): Set<string> {
   try {
@@ -268,12 +440,14 @@ function loadExpanded(): Set<string> {
 
 function RepoCard({
   repo,
+  allLabels,
   expanded,
   onToggle,
   onChange,
   onDeleted,
 }: {
   repo: RepoView;
+  allLabels: string[];
   expanded: boolean;
   onToggle: () => void;
   onChange: (repo: Repo | RepoView) => void;
@@ -317,6 +491,12 @@ function RepoCard({
           />
           <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
           <CardTitle className="shrink-0">{repo.name}</CardTitle>
+          {repo.labels.map((label) => (
+            <Badge key={label} variant="default" className="shrink-0 gap-1">
+              <TagIcon className="size-3 text-muted-foreground" />
+              {label}
+            </Badge>
+          ))}
           {repo.host && (
             <Badge variant="outline" className="shrink-0 gap-1 font-mono" title={`On ${repo.host} (SSH)`}>
               <ServerIcon className="size-3" />
@@ -436,6 +616,7 @@ function RepoCard({
               </Button>
             </form>
           </div>
+          <LabelsEditor repo={repo} allLabels={allLabels} onSave={(labels) => patch({ labels })} />
           <ChainEditor repo={repo} onSave={(chain) => patch({ accountChain: chain })} />
           <CommitterEditor repo={repo} onSave={(body) => patch(body, "Committer saved")} />
         </div>

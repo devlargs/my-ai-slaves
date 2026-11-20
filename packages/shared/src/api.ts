@@ -118,6 +118,8 @@ export interface UpdateRepoRequest {
   /** Empty string clears it (falls back to your git config). */
   committerName?: string;
   committerEmail?: string;
+  /** Replaces the repo's labels (trimmed, deduped case-insensitively, blanks dropped). */
+  labels?: string[];
 }
 /** DELETE /api/repos/:id → { ok: true } (refused with 409 while it has tasks in the queue) */
 

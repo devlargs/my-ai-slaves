@@ -123,6 +123,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         accountChain: z.array(z.string()).optional(),
         committerName: z.string().max(200).optional(),
         committerEmail: z.string().max(200).optional(),
+        labels: z.array(z.string().max(40)).max(20).optional(),
       }),
       req.body,
     );

@@ -17,6 +17,8 @@ export const Repo = z.object({
   /** Author + committer for every commit on this repo's tasks (agent's and the app's). null = your git config. */
   committerName: z.string().min(1).nullable().default(null),
   committerEmail: z.email().nullable().default(null),
+  /** Your own tags for telling repos apart (e.g. "personal", "company"). App only; never sent to a CLI. */
+  labels: z.array(z.string().min(1).max(40)).default([]),
   createdAt: timestampNow(),
   updatedAt: timestampNow(),
 });

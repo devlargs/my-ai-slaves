@@ -134,6 +134,7 @@ export class RepoService {
       accountChain: (await this.stores.accounts.read()).accounts.filter((a) => (a.host ?? null) === host).map((a) => a.id),
       committerName: null,
       committerEmail: null,
+      labels: [],
       createdAt: stamp,
       updatedAt: stamp,
     };
@@ -247,6 +248,7 @@ export class RepoService {
       if (patch.accountChain !== undefined) updated.accountChain = [...new Set(patch.accountChain)];
       if (patch.committerName !== undefined) updated.committerName = patch.committerName.trim() || null;
       if (patch.committerEmail !== undefined) updated.committerEmail = patch.committerEmail.trim() || null;
+      if (patch.labels !== undefined) updated.labels = normalizeLabels(patch.labels);
       updated.updatedAt = formatLocalIso(this.now());
     });
     return updated as Repo;
@@ -329,4 +331,18 @@ export class RepoService {
       dirs: dirs.map((d) => ({ name: d.name, path: posix.join(pwd, d.name), isGitRepo: d.isGitRepo })),
     };
   }
+}
+
+/** Trimmed, inner whitespace collapsed, blanks dropped, deduped ignoring case (first spelling wins). */
+export function normalizeLabels(labels: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of labels) {
+    const label = raw.trim().replace(/\s+/g, " ").slice(0, 40);
+    const key = label.toLowerCase();
+    if (!label || seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+  }
+  return out;
 }

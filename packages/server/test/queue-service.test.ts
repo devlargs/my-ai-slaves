@@ -402,6 +402,15 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect(reset.name).toBe(basename(repo.path));
   });
 
+  it("labels a repo: trimmed, deduped ignoring case, blanks dropped; new repos have none", async () => {
+    const { repos, repo } = await setup();
+    expect(repo.labels).toEqual([]);
+    const labelled = await repos.update(repo.id, { labels: [" Company ", "company", "", "client  A"] });
+    expect(labelled.labels).toEqual(["Company", "client A"]);
+    expect((await repos.get(repo.id)).labels).toEqual(["Company", "client A"]);
+    expect((await repos.update(repo.id, { labels: [] })).labels).toEqual([]);
+  });
+
   it("runs only one task per repo at a time", async () => {
     const { queue, repo } = await setup();
     const a = await queue.create({ repo: repo.id, message: "SLOW one" });

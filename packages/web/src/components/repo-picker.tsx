@@ -108,6 +108,9 @@ export function RepoPicker({
                   <span className="min-w-0 flex-1 truncate text-[13px] text-ink">
                     {repo.name}
                     {repo.host && <span className="text-muted-foreground"> · {repo.host}</span>}
+                    {repo.labels.length > 0 && (
+                      <span className="text-[11px] text-muted-foreground"> · {repo.labels.join(", ")}</span>
+                    )}
                     {repo.availability.state === "unreachable" && (
                       <span className="text-warning-ink"> (unreachable)</span>
                     )}
