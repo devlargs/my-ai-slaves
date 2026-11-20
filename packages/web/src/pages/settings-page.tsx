@@ -1,7 +1,20 @@
 import type { AccountView, ProviderId, Settings, UpdateSettingsRequest } from "@my-ai-slaves/shared";
-import { LogInIcon, PlusIcon, RefreshCwIcon, SaveIcon, ServerIcon, TimerResetIcon, Trash2Icon } from "lucide-react";
+import {
+  ArrowUpRightIcon,
+  FileTextIcon,
+  FolderInputIcon,
+  FolderOpenIcon,
+  LogInIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  SaveIcon,
+  ServerIcon,
+  TimerResetIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
+import { InstallButton } from "@/components/desktop-update";
 import { SortableList } from "@/components/sortable-list";
 import { AccountStatusBadge, ProviderLabel } from "@/components/status";
 import { LoginDialog } from "@/components/login-dialog";
@@ -13,8 +26,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { api, attempt } from "@/lib/api";
+import { desktop, desktopAction, useDesktop } from "@/lib/desktop";
 import { useApi } from "@/lib/hooks";
 import { getState, setAccounts, useStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 
 export function SettingsPage() {
   return (
@@ -25,6 +40,7 @@ export function SettingsPage() {
       />
       <AccountsCard />
       <GeneralSettingsCard />
+      <DesktopCard />
     </div>
   );
 }
@@ -457,6 +473,95 @@ function GeneralSettingsCard() {
           </fieldset>
         </div>
         <p className="text-[11px] text-muted-foreground">Saved to .data/settings.json · last saved {data.updatedAt}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Desktop app (only in the desktop app) ───────────────────────────────────
+
+function DesktopCard() {
+  const { info, update } = useDesktop();
+  if (!desktop || !info) return null;
+  const status = update?.status ?? "idle";
+  const checking = status === "checking";
+
+  const updateLine = (() => {
+    switch (status) {
+      case "checking":
+        return "Checking for updates…";
+      case "latest":
+        return "This is the latest version.";
+      case "available":
+        return `Version ${update?.newVersion} is available.`;
+      case "manual":
+        return `Version ${update?.newVersion} is available, but has no checksum to verify it, so it can't install from the app.`;
+      case "downloading":
+        return `Downloading ${update?.newVersion}… ${update?.percent ?? 0}%`;
+      case "installing":
+        return "Installing; the app restarts in a moment.";
+      case "error":
+        return update?.error ?? "The last check failed.";
+      default:
+        return "Checks on launch and every 6 hours.";
+    }
+  })();
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Desktop app</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-[13px] font-medium">
+              My AI Slaves <span className="num">v{info.version}</span>
+            </span>
+            <span className={cn("text-xs", status === "error" ? "text-danger-ink" : "text-muted-foreground")}>{updateLine}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {status === "available" && <InstallButton newVersion={update?.newVersion ?? null} />}
+            {status === "manual" && (
+              <Button size="sm" variant="outline" onClick={() => void desktopAction(() => desktop!.openReleasePage())}>
+                <ArrowUpRightIcon /> Release page
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={checking || status === "downloading" || status === "installing"}
+              onClick={() => void desktopAction(() => desktop!.checkForUpdates())}
+            >
+              <RefreshCwIcon className={cn(checking && "animate-spin")} /> Check for updates
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label>Data folder</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-md border border-rule bg-paper-2 px-2.5 py-1.5 font-mono text-xs" title={info.dataDir}>
+              {info.dataDir}
+            </code>
+            <Button size="sm" variant="outline" onClick={() => void desktopAction(() => desktop!.openDataFolder())}>
+              <FolderOpenIcon /> Open
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => void desktopAction(() => desktop!.changeDataFolder())}>
+              <FolderInputIcon /> Change…
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Settings, accounts, repos, the queue and activity, as plain JSON files. Changing the folder restarts the app on
+            the new one and leaves this one as it is.
+          </p>
+        </div>
+
+        <div>
+          <Button size="sm" variant="ghost" onClick={() => void desktopAction(() => desktop!.openLogFile())}>
+            <FileTextIcon /> Open server log
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

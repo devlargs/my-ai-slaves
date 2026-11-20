@@ -1,5 +1,5 @@
 import { mkdir, rm } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import {
   type Account,
   AccountLabel,
@@ -7,7 +7,6 @@ import {
   formatLocalIso,
   type ProviderId,
 } from "@my-ai-slaves/shared";
-import { PROJECT_ROOT } from "../paths";
 import type { AdapterRegistry } from "../providers";
 import { runToCompletion } from "../providers/spawn";
 import { assertHost } from "../remote/machine";
@@ -29,7 +28,11 @@ export class AccountService {
 
   /** Local accounts: their isolated CLI config folder. Remote accounts (server's own login): null. */
   configDirOf(account: Account): string | null {
-    return account.host || !account.configDir ? null : resolve(PROJECT_ROOT, account.configDir);
+    if (account.host || !account.configDir) return null;
+    if (isAbsolute(account.configDir)) return account.configDir;
+    // Relative: inside this data folder's cli-config/, wherever the data folder lives. Older entries
+    // were written relative to the project (".data/cli-config/<label>"); they resolve the same way.
+    return join(this.stores.paths.cliConfigDir, basename(account.configDir));
   }
 
   context(account: Account): AccountContext {
@@ -95,8 +98,8 @@ export class AccountService {
     if (!host) {
       const configDirAbs = join(this.stores.paths.cliConfigDir, label);
       await mkdir(configDirAbs, { recursive: true });
-      // Relative to the project when .data is inside it (the normal case), absolute otherwise.
-      configDir = relative(PROJECT_ROOT, configDirAbs).startsWith("..") ? configDirAbs : relative(PROJECT_ROOT, configDirAbs);
+      // Relative to the data folder, so it keeps working when the data folder is moved or picked in the desktop app.
+      configDir = join("cli-config", label);
     }
     const stamp = formatLocalIso(this.now());
     const account: Account = {

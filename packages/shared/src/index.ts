@@ -10,3 +10,4 @@ export * from "./schemas/prompts";
 export type * from "./stream";
 export type * from "./api";
 export type * from "./ws";
+export type * from "./desktop";

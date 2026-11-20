@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
 import Fastify from "fastify";
@@ -18,12 +18,17 @@ import { openDataStores } from "./storage/data-stores";
 import { LoginService } from "./login/login-service";
 import { WsHub } from "./ws/hub";
 
+// Started by the desktop app (Electron running as plain Node): the CLIs this server spawns must not
+// inherit that, or an Electron-based CLI would start as Node too.
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 // SLAVES_PORT lets a second instance (e.g. a test copy on scratch data) run next to yours.
 const PORT = Number(process.env.SLAVES_PORT) || 3005;
 const HOST = "127.0.0.1"; // never 0.0.0.0
 const HMR_PORT = PORT + 1;
 const isProduction = process.env.NODE_ENV === "production";
-const webRoot = join(PROJECT_ROOT, "packages", "web");
+// SLAVES_WEB_DIR: where the built web app sits when this runs bundled inside the desktop app.
+const webRoot = process.env.SLAVES_WEB_DIR ? resolve(process.env.SLAVES_WEB_DIR) : join(PROJECT_ROOT, "packages", "web");
 
 // ── data + services ─────────────────────────────────────────────────────────
 const { stores } = await openDataStores({ dataDir: resolveDataDir() });
@@ -88,7 +93,10 @@ try {
 } catch (error) {
   if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
     console.error(`\nPort ${PORT} is already in use. Is My AI Slaves already running?\n`);
-    process.exit(1);
+    // The desktop app shows its own message for this; wait for it to arrive before exiting.
+    if (process.send) process.send({ type: "port-in-use", port: PORT }, () => process.exit(1));
+    else process.exit(1);
+    await new Promise(() => {});
   }
   throw error;
 }
@@ -121,3 +129,13 @@ async function shutdown(signal: string) {
 }
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+// Desktop app: tell it where to load the UI from, stop cleanly when it quits (Windows has no
+// SIGTERM to catch), and never outlive it if it crashes.
+if (process.send) {
+  process.send({ type: "ready", port: PORT, dataDir: stores.paths.root });
+  process.on("message", (message) => {
+    if ((message as { type?: string } | null)?.type === "shutdown") void shutdown("quit");
+  });
+  process.on("disconnect", () => void shutdown("desktop app closed"));
+}

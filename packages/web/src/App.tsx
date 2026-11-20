@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
+import { UpdateControl } from "@/components/desktop-update";
 import { AccountStatusDot, LiveDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -169,8 +170,9 @@ function Sidebar({ route }: { route: Route }) {
         </div>
       )}
 
-      <div className="mt-auto p-3">
+      <div className="mt-auto flex flex-col gap-2 p-3">
         <NotificationPrompt />
+        <UpdateControl />
       </div>
     </nav>
   );

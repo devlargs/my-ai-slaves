@@ -1,5 +1,6 @@
 {
   "name": "my-ai-slaves",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -12,8 +13,10 @@
     "dev": "npm run dev --workspace @my-ai-slaves/server",
     "build": "npm run build --workspace @my-ai-slaves/web",
     "start": "npm run start --workspace @my-ai-slaves/server",
-    "postinstall": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true",
-    "test": "npm run test --workspace @my-ai-slaves/server",
+    "desktop": "npm run build && npm run stage --workspace @my-ai-slaves/desktop && electron packages/desktop/app",
+    "desktop:dist": "npm run build && npm run stage --workspace @my-ai-slaves/desktop && npm run dist --workspace @my-ai-slaves/desktop --",
+    "postinstall": "node scripts/postinstall.mjs",
+    "test": "npm run test --workspace @my-ai-slaves/server --workspace @my-ai-slaves/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "data:init": "npm run data:init --workspace @my-ai-slaves/server",
     "data:demo-activity": "npm run data:demo-activity --workspace @my-ai-slaves/server --",

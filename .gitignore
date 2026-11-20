@@ -6,3 +6,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+
+# Desktop app build output
+packages/desktop/app/
+packages/desktop/release/

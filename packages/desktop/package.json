@@ -1,0 +1,21 @@
+{
+  "name": "@my-ai-slaves/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "stage": "node scripts/build.mjs",
+    "dist": "electron-builder --config electron-builder.config.cjs --publish never",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@my-ai-slaves/shared": "*",
+    "@types/node": "^22",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}
