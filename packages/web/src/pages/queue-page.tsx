@@ -48,7 +48,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, attempt } from "@/lib/api";
-import { useApi, useDebounced, useTaskSubscription } from "@/lib/hooks";
+import { useApi, useDebounced, useRepoName, useTaskSubscription } from "@/lib/hooks";
 import { getState, setTasks, useStore } from "@/lib/store";
 import { cn, formatTime, storageGet, storageSet } from "@/lib/utils";
 
@@ -151,6 +151,7 @@ function QueueList({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const repoName = useRepoName();
   const pendingIds = useMemo(() => new Set(tasks.filter((t) => t.status === "pending").map((t) => t.id)), [tasks]);
 
   const reorder = async (ids: string[]) => {
@@ -193,8 +194,8 @@ function QueueList({
               <TaskStatusBadge status={task.status} className="shrink-0" />
             </div>
             <div className="mt-1 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-              <span className="truncate" title={[task.repo, ...task.extraRepos.map((x) => x.repo)].join(" + ")}>
-                {task.repo}
+              <span className="truncate" title={[task.repo, ...task.extraRepos.map((x) => x.repo)].map(repoName).join(" + ")}>
+                {repoName(task.repo)}
                 {task.extraRepos.length > 0 && ` +${task.extraRepos.length}`}
               </span>
               {task.currentAccount && (
@@ -557,6 +558,7 @@ function PromptPreview({
 // ── Task detail ─────────────────────────────────────────────────────────────
 
 function TaskDetail({ task }: { task: TaskView }) {
+  const repoName = useRepoName();
   useTaskSubscription(task.id);
   const reviewable = Boolean(task.checkout || task.branch) && (task.status === "needs-review" || task.status === "interrupted");
   const [tab, setTab] = useState(task.status === "needs-review" ? "diff" : "live");
@@ -577,8 +579,8 @@ function TaskDetail({ task }: { task: TaskView }) {
           {(task.status === "pending" || task.status === "running") && <DiscardTaskButton task={task} withLabel />}
         </div>
         <dl className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground">
-          <Meta label="repo" value={task.repo} />
-          {task.extraRepos.length > 0 && <Meta label="also" value={task.extraRepos.map((x) => x.repo).join(", ")} />}
+          <Meta label="repo" value={repoName(task.repo)} />
+          {task.extraRepos.length > 0 && <Meta label="also" value={task.extraRepos.map((x) => repoName(x.repo)).join(", ")} />}
           {task.currentAccount && <Meta label="account" value={task.currentAccount} />}
           {task.accountOverride && <Meta label="override" value={task.accountOverride} />}
           {task.checkout && <Meta label="started on" value={`${task.checkout.ref}@${task.checkout.commit.slice(0, 7)}`} />}

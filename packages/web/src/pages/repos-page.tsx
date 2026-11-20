@@ -26,7 +26,7 @@ import { Input, Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
 import { api, attempt } from "@/lib/api";
-import { useApi } from "@/lib/hooks";
+import { setRepoNames, useApi } from "@/lib/hooks";
 import { useStore } from "@/lib/store";
 import { cn, storageGet, storageSet } from "@/lib/utils";
 
@@ -54,6 +54,11 @@ export function ReposPage() {
     const t = setInterval(() => void api.getRepos().then(setData).catch(() => {}), 30_000);
     return () => clearInterval(t);
   }, []);
+
+  // Tasks and History show these names too.
+  useEffect(() => {
+    if (repos) setRepoNames(repos);
+  }, [repos]);
 
   const replace = (repo: Repo) => setData((list) => list?.map((r) => (r.id === repo.id ? { ...r, ...repo } : r)));
 
@@ -282,6 +287,9 @@ function RepoCard({
     setChecking(false);
     if (fresh) onChange(fresh);
   };
+  const [name, setName] = useState(repo.name);
+  useEffect(() => setName(repo.name), [repo.name]);
+  const folderName = repo.path.split(/[\\/]/).filter(Boolean).pop() ?? repo.id;
   const [branch, setBranch] = useState(repo.defaultBranch);
   useEffect(() => setBranch(repo.defaultBranch), [repo.defaultBranch]);
 
@@ -384,6 +392,30 @@ function RepoCard({
         )}
         <fieldset disabled={unreachable} className={cn("grid min-w-0 gap-5 md:grid-cols-2", unreachable && "opacity-55")}>
         <div className="flex flex-col gap-4">
+          <form
+            className="flex flex-col gap-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (name.trim() !== repo.name) void patch({ name: name.trim() }, "Renamed");
+            }}
+          >
+            <Label htmlFor={`name-${repo.id}`}>Name</Label>
+            <div className="flex gap-2">
+              <Input
+                id={`name-${repo.id}`}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={folderName}
+                maxLength={100}
+              />
+              <Button type="submit" variant="outline" disabled={name.trim() === repo.name}>
+                Save
+              </Button>
+            </div>
+            <span className="text-[11px] text-muted-foreground">
+              Only how it shows in this app; the folder on disk keeps its name. Blank goes back to “{folderName}”.
+            </span>
+          </form>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor={`branch-${repo.id}`}>Base branch (a task&apos;s diff compares to it when the agent moves to another branch)</Label>
             <form

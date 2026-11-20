@@ -111,6 +111,7 @@ export interface RemoteHost {
 }
 /** PATCH /api/repos/:id → Repo */
 export interface UpdateRepoRequest {
+  /** Display name in the app only (the folder isn't renamed). Empty string = back to the folder name. */
   name?: string;
   defaultBranch?: string;
   accountChain?: string[];

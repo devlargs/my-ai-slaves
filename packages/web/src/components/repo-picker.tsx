@@ -92,7 +92,7 @@ export function RepoPicker({
                       ? `${repo.name} is ${where(repo)}: picking it switches to it (a task's repos share one machine)`
                       : isMain && extras.length === 0
                         ? "A task needs at least one repo"
-                        : undefined
+                        : repo.path
                   }
                   className="flex w-full cursor-pointer items-center gap-2.5 rounded-md py-1.5 pr-2 pl-2 text-left transition-colors hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
                 >

@@ -5,12 +5,13 @@ import { PanelHeader } from "@/components/page-header";
 import { TaskStatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { api, attempt } from "@/lib/api";
-import { useApi } from "@/lib/hooks";
+import { useApi, useRepoName } from "@/lib/hooks";
 import { cn, formatTime } from "@/lib/utils";
 import { TaskHistory } from "./queue-page";
 
 export function HistoryPage() {
   const { data, loading, reload } = useApi<HistoryItem[]>(() => api.history(), []);
+  const repoName = useRepoName();
   const [selected, setSelected] = useState<string | null>(null);
   const item = data?.find((h) => h.taskId === selected) ?? null;
 
@@ -49,7 +50,7 @@ export function HistoryPage() {
                   <TaskStatusBadge status={h.outcome} />
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 font-mono text-[11px] text-muted-foreground">
-                  <span>{h.repo}</span>
+                  <span>{repoName(h.repo)}</span>
                   {h.lastAccount && <span>· {h.lastAccount}</span>}
                   {h.branch && (
                     <span className="flex items-center gap-0.5">

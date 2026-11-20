@@ -239,7 +239,10 @@ export class RepoService {
     await this.stores.repos.update((file) => {
       updated = file.repos.find((r) => r.id === id);
       if (!updated) throw notFound(`No repo "${id}".`);
-      if (patch.name !== undefined) updated.name = patch.name.trim() || updated.name;
+      // Display name in the app only; the folder on disk keeps its name. Blank = back to the folder name.
+      if (patch.name !== undefined) {
+        updated.name = patch.name.trim() || (updated.host ? posix.basename(updated.path) : basename(updated.path)) || updated.id;
+      }
       if (patch.defaultBranch !== undefined) updated.defaultBranch = patch.defaultBranch;
       if (patch.accountChain !== undefined) updated.accountChain = [...new Set(patch.accountChain)];
       if (patch.committerName !== undefined) updated.committerName = patch.committerName.trim() || null;

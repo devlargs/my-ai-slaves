@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createAdapters } from "../src/providers";
@@ -390,6 +390,16 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     );
     // The app commits nothing itself: what the agent didn't commit stays uncommitted.
     expect(sh(repo.path, "status", "--porcelain").trim()).toBe("?? leftover.txt");
+  });
+
+  it("renames a repo in the app only; blank goes back to the folder name", async () => {
+    const { repos, repo } = await setup();
+    const renamed = await repos.update(repo.id, { name: "  Client A mobile " });
+    expect(renamed.name).toBe("Client A mobile");
+    expect(renamed.id).toBe(repo.id);
+    expect(renamed.path).toBe(repo.path);
+    const reset = await repos.update(repo.id, { name: "" });
+    expect(reset.name).toBe(basename(repo.path));
   });
 
   it("runs only one task per repo at a time", async () => {
