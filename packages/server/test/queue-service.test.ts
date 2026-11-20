@@ -416,6 +416,19 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect(head(repo.path)).toBe("main");
   });
 
+  it("a task going to review frees its repo: the next queued task starts right away", async () => {
+    const { queue, repo } = await setup();
+    const a = await queue.create({ repo: repo.id, message: "one" });
+    const b = await queue.create({ repo: repo.id, message: "two" });
+    const c = await queue.create({ repo: repo.id, message: "three" });
+    await waitFor(taskWith(queue, a.id, "needs-review"));
+    await waitFor(taskWith(queue, b.id, "needs-review"));
+    await waitFor(taskWith(queue, c.id, "needs-review"));
+    // A reply on a task in review queues behind nothing: it runs too.
+    await queue.reply(a.id, "more");
+    await waitFor(async () => (await queue.list()).find((t) => t.id === a.id && t.status === "needs-review" && !t.pendingReply));
+  });
+
   it("tasks running when the server stopped come back interrupted; the repo is left as it is", async () => {
     const { stores, queue, repo } = await setup();
     const created = await queue.create({ repo: repo.id, message: "SLOW crash" });
