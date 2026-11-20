@@ -62,7 +62,11 @@ jobs:
 
   build:
     needs: [version, checks]
+    name: build (${{ matrix.platform }})
     strategy:
+      # Let both platforms finish, so one run shows every platform's problem.
+      # The release still waits for both.
+      fail-fast: false
       matrix:
         include:
           # One DMG per CPU (arm64 for Apple Silicon, x64 for Intel), both built
@@ -101,7 +105,6 @@ jobs:
       - name: Build and package
         run: npm run desktop:dist -- --${{ matrix.platform }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # No Apple Developer ID: don't go looking for one in the keychain.
           # scripts/after-pack.cjs ad-hoc signs the macOS app instead.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"

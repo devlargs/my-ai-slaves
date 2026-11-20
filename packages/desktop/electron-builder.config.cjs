@@ -14,6 +14,10 @@ module.exports = {
   npmRebuild: false,
   icon: "build/icon.png",
   afterPack: "scripts/after-pack.cjs",
+  // The app has its own updater (src/updater) reading GitHub releases, and the release workflow
+  // uploads the installers. Without this, electron-builder sees GH_TOKEN on CI, tries to write
+  // electron-updater metadata for a repository it can't detect, and crashes.
+  publish: null,
   mac: {
     target: [{ target: "dmg", arch: ["arm64", "x64"] }],
     category: "public.app-category.developer-tools",
