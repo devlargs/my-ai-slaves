@@ -384,8 +384,9 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     const { queue, repos, repo, stores } = await setup();
     await stores.settings.update((s) => {
       s.committers = [
-        { id: "work", name: "Work Person", email: "work@example.com" },
-        { id: "ralph", name: "Ralph Example", email: "ralph@example.com" },
+        { id: "work", name: "Work Person", email: "work@example.com", label: "Work" },
+        // The label is app-only: git gets just the name and email.
+        { id: "ralph", name: "Ralph Example", email: "ralph@example.com", label: "Personal" },
       ];
       s.defaultCommitterId = "work";
     });
@@ -402,7 +403,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
   it("a repo that picks no committer uses the default one", async () => {
     const { queue, repo, stores } = await setup();
     await stores.settings.update((s) => {
-      s.committers = [{ id: "work", name: "Work Person", email: "work@example.com" }];
+      s.committers = [{ id: "work", name: "Work Person", email: "work@example.com", label: null }];
       s.defaultCommitterId = "work";
     });
     const created = await queue.create({ repo: repo.id, message: "COMMIT please" });
@@ -426,7 +427,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     });
     await repos.migrateCommitters();
     const { committers } = await stores.settings.read();
-    expect(committers).toEqual([{ id: expect.any(String), name: "Old Name", email: "old@example.com" }]);
+    expect(committers).toEqual([{ id: expect.any(String), name: "Old Name", email: "old@example.com", label: null }]);
     const migrated = await repos.get(repo.id);
     expect(migrated.committerId).toBe(committers[0]!.id);
     expect(migrated.committerName).toBeNull();

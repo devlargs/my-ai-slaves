@@ -47,6 +47,23 @@ describe("JsonStore", () => {
     expect(logger.warnings).toEqual([]);
   });
 
+  it("gives older committers no label and turns a blank label into none", async () => {
+    const dir = await tempDir();
+    await writeFile(
+      join(dir, "settings.json"),
+      JSON.stringify({
+        committers: [
+          { id: "a", name: "A", email: "a@example.com" },
+          { id: "b", name: "B", email: "b@example.com", label: "   " },
+          { id: "c", name: "C", email: "c@example.com", label: " Work " },
+        ],
+      }),
+    );
+    const { store } = await settingsStore(dir);
+    await store.load();
+    expect((await store.read()).committers.map((c) => c.label)).toEqual([null, null, "Work"]);
+  });
+
   it("writes keys in canonical order no matter how the caller built the object", async () => {
     const dir = await tempDir();
     const store = new JsonStore({ file: join(dir, "queue.json"), schema: QueueFile, logger: memoryLogger() });

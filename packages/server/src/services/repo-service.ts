@@ -296,7 +296,7 @@ export class RepoService {
         const email = repo.committerEmail.trim();
         let committer = settings.committers.find((c) => c.name === name && c.email.toLowerCase() === email.toLowerCase());
         if (!committer) {
-          committer = { id: randomUUID(), name, email };
+          committer = { id: randomUUID(), name, email, label: null };
           settings.committers.push(committer);
         }
         picked.set(repo.id, committer.id);

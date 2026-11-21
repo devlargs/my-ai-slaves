@@ -22,6 +22,14 @@ export const Committer = z.object({
   id: z.string().min(1).max(100),
   name: z.string().trim().min(1).max(200),
   email: z.email().max(200),
+  /** Short tag shown next to the identity (e.g. "Work", "Personal"). App only; never sent to git or a CLI. */
+  label: z
+    .string()
+    .trim()
+    .max(40)
+    .nullable()
+    .default(null)
+    .transform((v) => v || null),
 });
 export type Committer = z.infer<typeof Committer>;
 

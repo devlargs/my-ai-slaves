@@ -11,6 +11,7 @@ import {
   SaveIcon,
   ServerIcon,
   StarIcon,
+  TagIcon,
   TimerResetIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -321,6 +322,7 @@ function CommittersCard() {
   const { data, setData } = useApi<Settings>(() => api.getSettings(), [], "settings");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
 
   if (!data) {
@@ -343,7 +345,12 @@ function CommittersCard() {
 
   const add = async () => {
     if (!valid) return;
-    const committer: Committer = { id: crypto.randomUUID(), name: name.trim(), email: email.trim() };
+    const committer: Committer = {
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      email: email.trim(),
+      label: label.trim() || null,
+    };
     // The first one becomes the default, so it applies right away.
     const result = await save(
       { committers: [...committers, committer], defaultCommitterId: defaultCommitterId ?? committer.id },
@@ -351,6 +358,7 @@ function CommittersCard() {
     if (result) {
       setName("");
       setEmail("");
+      setLabel("");
     }
   };
 
@@ -415,12 +423,22 @@ function CommittersCard() {
               aria-invalid={email.trim() !== "" && !EMAIL_RE.test(email.trim())}
             />
           </div>
+          <div className="flex w-36 flex-col gap-1">
+            <Label htmlFor="committer-label">Label</Label>
+            <Input
+              id="committer-label"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. Work"
+              maxLength={40}
+            />
+          </div>
           <Button type="submit" disabled={!valid || busy}>
             <PlusIcon /> Add
           </Button>
           <p className="w-full text-[11px] text-muted-foreground">
             Author and committer of every commit on a repo&apos;s tasks. With no default, repos that don&apos;t pick one use
-            your git config.
+            your git config. The label is optional and only tells identities apart here; git never sees it.
           </p>
         </form>
       </CardContent>
@@ -446,8 +464,10 @@ function CommitterRow({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(committer.name);
   const [email, setEmail] = useState(committer.email);
+  const [label, setLabel] = useState(committer.label ?? "");
   const valid = name.trim() !== "" && EMAIL_RE.test(email.trim());
-  const dirty = name.trim() !== committer.name || email.trim() !== committer.email;
+  const dirty =
+    name.trim() !== committer.name || email.trim() !== committer.email || (label.trim() || null) !== committer.label;
 
   if (editing) {
     return (
@@ -456,7 +476,7 @@ function CommitterRow({
         onSubmit={async (e) => {
           e.preventDefault();
           if (!valid) return;
-          if (!dirty || (await onEdit({ ...committer, name: name.trim(), email: email.trim() }))) setEditing(false);
+          if (!dirty || (await onEdit({ ...committer, name: name.trim(), email: email.trim(), label: label.trim() || null }))) setEditing(false);
         }}
       >
         <Input aria-label="Full name" value={name} onChange={(e) => setName(e.target.value)} className="min-w-40 flex-1" maxLength={200} />
@@ -469,6 +489,14 @@ function CommitterRow({
           maxLength={200}
           aria-invalid={!EMAIL_RE.test(email.trim())}
         />
+        <Input
+          aria-label="Label"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Label"
+          className="w-32"
+          maxLength={40}
+        />
         <Button type="submit" size="sm" disabled={!valid || busy}>
           <SaveIcon /> Save
         </Button>
@@ -479,6 +507,7 @@ function CommitterRow({
           onClick={() => {
             setName(committer.name);
             setEmail(committer.email);
+            setLabel(committer.label ?? "");
             setEditing(false);
           }}
         >
@@ -493,6 +522,12 @@ function CommitterRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium">{committer.name}</span>
+          {committer.label && (
+            <Badge variant="default" className="gap-1">
+              <TagIcon className="size-3 text-muted-foreground" />
+              {committer.label}
+            </Badge>
+          )}
           {isDefault && <Badge variant="outline">default</Badge>}
         </div>
         <div className="truncate font-mono text-[11px] text-muted-foreground">{committer.email}</div>

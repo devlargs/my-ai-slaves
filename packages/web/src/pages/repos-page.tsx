@@ -1,4 +1,4 @@
-import type { RemoteHost, Repo, RepoView, Settings } from "@my-ai-slaves/shared";
+import type { Committer, RemoteHost, Repo, RepoView, Settings } from "@my-ai-slaves/shared";
 import {
   AlertTriangleIcon,
   ChevronRightIcon,
@@ -639,6 +639,12 @@ function RepoCard({
 
 const DEFAULT_COMMITTER = "__default__";
 
+/** "Work · Name <email>", or just "Name <email>" when the committer has no label. */
+function committerText(c: Committer): string {
+  const identity = `${c.name} <${c.email}>`;
+  return c.label ? `${c.label} · ${identity}` : identity;
+}
+
 /** Author + committer for every commit on this repo's tasks: one of the committers saved in Settings. */
 function CommitterEditor({
   repo,
@@ -664,9 +670,9 @@ function CommitterEditor({
         options={[
           {
             value: DEFAULT_COMMITTER,
-            label: fallback ? `Default: ${fallback.name} <${fallback.email}>` : "Default: your git config",
+            label: fallback ? `Default: ${committerText(fallback)}` : "Default: your git config",
           },
-          ...committers.map((c) => ({ value: c.id, label: `${c.name} <${c.email}>` })),
+          ...committers.map((c) => ({ value: c.id, label: committerText(c) })),
         ]}
       />
       <span className="text-[11px] text-muted-foreground">
