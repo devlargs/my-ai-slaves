@@ -4,7 +4,8 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-**My AI Slaves**: a local web app (macOS first) that queues AI coding tasks and runs them through the
+**My AI Slaves**: a local web app, also packaged as an Electron desktop app for
+**macOS and Windows**, that queues AI coding tasks and runs them through the
 Claude Code CLI and the Cursor Agent CLI, falling back across several logged-in subscriptions when one
 hits a usage limit. Each task runs **directly in the repo, exactly as it's checked out**: the app never
 creates, switches, resets, commits or deletes branches, and never makes worktrees. The repo prompts tell
@@ -18,12 +19,16 @@ npm install            # also fixes node-pty's spawn-helper permission (postinst
 npm run dev            # server + Vite (middleware mode) at http://localhost:3005
 npm run build          # build the web app (packages/web/dist)
 npm start              # production mode, serves the built web app
-npm test               # Vitest (server package): fake CLIs + real temp git repos
+npm test               # Vitest (server + desktop packages): fake CLIs + real temp git repos
 npm run typecheck      # tsc in every package (TypeScript 7)
-npx vitest run test/<file>.test.ts   # one test file (run inside packages/server)
+npx vitest run test/<file>.test.ts   # one test file (run inside packages/server or packages/desktop)
+npm run desktop        # build web, stage packages/desktop/app, open it in Electron
+npm run desktop:dist   # same, then electron-builder → packages/desktop/release (this Mac's CPU only)
+npm run data:init | data:demo-activity | prompt:preview   # server scripts (src/scripts/)
 ```
 
 There is no watch mode for the server: restart `npm run dev` after server changes. Web changes hot-reload.
+Node 22 (`.nvmrc`). The dev server's Vite HMR uses port `SLAVES_PORT + 1`.
 
 ## Layout
 
@@ -36,8 +41,21 @@ packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with t
   src/services    PromptAssembler, AccountRouter (pure) + AccountService, RepoService, BranchService,
                   QueueService (scheduler, runs, fallback, replies, review actions)
   src/login       LoginService: drives `claude auth login` / `agent login` in a hidden pty
+  src/remote        machine.ts (run git/CLIs locally or over ssh), hosts.ts (~/.ssh/config aliases)
   src/http, src/ws, src/security (Host / Origin / Sec-Fetch-Site guard; no token)
+  src/scripts       data-init, demo-activity, prompt-preview, run-task
 packages/web      React 19 + Vite 8 + Tailwind 4, hand-written shadcn-style components (radix-ui)
+                  pages: queue, history, repos, prompts, settings
+packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder (remembered in
+                  <userData>/desktop.json), forks the bundled server on Electron's Node
+                  (ELECTRON_RUN_AS_NODE, SLAVES_DATA_DIR/SLAVES_PORT/SLAVES_WEB_DIR), loads the same UI,
+                  pulls the login shell's PATH on macOS (shell-env.ts), and src/updater/ (in-app updates
+                  from GitHub Releases, sha256-verified; token from GH_TOKEN/GITHUB_TOKEN or `gh auth token`).
+                  scripts/build.mjs stages app/ (esbuild + node-pty prebuilds); electron-builder.config.cjs
+                  packages it unsigned (macOS ad-hoc signed in scripts/after-pack.cjs, asar off).
+.github/workflows release.yml: every push to main (except *.md / .github/** only) runs checks.yml
+                  (audit, typecheck, test), builds arm64 + x64 DMGs and a Windows NSIS .exe, commits
+                  `chore: bump version to vX.Y.Z` and publishes a GitHub Release.
 docs/DESIGN.md    architecture proposal (schemas, API, adapter interface)
 design.md         locked visual design system (Hallmark, Coral theme): read before UI changes
 ```
@@ -45,11 +63,13 @@ design.md         locked visual design system (Hallmark, Coral theme): read befo
 ## Data (`.data/`, gitignored, never commit it)
 
 Plain pretty-printed JSON: `settings.json`, `accounts.json`, `repos.json`, `queue.json`,
-`prompts.json` (saved prompt library), `knowledge/<repo>.json` (the repo's prompts), `activity/NNNN_activity.json`, `attachments/<id>/`,
+`prompts.json` (saved prompt library), `knowledge/<repo>.json` (the repo's prompts; repos also carry
+a display name and `labels` for filtering, renaming never touches the folder), `activity/NNNN_activity.json`, `attachments/<id>/`,
 `cli-config/<account>/` (CLI logins: never read, log or serve). It can contain the user's API tokens.
 Use `SLAVES_DATA_DIR=<dir>` to point the server or scripts at a scratch folder when testing, and
 `SLAVES_PORT=<port>` (default 3005) to run that test copy next to the user's running app. Never stop
-a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_DIR` = theirs).
+a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_DIR` = theirs; the
+desktop app also uses 3005 and refuses to start if it's taken).
 
 ## Rules that must hold
 
@@ -88,11 +108,19 @@ a process on 3005 without checking it isn't the user's own app (no `SLAVES_DATA_
   `cursor-agent status` on a server: old versions start a login instead. Repos are checked for
   reachability every minute; unreachable ones show disabled with an alert, and their tasks wait.
   Tests use `test/fixtures/fake-ssh.mjs` (`SLAVES_SSH_BIN`), which runs the remote command locally.
+- **macOS and Windows:** everything must work on both. Use `node:path` (`join`, `delimiter`), not
+  hard-coded `/` or `:`; no POSIX-only shell tricks in npm scripts or spawns (use Node, as
+  `scripts/postinstall.mjs` does); pass `windowsHide: true` to child processes; remember Windows has no
+  SIGTERM to catch (the desktop app sends a `shutdown` IPC message instead). Remote/SSH and node-pty
+  logins are the macOS-tested paths; check Windows behaviour when touching them.
 - Verify CLI flags against the official docs before using them; don't guess.
 
 ## Commits
 
-- **Commit every finished request locally right away**, one commit per request. Don't push unless asked.
+- Work on `main` directly. Never create worktrees or feature branches. `git pull` main before starting.
+- **Commit every finished request right away and push it to `main`**, one commit per request.
+  Pushing code to main triggers a desktop release (see `.github/workflows/release.yml`), and CI then
+  pushes its own `chore: bump version` commit, so pull before the next commit.
 - **Author / committer is always `Ralph Largo <devlargs@gmail.com>`** (set in this repo's local git
   config; check with `git config user.email` before committing, never commit as anyone else).
 - **No signature**: no `Co-Authored-By`, no "Generated with Claude Code", no emoji footer.
