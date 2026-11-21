@@ -42,6 +42,14 @@ export function storageSet(key: string, value: string): void {
   }
 }
 
+export function storageRemove(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // storage unavailable — ignore
+  }
+}
+
 export async function copyToClipboard(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);

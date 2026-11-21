@@ -50,11 +50,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, attempt } from "@/lib/api";
 import { useApi, useDebounced, useRepoName, useTaskSubscription } from "@/lib/hooks";
 import { getState, setTasks, useStore } from "@/lib/store";
-import { cn, formatTime, storageGet, storageSet } from "@/lib/utils";
+import { cn, formatTime, storageGet, storageRemove, storageSet } from "@/lib/utils";
 
 const CHAIN = "__chain__";
 const REPO_KEY = "slaves.lastRepo";
 const EXTRA_REPOS_KEY = "slaves.lastExtraRepos";
+/** Unsent text of a message box, kept so it survives switching pages (and restarts). */
+const draftKey = (box: string) => `slaves.draft.${box}`;
+const COMPOSER_DRAFT = "composer";
+const replyDraft = (taskId: string) => `reply.${taskId}`;
 
 const promptCount = (task: TaskView) =>
   task.promptIds.length + (task.repoPromptIds?.length ?? 0) + task.extraRepos.reduce((n, x) => n + x.promptIds.length, 0);
@@ -317,7 +321,7 @@ function Composer() {
   };
   const [account, setAccount] = useState<string>(CHAIN);
   const input = useRef<HTMLTextAreaElement>(null);
-  const [hasText, setHasText] = useState(false);
+  const [hasText, setHasText] = useState(() => Boolean(storageGet(draftKey(COMPOSER_DRAFT))?.trim()));
   const [previewText, setPreviewText] = useState("");
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -372,6 +376,7 @@ function Composer() {
     setBusy(false);
     if (task) {
       if (input.current) input.current.value = "";
+      storageRemove(draftKey(COMPOSER_DRAFT));
       setHasText(false);
       setPreviewText("");
       files.clear();
@@ -416,6 +421,7 @@ function Composer() {
           )}
           <MessageInput
             inputRef={input}
+            draft={COMPOSER_DRAFT}
             aria-label="Task message"
             onHasText={setHasText}
             onText={preview ? setPreviewText : undefined}
@@ -665,7 +671,7 @@ export function TaskHistory({ taskId, version }: { taskId: string; version?: str
 
 function ReplyBox({ taskId }: { taskId: string }) {
   const input = useRef<HTMLTextAreaElement>(null);
-  const [hasText, setHasText] = useState(false);
+  const [hasText, setHasText] = useState(() => Boolean(storageGet(draftKey(replyDraft(taskId)))?.trim()));
   const [busy, setBusy] = useState(false);
   const files = useAttachments();
   const library = usePromptLibrary();
@@ -679,6 +685,7 @@ function ReplyBox({ taskId }: { taskId: string }) {
     setBusy(false);
     if (ok !== undefined) {
       if (input.current) input.current.value = "";
+      storageRemove(draftKey(replyDraft(taskId)));
       setHasText(false);
       files.clear();
       bound.setIds([]);
@@ -695,6 +702,7 @@ function ReplyBox({ taskId }: { taskId: string }) {
           )}
           <MessageInput
             inputRef={input}
+            draft={replyDraft(taskId)}
             aria-label="Reply"
             onHasText={setHasText}
             onPaste={files.onPaste}
@@ -730,9 +738,12 @@ function ReplyBox({ taskId }: { taskId: string }) {
  * The message box. Uncontrolled on purpose: a keystroke re-renders nothing (the composer around it,
  * with its pickers and prompt lists, re-renders only when the box goes empty ↔ non-empty), so typing
  * stays instant even while a task streams. Read the text from `inputRef` when sending.
+ * The text is saved as a draft under `draft` on every change and restored on mount, so it survives
+ * leaving the page; the sender removes the draft once the message is sent.
  */
 function MessageInput({
   inputRef,
+  draft,
   onHasText,
   onText,
   onSubmit,
@@ -741,6 +752,7 @@ function MessageInput({
   ...props
 }: {
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  draft: string;
   onHasText: (hasText: boolean) => void;
   /** Called with the full text on every change (only pass it when something shows the text live). */
   onText?: (text: string) => void;
@@ -750,12 +762,16 @@ function MessageInput({
   "aria-label": string;
   placeholder: string;
 }) {
+  const [initial] = useState(() => storageGet(draftKey(draft)) ?? "");
   return (
     <textarea
       ref={inputRef}
       {...props}
+      defaultValue={initial}
       onInput={(e) => {
         const text = e.currentTarget.value;
+        if (text) storageSet(draftKey(draft), text);
+        else storageRemove(draftKey(draft));
         onHasText(text.trim().length > 0);
         onText?.(text);
       }}
