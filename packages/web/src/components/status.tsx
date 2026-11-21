@@ -44,11 +44,11 @@ function secondsLeft(account: AccountView, now: number): number | null {
   return account.secondsUntilAvailable;
 }
 
-const accountTone: Record<string, { variant: BadgeVariant; dot: string; label: string }> = {
-  available: { variant: "success", dot: "bg-success", label: "available" },
-  limited: { variant: "warning", dot: "bg-warning", label: "limited" },
-  "logged-out": { variant: "destructive", dot: "bg-danger", label: "logged out" },
-  unknown: { variant: "outline", dot: "bg-rule-strong", label: "unknown" },
+const accountTone: Record<string, { variant: BadgeVariant; label: string }> = {
+  available: { variant: "success", label: "available" },
+  limited: { variant: "warning", label: "limited" },
+  "logged-out": { variant: "destructive", label: "logged out" },
+  unknown: { variant: "outline", label: "unknown" },
 };
 
 export function AccountStatusBadge({ account }: { account: AccountView }) {
@@ -60,19 +60,6 @@ export function AccountStatusBadge({ account }: { account: AccountView }) {
       {tone.label}
       {left !== null && <span className="num">· {formatDuration(left)}</span>}
     </Badge>
-  );
-}
-
-/** Compact form for dense lists: a status dot plus a short word. */
-export function AccountStatusDot({ account }: { account: AccountView }) {
-  const now = useNow();
-  const tone = accountTone[account.status] ?? accountTone.unknown!;
-  const left = account.status === "limited" ? secondsLeft(account, now) : null;
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" title={account.limitedUntil ?? undefined}>
-      <span className={cn("size-1.5 shrink-0 rounded-full", tone.dot)} aria-hidden />
-      <span className="num">{left !== null ? formatDuration(left) : tone.label}</span>
-    </span>
   );
 }
 

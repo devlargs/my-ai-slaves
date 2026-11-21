@@ -10,7 +10,7 @@ import {
 import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { UpdateControl } from "@/components/desktop-update";
-import { AccountStatusDot, LiveDot } from "@/components/status";
+import { LiveDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
@@ -87,7 +87,6 @@ export function App() {
 function Sidebar({ route }: { route: Route }) {
   const connected = useStore((s) => s.connected);
   const tasks = useStore((s) => s.tasks);
-  const accounts = useStore((s) => s.accounts);
   const running = tasks.filter((t) => t.status === "running").length;
   const review = tasks.filter((t) => t.status === "needs-review").length;
 
@@ -153,22 +152,6 @@ function Sidebar({ route }: { route: Route }) {
           );
         })}
       </div>
-
-      {accounts.length > 0 && (
-        <div className="mt-6 flex flex-col gap-2 px-4">
-          <div className="label-mono">Accounts</div>
-          <ul className="flex flex-col gap-1.5">
-            {accounts.map((a) => (
-              <li key={a.id} className="flex items-center justify-between gap-2 text-xs">
-                <span className="truncate text-ink-2" title={a.email ?? a.label}>
-                  {a.label}
-                </span>
-                <AccountStatusDot account={a} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="mt-auto flex flex-col gap-2 p-3">
         <NotificationPrompt />
