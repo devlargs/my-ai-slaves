@@ -1,14 +1,16 @@
-import type { AccountView, ProviderId, Settings, UpdateSettingsRequest } from "@my-ai-slaves/shared";
+import type { AccountView, Committer, ProviderId, Settings, UpdateSettingsRequest } from "@my-ai-slaves/shared";
 import {
   ArrowUpRightIcon,
   FileTextIcon,
   FolderInputIcon,
   FolderOpenIcon,
   LogInIcon,
+  PencilIcon,
   PlusIcon,
   RefreshCwIcon,
   SaveIcon,
   ServerIcon,
+  StarIcon,
   TimerResetIcon,
   Trash2Icon,
 } from "lucide-react";
@@ -39,6 +41,7 @@ export function SettingsPage() {
         description="Log in your Claude and Cursor accounts, and set what every task starts with."
       />
       <AccountsCard />
+      <CommittersCard />
       <GeneralSettingsCard />
       <DesktopCard />
     </div>
@@ -302,6 +305,231 @@ function AccountRow({
   );
 }
 
+// ── Committers ──────────────────────────────────────────────────────────────
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Saves only the committer fields, on top of the latest settings (the General card keeps its own draft). */
+async function saveCommitters(patch: Pick<Settings, "committers" | "defaultCommitterId">, success: string) {
+  const latest = await attempt(api.getSettings());
+  if (!latest) return undefined;
+  const { updatedAt: _ignored, ...rest } = latest;
+  return attempt(api.putSettings({ ...rest, ...patch }), success);
+}
+
+function CommittersCard() {
+  const { data, setData } = useApi<Settings>(() => api.getSettings(), []);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (!data) {
+    return (
+      <Card>
+        <CardContent className="text-[13px] text-muted-foreground">Loading committers…</CardContent>
+      </Card>
+    );
+  }
+  const { committers, defaultCommitterId } = data;
+  const valid = name.trim() !== "" && EMAIL_RE.test(email.trim());
+
+  const save = async (next: Pick<Settings, "committers" | "defaultCommitterId">, success: string) => {
+    setBusy(true);
+    const result = await saveCommitters(next, success);
+    setBusy(false);
+    if (result) setData(result);
+    return result;
+  };
+
+  const add = async () => {
+    if (!valid) return;
+    const committer: Committer = { id: crypto.randomUUID(), name: name.trim(), email: email.trim() };
+    // The first one becomes the default, so it applies right away.
+    const result = await save(
+      { committers: [...committers, committer], defaultCommitterId: defaultCommitterId ?? committer.id },
+      "Committer added",
+    );
+    if (result) {
+      setName("");
+      setEmail("");
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Committers</CardTitle>
+        <span className="text-xs text-muted-foreground">Each repo picks one; repos that don&apos;t use the default</span>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {committers.length === 0 ? (
+          <p className="text-[13px] text-muted-foreground">
+            None yet, so tasks commit with your git config. Add one below.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {committers.map((c) => (
+              <CommitterRow
+                key={c.id}
+                committer={c}
+                isDefault={c.id === defaultCommitterId}
+                busy={busy}
+                onMakeDefault={() => void save({ committers, defaultCommitterId: c.id }, "Default committer set")}
+                onEdit={(edited) =>
+                  save({ committers: committers.map((x) => (x.id === c.id ? edited : x)), defaultCommitterId }, "Committer saved")
+                }
+                onDelete={() =>
+                  save(
+                    {
+                      committers: committers.filter((x) => x.id !== c.id),
+                      defaultCommitterId: defaultCommitterId === c.id ? null : defaultCommitterId,
+                    },
+                    "Committer deleted",
+                  )
+                }
+              />
+            ))}
+          </div>
+        )}
+
+        <form
+          className="flex flex-wrap items-end gap-2 border-t pt-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void add();
+          }}
+        >
+          <div className="flex min-w-48 flex-1 flex-col gap-1">
+            <Label htmlFor="committer-name">Full name</Label>
+            <Input id="committer-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" autoComplete="name" maxLength={200} />
+          </div>
+          <div className="flex min-w-48 flex-1 flex-col gap-1">
+            <Label htmlFor="committer-email">Email</Label>
+            <Input
+              id="committer-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="email@example.com"
+              autoComplete="email"
+              className="font-mono text-xs"
+              maxLength={200}
+              aria-invalid={email.trim() !== "" && !EMAIL_RE.test(email.trim())}
+            />
+          </div>
+          <Button type="submit" disabled={!valid || busy}>
+            <PlusIcon /> Add
+          </Button>
+          <p className="w-full text-[11px] text-muted-foreground">
+            Author and committer of every commit on a repo&apos;s tasks. With no default, repos that don&apos;t pick one use
+            your git config.
+          </p>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CommitterRow({
+  committer,
+  isDefault,
+  busy,
+  onMakeDefault,
+  onEdit,
+  onDelete,
+}: {
+  committer: Committer;
+  isDefault: boolean;
+  busy: boolean;
+  onMakeDefault: () => void;
+  onEdit: (edited: Committer) => Promise<unknown>;
+  onDelete: () => Promise<unknown>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(committer.name);
+  const [email, setEmail] = useState(committer.email);
+  const valid = name.trim() !== "" && EMAIL_RE.test(email.trim());
+  const dirty = name.trim() !== committer.name || email.trim() !== committer.email;
+
+  if (editing) {
+    return (
+      <form
+        className="flex flex-wrap items-center gap-2 rounded-lg border border-rule bg-surface px-2.5 py-2"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!valid) return;
+          if (!dirty || (await onEdit({ ...committer, name: name.trim(), email: email.trim() }))) setEditing(false);
+        }}
+      >
+        <Input aria-label="Full name" value={name} onChange={(e) => setName(e.target.value)} className="min-w-40 flex-1" maxLength={200} />
+        <Input
+          aria-label="Email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="min-w-40 flex-1 font-mono text-xs"
+          maxLength={200}
+          aria-invalid={!EMAIL_RE.test(email.trim())}
+        />
+        <Button type="submit" size="sm" disabled={!valid || busy}>
+          <SaveIcon /> Save
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            setName(committer.name);
+            setEmail(committer.email);
+            setEditing(false);
+          }}
+        >
+          Cancel
+        </Button>
+      </form>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-rule bg-surface px-2.5 py-2 transition-colors hover:border-rule-strong">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate font-medium">{committer.name}</span>
+          {isDefault && <Badge variant="outline">default</Badge>}
+        </div>
+        <div className="truncate font-mono text-[11px] text-muted-foreground">{committer.email}</div>
+      </div>
+      {!isDefault && (
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onMakeDefault}>
+          <StarIcon /> Make default
+        </Button>
+      )}
+      <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+        <PencilIcon /> Edit
+      </Button>
+      <ConfirmButton
+        size="icon-sm"
+        variant="ghost"
+        className="text-muted-foreground hover:bg-danger-soft hover:text-danger-ink"
+        aria-label={`Delete ${committer.name}`}
+        title={`Delete ${committer.name}?`}
+        description={
+          <p>
+            Repos that commit as {committer.name} switch to the default committer
+            {isDefault ? " (none after this, so your git config)" : ""}.
+          </p>
+        }
+        confirmLabel="Delete committer"
+        onConfirm={async () => {
+          await onDelete();
+        }}
+      >
+        <Trash2Icon />
+      </ConfirmButton>
+    </div>
+  );
+}
+
 // ── General settings ────────────────────────────────────────────────────────
 
 function GeneralSettingsCard() {
@@ -332,10 +560,12 @@ function GeneralSettingsCard() {
     .split("\n")
     .map((p) => p.trim())
     .filter(Boolean);
-  const { updatedAt: _u, ...saved } = data;
+  // Committers are saved by their own card, so they don't count here.
+  const { updatedAt: _u, committers: _c, defaultCommitterId: _d, ...saved } = data;
+  const { committers: _dc, defaultCommitterId: _dd, ...draftRest } = draft;
   const dirty =
     JSON.stringify(saved) !==
-    JSON.stringify({ ...draft, providers: { ...draft.providers, "cursor-agent": { ...cursor, limitPatterns: patternList } } });
+    JSON.stringify({ ...draftRest, providers: { ...draft.providers, "cursor-agent": { ...cursor, limitPatterns: patternList } } });
 
   const set = (patch: Partial<UpdateSettingsRequest>) => setDraft({ ...draft, ...patch });
   const setClaude = (patch: Partial<typeof claude>) =>
@@ -345,9 +575,17 @@ function GeneralSettingsCard() {
 
   const save = async () => {
     setBusy(true);
+    // Keep whatever the Committers card saved since this card loaded.
+    const latest = await attempt(api.getSettings());
+    if (!latest) {
+      setBusy(false);
+      return;
+    }
     const result = await attempt(
       api.putSettings({
         ...draft,
+        committers: latest.committers,
+        defaultCommitterId: latest.defaultCommitterId,
         providers: { ...draft.providers, "cursor-agent": { ...cursor, limitPatterns: patternList } },
       }),
       "Settings saved",

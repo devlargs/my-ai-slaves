@@ -14,7 +14,12 @@ export const Repo = z.object({
   defaultBranch: z.string().min(1),
   /** Ordered account ids; first available one runs the task. */
   accountChain: z.array(z.string()).default([]),
-  /** Author + committer for every commit on this repo's tasks (agent's and the app's). null = your git config. */
+  /**
+   * Author + committer for every commit on this repo's tasks: one of Settings' committers.
+   * null (or a deleted one) = the default committer, else your git config.
+   */
+  committerId: z.string().min(1).nullable().default(null),
+  /** Legacy per-repo identity; moved into Settings' committers on startup. */
   committerName: z.string().min(1).nullable().default(null),
   committerEmail: z.email().nullable().default(null),
   /** Your own tags for telling repos apart (e.g. "personal", "company"). App only; never sent to a CLI. */

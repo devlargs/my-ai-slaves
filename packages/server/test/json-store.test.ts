@@ -27,6 +27,8 @@ describe("JsonStore", () => {
       "basePrompt",
       "maxParallelTasks",
       "limitCooldownMinutes",
+      "committers",
+      "defaultCommitterId",
       "providers",
       "updatedAt",
     ]);

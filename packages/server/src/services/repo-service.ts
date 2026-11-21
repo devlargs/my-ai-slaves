@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { access, readdir, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
@@ -132,6 +133,7 @@ export class RepoService {
       defaultBranch: await this.detectDefaultBranch(host, top),
       // Pre-fill with the accounts that run on the same machine as the repo.
       accountChain: (await this.stores.accounts.read()).accounts.filter((a) => (a.host ?? null) === host).map((a) => a.id),
+      committerId: null,
       committerName: null,
       committerEmail: null,
       labels: [],
@@ -227,8 +229,10 @@ export class RepoService {
         );
       }
     }
-    const email = patch.committerEmail?.trim();
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw badRequest(`"${email}" isn't a valid email address.`);
+    if (patch.committerId) {
+      const { committers } = await this.stores.settings.read();
+      if (!committers.some((c) => c.id === patch.committerId)) throw badRequest("That committer no longer exists. Pick another one.");
+    }
     if (patch.defaultBranch !== undefined) {
       try {
         await runOn(repo.host, "git", ["rev-parse", "--verify", "--quiet", `${patch.defaultBranch}^{commit}`], repo.path);
@@ -246,12 +250,46 @@ export class RepoService {
       }
       if (patch.defaultBranch !== undefined) updated.defaultBranch = patch.defaultBranch;
       if (patch.accountChain !== undefined) updated.accountChain = [...new Set(patch.accountChain)];
-      if (patch.committerName !== undefined) updated.committerName = patch.committerName.trim() || null;
-      if (patch.committerEmail !== undefined) updated.committerEmail = patch.committerEmail.trim() || null;
+      if (patch.committerId !== undefined) {
+        updated.committerId = patch.committerId || null;
+        updated.committerName = null;
+        updated.committerEmail = null;
+      }
       if (patch.labels !== undefined) updated.labels = normalizeLabels(patch.labels);
       updated.updatedAt = formatLocalIso(this.now());
     });
     return updated as Repo;
+  }
+
+  /**
+   * One-time move off per-repo "Commit as" fields: each distinct name/email becomes a saved
+   * committer in Settings and the repo picks it. Fields set only partly are left to your git config.
+   */
+  async migrateCommitters(): Promise<void> {
+    const legacy = (await this.list()).filter((r) => r.committerName || r.committerEmail);
+    if (legacy.length === 0) return;
+    const picked = new Map<string, string>();
+    await this.stores.settings.update((settings) => {
+      for (const repo of legacy) {
+        if (!repo.committerName || !repo.committerEmail) continue;
+        const name = repo.committerName.trim();
+        const email = repo.committerEmail.trim();
+        let committer = settings.committers.find((c) => c.name === name && c.email.toLowerCase() === email.toLowerCase());
+        if (!committer) {
+          committer = { id: randomUUID(), name, email };
+          settings.committers.push(committer);
+        }
+        picked.set(repo.id, committer.id);
+      }
+    });
+    await this.stores.repos.update((file) => {
+      for (const repo of file.repos) {
+        if (!repo.committerName && !repo.committerEmail) continue;
+        if (!repo.committerId) repo.committerId = picked.get(repo.id) ?? null;
+        repo.committerName = null;
+        repo.committerEmail = null;
+      }
+    });
   }
 
   async remove(id: string): Promise<void> {

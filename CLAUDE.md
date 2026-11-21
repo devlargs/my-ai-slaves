@@ -83,7 +83,8 @@ desktop app also uses 3005 and refuses to start if it's taken).
 - **Every started run is logged** in activity with its full assembled prompt.
 - **No AI attribution** in commits or PRs: Claude runs with `attribution: false`, Cursor's cli-config sets
   `attributeCommitsToAgent/attributePRsToAgent: false`. The agent's commits use the repo's committer
-  name/email when set (passed as GIT_* env).
+  (picked from the committers saved on the Settings page, else the default committer, else git config;
+  passed as GIT_* env).
 - **No branches, no worktrees, ever.** The app does **not** create `ai/…` (or any) branches, check out,
   reset, commit, stash, push or delete anything in a repo: not in the main repo, not in a cross-repo
   task's other repos. Runs happen in the checkout as it is (no clean-tree requirement); the repo prompts

@@ -115,9 +115,8 @@ export interface UpdateRepoRequest {
   name?: string;
   defaultBranch?: string;
   accountChain?: string[];
-  /** Empty string clears it (falls back to your git config). */
-  committerName?: string;
-  committerEmail?: string;
+  /** One of Settings' committers; null = the default committer. */
+  committerId?: string | null;
   /** Replaces the repo's labels (trimmed, deduped case-insensitively, blanks dropped). */
   labels?: string[];
 }

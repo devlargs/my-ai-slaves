@@ -1,4 +1,4 @@
-import type { RemoteHost, Repo, RepoView } from "@my-ai-slaves/shared";
+import type { RemoteHost, Repo, RepoView, Settings } from "@my-ai-slaves/shared";
 import {
   AlertTriangleIcon,
   ChevronRightIcon,
@@ -627,58 +627,46 @@ function RepoCard({
   );
 }
 
-/** Author + committer for every commit on this repo's tasks. Blank = your git config. */
+const DEFAULT_COMMITTER = "__default__";
+
+/** Author + committer for every commit on this repo's tasks: one of the committers saved in Settings. */
 function CommitterEditor({
   repo,
   onSave,
 }: {
   repo: Repo;
-  onSave: (body: { committerName: string; committerEmail: string }) => Promise<unknown>;
+  onSave: (body: { committerId: string | null }) => Promise<unknown>;
 }) {
-  const [name, setName] = useState(repo.committerName ?? "");
-  const [email, setEmail] = useState(repo.committerEmail ?? "");
-  useEffect(() => {
-    setName(repo.committerName ?? "");
-    setEmail(repo.committerEmail ?? "");
-  }, [repo.committerName, repo.committerEmail]);
-  const dirty = name.trim() !== (repo.committerName ?? "") || email.trim() !== (repo.committerEmail ?? "");
+  const { data: settings } = useApi<Settings>(() => api.getSettings(), []);
+  const committers = settings?.committers ?? [];
+  const fallback = committers.find((c) => c.id === settings?.defaultCommitterId);
+  // A deleted committer falls back to the default, same as the server does.
+  const picked = committers.some((c) => c.id === repo.committerId) ? (repo.committerId as string) : DEFAULT_COMMITTER;
 
   return (
-    <form
-      className="flex flex-col gap-1.5"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (dirty) void onSave({ committerName: name.trim(), committerEmail: email.trim() });
-      }}
-    >
-      <Label htmlFor={`committer-name-${repo.id}`}>Commit as</Label>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Input
-          id={`committer-name-${repo.id}`}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Full name"
-          autoComplete="name"
-        />
-        <Input
-          type="email"
-          aria-label="Committer email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="email@example.com"
-          autoComplete="email"
-          className="font-mono text-xs"
-        />
-      </div>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-muted-foreground">
-          Author and committer of every commit on this repo&apos;s tasks. Blank uses your git config.
-        </span>
-        <Button type="submit" size="sm" variant="outline" disabled={!dirty}>
-          Save
-        </Button>
-      </div>
-    </form>
+    <div className="flex flex-col gap-1.5">
+      <Label>Commit as</Label>
+      <Select
+        aria-label="Commit as"
+        value={picked}
+        disabled={!settings}
+        onValueChange={(v) => void onSave({ committerId: v === DEFAULT_COMMITTER ? null : v })}
+        options={[
+          {
+            value: DEFAULT_COMMITTER,
+            label: fallback ? `Default: ${fallback.name} <${fallback.email}>` : "Default: your git config",
+          },
+          ...committers.map((c) => ({ value: c.id, label: `${c.name} <${c.email}>` })),
+        ]}
+      />
+      <span className="text-[11px] text-muted-foreground">
+        Author and committer of every commit on this repo&apos;s tasks. Add or change committers and the default in{" "}
+        <a href="#/settings" className="text-signal-ink hover:underline">
+          Settings
+        </a>
+        .
+      </span>
+    </div>
   );
 }
 

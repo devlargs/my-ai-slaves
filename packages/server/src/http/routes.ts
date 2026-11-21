@@ -62,6 +62,10 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.get("/api/settings", () => stores.settings.read());
   app.put("/api/settings", async (req) => {
     const body = parseBody(SettingsFile.omit({ updatedAt: true }), req.body);
+    const ids = body.committers.map((c) => c.id);
+    if (new Set(ids).size !== ids.length) throw badRequest("Two committers share an id.");
+    // A default that was just deleted falls back to your git config.
+    if (!ids.includes(body.defaultCommitterId ?? "")) body.defaultCommitterId = null;
     const saved = await stores.settings.update(() => ({ ...body, updatedAt: formatLocalIso() }));
     void queue.tick(); // concurrency may have changed
     return saved;
@@ -121,8 +125,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
         name: z.string().optional(),
         defaultBranch: z.string().min(1).optional(),
         accountChain: z.array(z.string()).optional(),
-        committerName: z.string().max(200).optional(),
-        committerEmail: z.string().max(200).optional(),
+        committerId: z.string().max(100).nullable().optional(),
         labels: z.array(z.string().max(40)).max(20).optional(),
       }),
       req.body,

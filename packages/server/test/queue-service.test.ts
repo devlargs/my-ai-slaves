@@ -380,9 +380,16 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect(sh(repo.path, "log", "--format=%s").trim()).toBe("init");
   });
 
-  it("the agent's own commits use the repo's committer", async () => {
-    const { queue, repos, repo } = await setup();
-    await repos.update(repo.id, { committerName: "Ralph Example", committerEmail: "ralph@example.com" });
+  it("the agent's own commits use the committer the repo picked", async () => {
+    const { queue, repos, repo, stores } = await setup();
+    await stores.settings.update((s) => {
+      s.committers = [
+        { id: "work", name: "Work Person", email: "work@example.com" },
+        { id: "ralph", name: "Ralph Example", email: "ralph@example.com" },
+      ];
+      s.defaultCommitterId = "work";
+    });
+    await repos.update(repo.id, { committerId: "ralph" });
     const created = await queue.create({ repo: repo.id, message: "COMMIT please" });
     await waitFor(taskWith(queue, created.id, "needs-review"));
     expect(sh(repo.path, "log", "-1", "--format=%an <%ae>|%cn <%ce>").trim()).toBe(
@@ -390,6 +397,40 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     );
     // The app commits nothing itself: what the agent didn't commit stays uncommitted.
     expect(sh(repo.path, "status", "--porcelain").trim()).toBe("?? leftover.txt");
+  });
+
+  it("a repo that picks no committer uses the default one", async () => {
+    const { queue, repo, stores } = await setup();
+    await stores.settings.update((s) => {
+      s.committers = [{ id: "work", name: "Work Person", email: "work@example.com" }];
+      s.defaultCommitterId = "work";
+    });
+    const created = await queue.create({ repo: repo.id, message: "COMMIT please" });
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+    expect(sh(repo.path, "log", "-1", "--format=%an <%ae>|%cn <%ce>").trim()).toBe(
+      "Work Person <work@example.com>|Work Person <work@example.com>",
+    );
+  });
+
+  it("refuses a committer that isn't saved in settings", async () => {
+    const { repos, repo } = await setup();
+    await expect(repos.update(repo.id, { committerId: "nope" })).rejects.toThrow(/no longer exists/);
+  });
+
+  it("moves old per-repo committer fields into settings' committers", async () => {
+    const { repos, repo, stores } = await setup();
+    await stores.repos.update((f) => {
+      const r = f.repos.find((x) => x.id === repo.id)!;
+      r.committerName = "Old Name";
+      r.committerEmail = "old@example.com";
+    });
+    await repos.migrateCommitters();
+    const { committers } = await stores.settings.read();
+    expect(committers).toEqual([{ id: expect.any(String), name: "Old Name", email: "old@example.com" }]);
+    const migrated = await repos.get(repo.id);
+    expect(migrated.committerId).toBe(committers[0]!.id);
+    expect(migrated.committerName).toBeNull();
+    expect(migrated.committerEmail).toBeNull();
   });
 
   it("renames a repo in the app only; blank goes back to the folder name", async () => {

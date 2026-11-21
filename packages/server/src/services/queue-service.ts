@@ -7,6 +7,7 @@ import {
   type HistoryItem,
   type RawLine,
   type Repo,
+  type SettingsFile,
   type StreamEvent,
   type Task,
   type TaskView,
@@ -57,8 +58,14 @@ export interface QueueDeps {
   now?: () => Date;
 }
 
-/** The repo's committer setting; null fields fall back to your git config. */
-const identityOf = (repo: Repo) => ({ name: repo.committerName, email: repo.committerEmail });
+/** The repo's committer, else the default committer, else null (your git config). */
+const identityOf = (repo: Repo, settings: SettingsFile) => {
+  const committer =
+    settings.committers.find((c) => c.id === repo.committerId) ??
+    settings.committers.find((c) => c.id === settings.defaultCommitterId);
+  if (committer) return { name: committer.name, email: committer.email };
+  return { name: repo.committerName, email: repo.committerEmail };
+};
 
 const pushCapped = <T>(list: T[], item: T) => {
   list.push(item);
@@ -105,6 +112,7 @@ export class QueueService {
   async init(): Promise<void> {
     // A repo that becomes reachable (or unreachable) again changes what can run.
     this.deps.repos.onChange(() => void this.tick());
+    await this.deps.repos.migrateCommitters();
     await this.migrateLegacyWorktrees();
     const interrupted: Task[] = [];
     await this.stores.queue.update((q) => {
@@ -137,12 +145,13 @@ export class QueueService {
     const legacy = tasks.filter((t) => t.worktree);
     if (legacy.length === 0) return;
     const repos = await this.deps.repos.list();
+    const settings = await this.stores.settings.read();
     for (const task of legacy) {
       const wt = task.worktree as NonNullable<Task["worktree"]>;
       const repo = repos.find((r) => r.id === task.repo);
       if (repo) {
         try {
-          await this.deps.git.removeLegacyWorktree(repo, wt.path, `${task.title} (moved off worktree)`, identityOf(repo));
+          await this.deps.git.removeLegacyWorktree(repo, wt.path, `${task.title} (moved off worktree)`, identityOf(repo, settings));
         } catch (e) {
           console.error(`[queue] couldn't move ${task.id} off its worktree (left as is): ${(e as Error).message}`);
           continue;
@@ -693,7 +702,7 @@ export class QueueService {
           cwd: repo.path,
           resume,
           addDirs: [...new Set(addDirs)],
-          gitIdentity: identityOf(repo),
+          gitIdentity: identityOf(repo, settings),
         },
         settings,
       );
