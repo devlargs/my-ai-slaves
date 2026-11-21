@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { macAppBundlePath, MAC_UPDATE_SCRIPT } from "../src/updater/mac-update";
+import { macUpdateTarget, MAC_UPDATE_SCRIPT } from "../src/updater/mac-update";
 import { installerFileName, staleUpdateEntries, UPDATE_DIR_PREFIX } from "../src/updater/paths";
 import {
   isAllowedUpdateUrl,
@@ -138,21 +138,27 @@ describe("update files", () => {
 
 describe("macOS in-place update", () => {
   it("finds the bundle of an installed app", () => {
-    expect(macAppBundlePath("/Applications/My AI Slaves.app/Contents/MacOS/My AI Slaves")).toBe(
+    expect(macUpdateTarget("/Applications/My AI Slaves.app/Contents/MacOS/My AI Slaves")).toBe(
       "/Applications/My AI Slaves.app",
     );
   });
 
-  it("won't replace the DMG, a translocated copy or a loose binary", () => {
-    expect(macAppBundlePath("/Volumes/My AI Slaves/My AI Slaves.app/Contents/MacOS/My AI Slaves")).toBeNull();
-    expect(macAppBundlePath("/private/var/folders/x/AppTranslocation/y/d/My AI Slaves.app/Contents/MacOS/My AI Slaves")).toBeNull();
-    expect(macAppBundlePath("/usr/local/bin/my-ai-slaves")).toBeNull();
+  it("installs a copy on the DMG or translocated into /Applications", () => {
+    const target = "/Applications/My AI Slaves.app";
+    expect(macUpdateTarget("/Volumes/My AI Slaves/My AI Slaves.app/Contents/MacOS/My AI Slaves")).toBe(target);
+    expect(macUpdateTarget("/private/var/folders/x/AppTranslocation/y/d/My AI Slaves.app/Contents/MacOS/My AI Slaves")).toBe(target);
   });
 
-  it("swaps the new bundle in and always reopens the app", () => {
+  it("has nothing to replace for a loose binary", () => {
+    expect(macUpdateTarget("/usr/local/bin/my-ai-slaves")).toBeNull();
+  });
+
+  it("swaps the new bundle in, asking for admin rights before falling back to the DMG", () => {
     expect(MAC_UPDATE_SCRIPT).toContain('mv "$APP" "$OLD"');
     expect(MAC_UPDATE_SCRIPT).toContain('mv "$OLD" "$APP"');
-    expect(MAC_UPDATE_SCRIPT.trimEnd().split("\n").slice(-2)).toEqual(['open "$APP"', 'rm -f "$0"']);
+    expect(MAC_UPDATE_SCRIPT).toContain("with administrator privileges");
+    expect(MAC_UPDATE_SCRIPT.indexOf("with administrator privileges")).toBeLessThan(MAC_UPDATE_SCRIPT.indexOf('open "$DMG"'));
+    expect(MAC_UPDATE_SCRIPT.trimEnd().split("\n").at(-1)).toBe('rm -f "$0"');
   });
 });
 

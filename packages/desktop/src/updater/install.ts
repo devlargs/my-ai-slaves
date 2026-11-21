@@ -2,15 +2,14 @@ import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { app, shell } from "electron";
+import { app } from "electron";
 import { hashFile } from "./download";
-import { MAC_UPDATE_SCRIPT, MAC_UPDATE_SCRIPT_NAME, macAppBundlePath } from "./mac-update";
+import { MAC_UPDATE_SCRIPT, MAC_UPDATE_SCRIPT_NAME, macUpdateTarget } from "./mac-update";
 import { UPDATE_DIR_PREFIX, installerFileName, staleUpdateEntries } from "./paths";
 import { sameSha256 } from "./verify";
 
 // Running a downloaded update: the NSIS installer on Windows; on macOS a script
-// that swaps the new app in and relaunches it (see mac-update.ts), or, when this
-// copy can't replace itself, the DMG opened in Finder. Also where the installer
+// that swaps the new app in and relaunches it (see mac-update.ts). Also where the installer
 // file lives, and cleaning it up on the next launch (it can't be deleted right
 // away: the installer is still reading it when this app quits).
 
@@ -50,21 +49,6 @@ function quitForUpdate() {
   setTimeout(() => app.exit(0), 5000);
 }
 
-// The bundle to replace on macOS, or null when this copy can't replace itself:
-// macAppBundlePath rules out dev runs, the DMG and translocated copies, and the
-// bundle and the folder it sits in have to be writable for the swap.
-function macReplaceableBundle(): string | null {
-  const bundle = macAppBundlePath(app.getPath("exe"));
-  if (!bundle) return null;
-  try {
-    fs.accessSync(bundle, fs.constants.W_OK);
-    fs.accessSync(path.dirname(bundle), fs.constants.W_OK);
-    return bundle;
-  } catch {
-    return null;
-  }
-}
-
 // Starts the macOS update script, fully detached so it outlives this process.
 // Its output goes to a log in the temp folder: the only trace of an update that
 // went wrong after the app had already quit.
@@ -85,32 +69,26 @@ function spawnMacUpdate(dmgPath: string, bundle: string): void {
 
 function installOnMac(dmgPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Replace the app in place and relaunch it, like Windows.
-    const bundle = macReplaceableBundle();
-    if (bundle) {
-      try {
-        spawnMacUpdate(dmgPath, bundle);
-      } catch (err) {
-        reject(err instanceof Error ? err : new Error(String(err)));
-        return;
-      }
-      setTimeout(() => {
-        resolve();
-        quitForUpdate();
-      }, 1000);
+    // Replace the app and relaunch it, like Windows. The script handles every
+    // case itself (see mac-update.ts): installing into /Applications for a copy
+    // that can't be replaced where it runs, asking for an administrator
+    // password when the folder isn't writable, and opening the DMG in Finder
+    // only if all of that fails.
+    const bundle = macUpdateTarget(app.getPath("exe"));
+    if (!bundle) {
+      reject(new Error("Updates install only in the packaged app."));
       return;
     }
-    // Can't replace this copy (running from the DMG, translocated, or the
-    // folder isn't writable): open the DMG in Finder so the new app can be
-    // dragged over the old one, then quit so the old copy isn't in use.
-    void shell.openPath(dmgPath).then((err) => {
-      if (err) {
-        reject(new Error(`Could not open the update: ${err}`));
-        return;
-      }
+    try {
+      spawnMacUpdate(dmgPath, bundle);
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    setTimeout(() => {
       resolve();
       quitForUpdate();
-    });
+    }, 1000);
   });
 }
 
