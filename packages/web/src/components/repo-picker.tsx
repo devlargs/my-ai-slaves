@@ -1,15 +1,26 @@
 import type { RepoView } from "@my-ai-slaves/shared";
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
-import { useState } from "react";
+import { CheckIcon, ChevronDownIcon, TagIcon } from "lucide-react";
+import { type ReactNode, useMemo, useState } from "react";
 import { labelColorAttr } from "@/components/label-badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useLabelColor } from "@/lib/hooks";
-import { cn } from "@/lib/utils";
+import { cn, storageGet, storageSet } from "@/lib/utils";
 
 /** The repos a task works in: the first is the main one (the CLI runs there), the rest are opened as they are. */
 export interface RepoSelection {
   main: string | undefined;
   extras: string[];
+}
+
+const FILTER_KEY = "slaves.repoPickerLabelFilter";
+/** Filter value for repos without any label (labels can't contain control characters, so no clash). */
+const NO_LABEL = "\u0000none";
+
+/** Every label in use (first spelling wins, case-insensitive), sorted by name. */
+function collectLabels(repos: RepoView[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const repo of repos) for (const label of repo.labels) if (!byKey.has(label.toLowerCase())) byKey.set(label.toLowerCase(), label);
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
 }
 
 const machine = (r: RepoView) => r.host ?? null;
@@ -33,6 +44,27 @@ export function RepoPicker({
   const main = repos.find((r) => r.id === value.main);
   const extras = value.extras.map((id) => repos.find((r) => r.id === id)).filter((r): r is RepoView => Boolean(r));
   const selected = new Set([value.main, ...value.extras]);
+
+  // Filter the list by label (remembered across visits). Ticked repos always stay visible so they can be unticked.
+  const [filter, setFilter] = useState<string | null>(() => storageGet(FILTER_KEY) || null);
+  const pickFilter = (next: string | null) => {
+    setFilter(next);
+    storageSet(FILTER_KEY, next ?? "");
+  };
+  const labels = useMemo(() => collectLabels(repos), [repos]);
+  const hasUnlabelled = repos.some((r) => r.labels.length === 0);
+  const activeFilter =
+    filter === NO_LABEL && hasUnlabelled
+      ? NO_LABEL
+      : (labels.find((l) => l.toLowerCase() === filter?.toLowerCase()) ?? null);
+  const shown = repos.filter(
+    (r) =>
+      activeFilter === null ||
+      selected.has(r.id) ||
+      (activeFilter === NO_LABEL
+        ? r.labels.length === 0
+        : r.labels.some((l) => l.toLowerCase() === activeFilter.toLowerCase())),
+  );
 
   const toggle = (repo: RepoView) => {
     if (!main || machine(repo) !== machine(main)) return onChange({ main: repo.id, extras: [] });
@@ -78,8 +110,33 @@ export function RepoPicker({
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-72 p-0">
+        {labels.length > 0 && (
+          <div
+            className="flex flex-wrap items-center gap-1 border-b border-rule p-2"
+            role="radiogroup"
+            aria-label="Filter by label"
+          >
+            <FilterChip active={activeFilter === null} onClick={() => pickFilter(null)}>
+              All
+            </FilterChip>
+            {labels.map((label) => (
+              <FilterChip key={label} active={activeFilter === label} onClick={() => pickFilter(label)}>
+                <TagIcon
+                  className={cn("size-3", activeFilter !== label && "label-dot")}
+                  {...labelColorAttr(colorOf(label))}
+                />
+                {label}
+              </FilterChip>
+            ))}
+            {hasUnlabelled && (
+              <FilterChip active={activeFilter === NO_LABEL} onClick={() => pickFilter(NO_LABEL)}>
+                No label
+              </FilterChip>
+            )}
+          </div>
+        )}
         <ul className="scroll-quiet max-h-72 overflow-auto p-1" role="listbox" aria-multiselectable aria-label="Repositories">
-          {repos.map((repo) => {
+          {shown.map((repo) => {
             const on = selected.has(repo.id);
             const isMain = repo.id === main?.id;
             const elsewhere = main && machine(repo) !== machine(main);
@@ -152,5 +209,22 @@ export function RepoPicker({
         </p>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      className={cn(
+        "flex h-5 cursor-pointer items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-(--color-focus)",
+        active ? "border-ink bg-ink text-paper" : "border-rule bg-surface text-ink-2 hover:border-rule-strong hover:text-ink",
+      )}
+    >
+      {children}
+    </button>
   );
 }
