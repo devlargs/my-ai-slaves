@@ -8,6 +8,12 @@
 //    matches once our files are added. Apple Silicon refuses to launch a bundle with a broken
 //    signature ("is damaged and can't be opened"); an ad-hoc signature (`--sign -`) is enough to
 //    launch. Gatekeeper still asks once, since it isn't notarized.
+//
+//    An ad-hoc signature's designated requirement is its own cdhash, which changes with every
+//    build. macOS privacy permissions (TCC: "would like to access files in your Desktop folder")
+//    are remembered against that requirement, so every update looked like a new app and asked
+//    again. The outer bundle is therefore re-signed with an explicit requirement on the bundle
+//    identifier only, which stays the same across versions, so the answer is remembered.
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -31,5 +37,10 @@ exports.default = async function afterPack(context) {
     if (fs.existsSync(helper)) fs.chmodSync(helper, 0o755);
   }
 
-  if (isMac) execFileSync("codesign", ["--force", "--deep", "--sign", "-", appPath], { stdio: "inherit" });
+  if (isMac) {
+    execFileSync("codesign", ["--force", "--deep", "--sign", "-", appPath], { stdio: "inherit" });
+    // Only the outer bundle gets the identifier requirement: the nested helpers keep their own.
+    const requirement = `=designated => identifier "${context.packager.appInfo.id}"`;
+    execFileSync("codesign", ["--force", "--sign", "-", "--requirements", requirement, appPath], { stdio: "inherit" });
+  }
 };
