@@ -31,3 +31,10 @@ export function isNewerVersion(latest: unknown, current: unknown): boolean {
   }
   return false;
 }
+
+/** True when both parse and are the same version ("v0.1.9" and "0.1.9" are). */
+export function isSameVersion(a: unknown, b: unknown): boolean {
+  const x = parseVersion(a);
+  const y = parseVersion(b);
+  return !!x && !!y && x.every((part, i) => part === y[i]);
+}

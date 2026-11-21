@@ -95,7 +95,8 @@ function Sidebar({ route }: { route: Route }) {
         <div className="flex items-center gap-1.5 pl-7 text-[11px] text-muted-foreground" role="status">
           {connected ? (
             <>
-              <LiveDot className="text-success-ink" /> Live
+              {/* A still dot: a pulse here would keep the GPU drawing every frame while nothing is happening. */}
+              <span className="size-1.5 rounded-full bg-success" aria-hidden /> Live
             </>
           ) : (
             <>

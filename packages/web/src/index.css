@@ -167,6 +167,16 @@
   }
 }
 
+/* Looping decorations (the live pulse, spinners, the streaming caret) stand still while the window
+   isn't the active one (lib/window-active.ts). Each keeps the compositor and the GPU drawing every
+   frame for as long as it runs, which was the app's whole CPU cost when it sat in the background.
+   Unlayered on purpose: Tailwind's utilities layer would otherwise win. */
+.window-inactive .animate-ping,
+.window-inactive .animate-pulse,
+.window-inactive .animate-spin {
+  animation: none;
+}
+
 /* react-diff-view theming */
 .diff {
   font-family: var(--font-mono);

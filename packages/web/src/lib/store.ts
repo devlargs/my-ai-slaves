@@ -8,6 +8,7 @@ import type {
   TaskView,
 } from "@my-ai-slaves/shared";
 import { startTransition, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { isWindowActive, onWindowActive } from "./window-active";
 
 // ── Live task output model ──────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ export interface LiveState {
   items: LiveItem[];
   /** Assistant text currently being generated (text-delta). */
   streaming: string;
+  /** The CLI's raw lines: only filled while the task's "Raw output" view is open. */
   raw: RawLine[];
   lastStatus: { status: string; detail: string | null } | null;
 }
@@ -148,23 +150,39 @@ export function setTasks(tasks: TaskView[]) {
   setState({ tasks, tasksLoaded: true });
 }
 
-// A running task sends a message for every token and every raw CLI line, often 100+ a second.
-// Re-rendering the live output for each one kept the main thread busy enough that clicks lagged,
-// so live messages are queued and applied together, at most once every LIVE_FLUSH_MS, and the live
-// view renders them as a transition (useStoreTransition) that yields to typing and clicks.
-type LiveMessage = Extract<ServerMessage, { type: "task.replay" | "task.event" | "task.raw" | "task.status" }>;
+// A running task sends a message for every token and tool call, many a second. Re-rendering the
+// live output for each one would keep the main thread busy, so live messages are queued and applied
+// together, at most once every LIVE_FLUSH_MS, and the live view renders them as a transition
+// (useStoreTransition) that yields to typing and clicks.
+type LiveMessage = Extract<
+  ServerMessage,
+  { type: "task.replay" | "task.event" | "task.raw-replay" | "task.raw" | "task.status" }
+>;
 const LIVE_FLUSH_MS = 100;
+// While the window isn't the active one (another app in front, or minimized): once a second is
+// plenty, and every flush costs a render, a layout and a paint.
+const LIVE_FLUSH_INACTIVE_MS = 1000;
 let pendingLive: LiveMessage[] = [];
 let liveTimer: ReturnType<typeof setTimeout> | null = null;
 /** Tasks whose view is open. Only these keep live output in memory (task.status goes to every queue view). */
 const liveTasks = new Set<string>();
+/** Tasks whose "Raw output" view is open. Only these are sent, and keep, the CLI's raw lines. */
+const rawTasks = new Set<string>();
 
 function queueLive(msg: LiveMessage) {
   if (!liveTasks.has(msg.taskId)) return;
+  if ((msg.type === "task.raw" || msg.type === "task.raw-replay") && !rawTasks.has(msg.taskId)) return;
   pendingLive.push(msg);
   // A timer, not requestAnimationFrame: that one stops while the window is hidden and the queue would pile up.
-  liveTimer ??= setTimeout(flushLive, LIVE_FLUSH_MS);
+  liveTimer ??= setTimeout(flushLive, isWindowActive() ? LIVE_FLUSH_MS : LIVE_FLUSH_INACTIVE_MS);
 }
+
+// Back in the window: show what arrived meanwhile at once, not up to a second later.
+onWindowActive((active) => {
+  if (!active || liveTimer === null) return;
+  clearTimeout(liveTimer);
+  flushLive();
+});
 
 function flushLive() {
   liveTimer = null;
@@ -198,13 +216,19 @@ function flushLive() {
     const id = msg.taskId;
     switch (msg.type) {
       case "task.replay": {
-        rawAdds.delete(id);
-        const next: LiveState = { ...emptyLive(), raw: msg.raw.slice(-RAW_CAP) };
+        // Everything streamed so far, again (the view just opened, or the socket reconnected).
+        // Raw lines have their own replay, so the ones already here stay.
+        appendRaw(id);
+        const next: LiveState = { ...emptyLive(), raw: live[id]?.raw ?? [] };
         for (const e of msg.events) applyEvent(next, e);
         drafts.set(id, next);
         live[id] = next;
         break;
       }
+      case "task.raw-replay":
+        rawAdds.delete(id);
+        draft(id).raw = msg.raw.slice(-RAW_CAP);
+        break;
       case "task.event":
         appendRaw(id); // keep raw lines and events in arrival order
         applyEvent(draft(id), msg.event);
@@ -238,6 +262,14 @@ function dropLive(taskId: string) {
   const live = { ...state.live };
   delete live[taskId];
   setState({ live });
+}
+
+/** A task's raw view closed: forget its raw lines (thousands of long strings). */
+function dropRaw(taskId: string) {
+  rawTasks.delete(taskId);
+  const current = state.live[taskId];
+  if (!current || current.raw.length === 0) return;
+  setState({ live: { ...state.live, [taskId]: { ...current, raw: [] } } });
 }
 
 // ── Notifications ───────────────────────────────────────────────────────────
@@ -322,6 +354,7 @@ class WsClient {
         break;
       case "task.replay":
       case "task.event":
+      case "task.raw-replay":
       case "task.raw":
       case "task.status":
         queueLive(msg);
@@ -368,6 +401,17 @@ class WsClient {
       } else {
         this.taskRefs.set(taskId, n);
       }
+    };
+  }
+
+  /** Receive a task's raw CLI lines (the ones kept so far, then new ones) until the returned function is called. */
+  subscribeTaskRaw(taskId: string): () => void {
+    rawTasks.add(taskId);
+    this.persist(`raw:${taskId}`, { type: "subscribe", topic: "task-raw", taskId });
+    return () => {
+      this.unpersist(`raw:${taskId}`);
+      this.send({ type: "unsubscribe", topic: "task-raw", taskId });
+      dropRaw(taskId);
     };
   }
 

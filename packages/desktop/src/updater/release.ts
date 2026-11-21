@@ -1,4 +1,4 @@
-import { isNewerVersion } from "./version";
+import { isNewerVersion, isSameVersion } from "./version";
 
 // Reading GitHub's "latest release" answer: which asset to install, where it
 // may be downloaded from, and the checksum to verify it against. Pure
@@ -15,6 +15,28 @@ export interface ReleaseAsset {
   url?: string;
   digest?: string;
 }
+
+/**
+ * True when this is the Intel build running through Rosetta on an Apple Silicon
+ * Mac. It works, but every click, keystroke and page is many times slower (the
+ * whole app, V8's compiled JavaScript included, is translated on the fly).
+ * `translated` is Electron's `app.runningUnderARM64Translation`.
+ */
+export function isIntelBuildOnAppleSilicon(platform: NodeJS.Platform, arch: string, translated: boolean): boolean {
+  return platform === "darwin" && arch === "x64" && translated;
+}
+
+/**
+ * The CPU to pick a download for. Not simply `process.arch`: under Rosetta that
+ * says "x64" on an Apple Silicon Mac, so going by it kept every update on the
+ * Intel build, however many releases went by.
+ */
+export function machineArch(platform: NodeJS.Platform, arch: string, translated: boolean): string {
+  return isIntelBuildOnAppleSilicon(platform, arch, translated) ? "arm64" : arch;
+}
+
+/** Where to download a build by hand. */
+export const LATEST_RELEASE_PAGE_URL = `https://github.com/${REPO}/releases/latest`;
 
 /**
  * Picks the release asset this machine should install: the NSIS `.exe` on
@@ -90,17 +112,24 @@ export function releasePageUrl(version: string): string {
  * The update to offer from the latest-release JSON, or null when there is none
  * for this machine: not newer than `currentVersion`, no asset for this
  * platform/arch, or an asset URL that isn't this repo's.
+ *
+ * `arch` is the CPU the download is for (see `machineArch`). With
+ * `sameVersion`, the latest release is offered even when this copy already has
+ * that version: for a copy built for the wrong CPU, whose fix is the same
+ * version built for the right one.
  */
 export function resolveUpdate(
   release: unknown,
   currentVersion: string,
   platform: NodeJS.Platform,
   arch: string,
+  options: { sameVersion?: boolean } = {},
 ): PendingUpdate | null {
   if (typeof release !== "object" || release === null) return null;
   const { tag_name, assets } = release as { tag_name?: unknown; assets?: unknown };
   const latest = (typeof tag_name === "string" ? tag_name : "").replace(/^v/, "");
-  if (!isNewerVersion(latest, currentVersion)) return null;
+  const wanted = isNewerVersion(latest, currentVersion) || (options.sameVersion === true && isSameVersion(latest, currentVersion));
+  if (!wanted) return null;
   const asset = pickUpdateAsset(assets, platform, arch);
   const url = asset?.url;
   if (!url || !url.startsWith(ASSET_API_PREFIX) || !isAllowedUpdateUrl(url)) return null;

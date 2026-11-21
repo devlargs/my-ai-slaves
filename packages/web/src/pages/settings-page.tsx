@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
-import { InstallButton } from "@/components/desktop-update";
+import { InstallButton, RosettaNotice } from "@/components/desktop-update";
 import { SortableList } from "@/components/sortable-list";
 import { AccountStatusBadge, ProviderLabel } from "@/components/status";
 import { LoginDialog } from "@/components/login-dialog";
@@ -728,7 +728,9 @@ function DesktopCard() {
       case "latest":
         return "This is the latest version.";
       case "available":
-        return `Version ${update?.newVersion} is available.`;
+        return update?.rosetta
+          ? `The Apple Silicon build of version ${update.newVersion} is ready to install.`
+          : `Version ${update?.newVersion} is available.`;
       case "manual":
         return `Version ${update?.newVersion} is available, but has no checksum to verify it, so it can't install from the app.`;
       case "downloading":
@@ -748,6 +750,9 @@ function DesktopCard() {
         <CardTitle>Desktop app</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
+        {update?.rosetta && status !== "downloading" && status !== "installing" && (
+          <RosettaNotice update={update} className="max-w-md text-xs" />
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="text-[13px] font-medium">
@@ -756,7 +761,7 @@ function DesktopCard() {
             <span className={cn("text-xs", status === "error" ? "text-danger-ink" : "text-muted-foreground")}>{updateLine}</span>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {status === "available" && <InstallButton newVersion={update?.newVersion ?? null} />}
+            {status === "available" && !update?.rosetta && <InstallButton newVersion={update?.newVersion ?? null} />}
             {status === "manual" && (
               <Button size="sm" variant="outline" onClick={() => void desktopAction(() => desktop!.openReleasePage())}>
                 <ArrowUpRightIcon /> Release page

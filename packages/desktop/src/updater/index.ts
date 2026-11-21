@@ -3,7 +3,15 @@ import { app } from "electron";
 import type { DesktopUpdateState } from "@my-ai-slaves/shared";
 import { fetchGitHubJson, downloadVerified } from "./download";
 import { createUpdateDir, installUpdate, installerPathIn, removeStaleUpdates } from "./install";
-import { LATEST_RELEASE_URL, type PendingUpdate, releasePageUrl, resolveUpdate } from "./release";
+import {
+  isIntelBuildOnAppleSilicon,
+  LATEST_RELEASE_PAGE_URL,
+  LATEST_RELEASE_URL,
+  machineArch,
+  type PendingUpdate,
+  releasePageUrl,
+  resolveUpdate,
+} from "./release";
 import { singleFlight } from "./single-flight";
 
 // In-app updater, ported from Largs Hub: checks the latest GitHub release of
@@ -41,6 +49,13 @@ export interface Updater {
 }
 
 export function createUpdater(deps: UpdaterDeps): Updater {
+  // The Intel build on an Apple Silicon Mac (Rosetta): process.arch says "x64" there, so the
+  // download is picked for the real chip instead, and the Apple Silicon build of the latest
+  // release counts as an update even when this copy already has that version.
+  const translated = app.runningUnderARM64Translation;
+  const rosetta = isIntelBuildOnAppleSilicon(process.platform, process.arch, translated);
+  const arch = machineArch(process.platform, process.arch, translated);
+
   let state: DesktopUpdateState = {
     status: "idle",
     currentVersion: app.getVersion(),
@@ -49,6 +64,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     releaseUrl: null,
     error: null,
     checkedAt: null,
+    rosetta,
   };
   let pending: PendingUpdate | null = null;
   // The directory of the download in progress, which cleanup must leave alone
@@ -80,7 +96,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         return state;
       }
       if (status !== 200) throw new Error(`GitHub answered HTTP ${status}`);
-      const update = resolveUpdate(body, app.getVersion(), process.platform, process.arch);
+      const update = resolveUpdate(body, app.getVersion(), process.platform, arch, { sameVersion: rosetta });
       pending = update;
       if (!update) {
         set({ status: "latest", newVersion: null, releaseUrl: null, checkedAt });
@@ -142,7 +158,8 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     state: () => state,
     check: () => (installFlight.isRunning() ? Promise.resolve(state) : checkFlight.run()),
     install: () => installFlight.run(),
-    releaseUrl: () => state.releaseUrl,
+    // Under Rosetta there is always something to get by hand, even when the check couldn't run.
+    releaseUrl: () => state.releaseUrl ?? (rosetta ? LATEST_RELEASE_PAGE_URL : null),
   };
 }
 

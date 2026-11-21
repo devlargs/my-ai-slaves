@@ -16,6 +16,8 @@ interface Client {
   queue: boolean;
   accounts: boolean;
   tasks: Set<string>;
+  /** Tasks whose raw CLI lines this client is showing. */
+  rawTasks: Set<string>;
 }
 
 export interface HubSources {
@@ -48,7 +50,7 @@ export class WsHub implements Broadcaster {
   }
 
   handle(socket: WebSocket): void {
-    const client: Client = { socket, queue: false, accounts: false, tasks: new Set() };
+    const client: Client = { socket, queue: false, accounts: false, tasks: new Set(), rawTasks: new Set() };
     this.clients.add(client);
     socket.on("message", (data) => {
       let msg: ClientMessage;
@@ -66,7 +68,9 @@ export class WsHub implements Broadcaster {
     const sources = this.sources;
     if (!sources) return;
     if (msg.type === "unsubscribe") {
-      client.tasks.delete(msg.taskId);
+      // Closing a task's view also ends its raw lines.
+      if (msg.topic === "task") client.tasks.delete(msg.taskId);
+      client.rawTasks.delete(msg.taskId);
       return;
     }
     if (msg.topic === "queue") {
@@ -77,8 +81,10 @@ export class WsHub implements Broadcaster {
       this.send(client, { type: "accounts.updated", accounts: await sources.listAccounts() });
     } else if (msg.topic === "task") {
       client.tasks.add(msg.taskId);
-      const { events, raw } = sources.replay(msg.taskId);
-      this.send(client, { type: "task.replay", taskId: msg.taskId, events, raw });
+      this.send(client, { type: "task.replay", taskId: msg.taskId, events: sources.replay(msg.taskId).events });
+    } else if (msg.topic === "task-raw") {
+      client.rawTasks.add(msg.taskId);
+      this.send(client, { type: "task.raw-replay", taskId: msg.taskId, raw: sources.replay(msg.taskId).raw });
     }
   }
 
@@ -96,7 +102,8 @@ export class WsHub implements Broadcaster {
     this.broadcast((c) => c.tasks.has(taskId), { type: "task.event", taskId, event });
   }
   taskRaw(taskId: string, raw: RawLine): void {
-    this.broadcast((c) => c.tasks.has(taskId), { type: "task.raw", taskId, raw });
+    // Only to views showing raw output: with none open (the usual case) this costs nothing.
+    this.broadcast((c) => c.rawTasks.has(taskId), { type: "task.raw", taskId, raw });
   }
   taskStatus(taskId: string, status: QueuedTaskStatus | "done" | "failed", detail: string | null): void {
     this.broadcast((c) => c.queue || c.tasks.has(taskId), { type: "task.status", taskId, status, detail });

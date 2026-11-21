@@ -14,7 +14,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { AttachmentList } from "@/components/attachments";
 import { Markdown } from "@/components/markdown";
 import { Switch } from "@/components/ui/switch";
-import { type LiveItem, type LiveState, useStoreTransition } from "@/lib/store";
+import { type LiveItem, type LiveState, useStoreTransition, ws } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const NO_ITEMS: LiveItem[] = [];
@@ -27,11 +27,12 @@ export function LiveOutput({ taskId }: { taskId: string }) {
   const [raw, setRaw] = useState(false);
   const [itemLimit, setItemLimit] = useState(ITEM_WINDOW);
   const [rawLimit, setRawLimit] = useState(RAW_WINDOW);
-  // Separate selections, so a raw CLI line (most of what a run sends) only re-renders this view
-  // while the raw output is shown. Rendered as transitions: typing and clicks go first.
+  // The CLI's raw lines are most of what a run sends, and only this view shows them: they are
+  // asked for (and kept in memory) only while it's switched on.
+  useEffect(() => (raw ? ws.subscribeTaskRaw(taskId) : undefined), [raw, taskId]);
+  // Rendered as transitions: typing and clicks go first.
   const items = useStoreTransition((s) => s.live[taskId]?.items ?? NO_ITEMS, [taskId]);
   const streaming = useStoreTransition((s) => s.live[taskId]?.streaming ?? "", [taskId]);
-  const hasRaw = useStoreTransition((s) => (s.live[taskId]?.raw.length ?? 0) > 0, [taskId]);
   const rawLines = useStoreTransition((s) => (raw ? (s.live[taskId]?.raw ?? NO_RAW) : NO_RAW), [taskId, raw]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -80,7 +81,9 @@ export function LiveOutput({ taskId }: { taskId: string }) {
         }}
         className="scroll-quiet min-h-0 flex-1 overflow-auto rounded-lg border border-rule bg-surface"
       >
-        {items.length === 0 && !streaming && !hasRaw ? (
+        {raw && rawLines.length === 0 ? (
+          <p className="p-4 text-[13px] text-muted-foreground">No raw output kept for this task.</p>
+        ) : !raw && items.length === 0 && !streaming ? (
           <p className="p-4 text-[13px] text-muted-foreground">No output yet. It streams here while the task runs.</p>
         ) : raw ? (
           <pre className="flex min-h-full flex-col bg-paper-2 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-ink-2">

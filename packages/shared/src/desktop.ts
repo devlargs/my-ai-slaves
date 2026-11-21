@@ -24,6 +24,12 @@ export interface DesktopUpdateState {
   error: string | null;
   /** ISO time of the last finished check. */
   checkedAt: string | null;
+  /**
+   * True when this copy is the Intel build running through Rosetta on an Apple Silicon Mac, which
+   * makes the whole app many times slower. The update offered is then the Apple Silicon build,
+   * even when it's the same version.
+   */
+  rosetta: boolean;
 }
 
 export interface DesktopInfo {

@@ -1,6 +1,6 @@
 import type { ActivityEntry } from "@my-ai-slaves/shared";
 import { ChevronRightIcon } from "lucide-react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Markdown } from "@/components/markdown";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { cn, formatTime } from "@/lib/utils";
@@ -22,19 +22,39 @@ const eventVariant: Partial<Record<ActivityEntry["event"], BadgeVariant>> = {
   discarded: "outline",
 };
 
+/** A long run logs thousands of entries (one per tool call). Past this many, the middle stays folded until asked for. */
+const FOLD_OVER = 300;
+/** Entries kept in view at each end of a folded log: how it started, and how it ended. */
+const FOLD_KEEP = 100;
+
 export function ActivityTimeline({ entries }: { entries: ActivityEntry[] }) {
+  const [showAll, setShowAll] = useState(false);
   if (entries.length === 0) return <p className="text-[13px] text-muted-foreground">No activity recorded yet.</p>;
+  const folded = !showAll && entries.length > FOLD_OVER;
+  const hidden = folded ? entries.length - 2 * FOLD_KEEP : 0;
+  // Rows are keyed by their place in the whole log, so unfolding keeps the ones already there.
+  const row = (entry: ActivityEntry, i: number) => <TimelineRow key={i} entry={entry} />;
   return (
     <ol className="flex flex-col divide-y divide-rule overflow-hidden rounded-lg border border-rule bg-surface">
-      {entries.map((entry, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: append-only log
-        <TimelineRow key={i} entry={entry} />
-      ))}
+      {folded ? entries.slice(0, FOLD_KEEP).map(row) : entries.map(row)}
+      {folded && (
+        <li className="bg-paper-2/60 px-3 py-2 text-center">
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="cursor-pointer text-xs text-muted-foreground underline-offset-2 hover:text-ink hover:underline"
+          >
+            Show the <span className="num">{hidden.toLocaleString()}</span> entries in between
+          </button>
+        </li>
+      )}
+      {folded && entries.slice(-FOLD_KEEP).map((entry, i) => row(entry, entries.length - FOLD_KEEP + i))}
     </ol>
   );
 }
 
-function TimelineRow({ entry }: { entry: ActivityEntry }) {
+// Memoized, and skipped by the browser while scrolled out of view: the list can be long.
+const TimelineRow = memo(function TimelineRow({ entry }: { entry: ActivityEntry }) {
   const prompt = entry.event === "started" && typeof entry.data?.prompt === "string" ? entry.data.prompt : null;
   // The agent's messages and final result are markdown: shown rendered, not as JSON.
   const agentText =
@@ -48,7 +68,7 @@ function TimelineRow({ entry }: { entry: ActivityEntry }) {
   const expandable = prompt !== null || agentText !== null || (extra !== null && Object.keys(extra).length > 0);
 
   return (
-    <li className="px-3 py-2">
+    <li className="offscreen-skip px-3 py-2">
       <button
         type="button"
         disabled={!expandable}
@@ -85,4 +105,4 @@ function TimelineRow({ entry }: { entry: ActivityEntry }) {
       )}
     </li>
   );
-}
+});

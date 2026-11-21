@@ -28,6 +28,9 @@ import type { RepoService } from "./repo-service";
 import type { RepoGit } from "./repo-git";
 
 const LIVE_BUFFER_LIMIT = 5000;
+// Raw lines can be huge (a tool result carrying a whole file), and every task in the queue keeps
+// its buffer: capped by size as well as by count, so the server's memory stays bounded.
+const RAW_BUFFER_MAX_CHARS = 4_000_000;
 const MAX_TIMER_MS = 60 * 60 * 1000;
 
 interface LiveRun {
@@ -41,10 +44,14 @@ interface LiveRun {
   cancelRequested: boolean;
 }
 
-interface OutputBuffer {
+export interface OutputBuffer {
   events: StreamEvent[];
   raw: RawLine[];
+  /** Total length of the lines in `raw`. */
+  rawChars: number;
 }
+
+const newBuffer = (): OutputBuffer => ({ events: [], raw: [], rawChars: 0 });
 
 export interface QueueDeps {
   stores: DataStores;
@@ -72,6 +79,18 @@ const pushCapped = <T>(list: T[], item: T) => {
   list.push(item);
   if (list.length > LIVE_BUFFER_LIMIT) list.splice(0, list.length - LIVE_BUFFER_LIMIT);
 };
+
+/** Adds a raw line, then drops the oldest ones while the buffer is over either limit (the newest line always stays). */
+export function pushRawCapped(buffer: OutputBuffer, line: RawLine, maxLines = LIVE_BUFFER_LIMIT, maxChars = RAW_BUFFER_MAX_CHARS): void {
+  buffer.raw.push(line);
+  buffer.rawChars += line.line.length;
+  let drop = 0;
+  while (drop < buffer.raw.length - 1 && (buffer.raw.length - drop > maxLines || buffer.rawChars > maxChars)) {
+    buffer.rawChars -= (buffer.raw[drop] as RawLine).line.length;
+    drop += 1;
+  }
+  if (drop > 0) buffer.raw.splice(0, drop);
+}
 
 /**
  * Owns queue.json and every task run.
@@ -192,7 +211,7 @@ export class QueueService {
   }
 
   replay(taskId: string): OutputBuffer {
-    return this.buffers.get(taskId) ?? { events: [], raw: [] };
+    return this.buffers.get(taskId) ?? newBuffer();
   }
 
   async publish(): Promise<void> {
@@ -584,7 +603,7 @@ export class QueueService {
 
   private async startRun(task: Task, repo: Repo, account: Account, isReply: boolean): Promise<void> {
     const settings = await this.stores.settings.read();
-    const buffer: OutputBuffer = isReply ? (this.buffers.get(task.id) ?? { events: [], raw: [] }) : { events: [], raw: [] };
+    const buffer: OutputBuffer = isReply ? (this.buffers.get(task.id) ?? newBuffer()) : newBuffer();
     this.buffers.set(task.id, buffer);
 
     const repoList = await this.deps.repos.list();
@@ -730,7 +749,7 @@ export class QueueService {
       this.deps.broadcaster.taskEvent(task.id, sent);
       handle.onStream((event) => this.onEvent(run, event, buffer));
       handle.onRaw((raw) => {
-        pushCapped(buffer.raw, raw);
+        pushRawCapped(buffer, raw);
         this.deps.broadcaster.taskRaw(task.id, raw);
       });
       this.deps.broadcaster.taskStatus(task.id, "running", `Running on ${account.id}`);

@@ -53,7 +53,7 @@ async function main() {
   await fs.promises.mkdir(app.getPath("logs"), { recursive: true });
 
   const getToken = createTokenSource(() => serverEnv);
-  updater = createUpdater({ getToken, onChange: broadcastUpdateState });
+  updater = createUpdater({ getToken, onChange: onUpdateState });
   registerIpc();
 
   if (await bootServer()) createWindow();
@@ -226,14 +226,52 @@ function broadcastUpdateState(state: DesktopUpdateState) {
   mainWindow?.webContents.send("desktop:update-state", state);
 }
 
+/** A message box on the app's window (or on its own when the window is closed). */
+function show(options: Electron.MessageBoxOptions) {
+  return mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options);
+}
+
+// ── Intel build on Apple Silicon ────────────────────────────────────────────
+
+let offeredAppleSiliconBuild = false;
+
+/** Every update state change goes to the window; the Apple Silicon build is offered once per launch. */
+function onUpdateState(state: DesktopUpdateState) {
+  broadcastUpdateState(state);
+  if (state.rosetta && state.status === "available" && !offeredAppleSiliconBuild) {
+    offeredAppleSiliconBuild = true;
+    void offerAppleSiliconBuild(state);
+  }
+}
+
+/**
+ * This copy is the Intel build on a Mac with an Apple Silicon chip: macOS runs it through Rosetta,
+ * and everything in it (pages, typing, the server, git) is many times slower. Offers to replace it
+ * with the Apple Silicon build of the latest release, which the updater has already found.
+ */
+async function offerAppleSiliconBuild(state: DesktopUpdateState) {
+  if (!updater) return;
+  const answer = await show({
+    type: "warning",
+    message: "This is the Intel build of My AI Slaves",
+    detail:
+      "This Mac has an Apple Silicon chip, so macOS runs the Intel build through Rosetta. That makes the whole app slow: opening pages, typing, and the tasks themselves.\n\n" +
+      `Switching installs the Apple Silicon build (v${state.newVersion}) and reopens the app. Running tasks stop and show as interrupted.`,
+    buttons: ["Switch and Restart", "Later"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (answer.response === 0) await updater.install().catch((err: Error) => show({ type: "error", message: err.message }));
+}
+
 /** The menu's "Check for Updates…": the same check, answered in a dialog. */
 async function checkForUpdatesFromMenu() {
   if (!updater) return;
   const state = await updater.check();
-  const parent = mainWindow ?? undefined;
-  const show = (options: Electron.MessageBoxOptions) =>
-    parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
-  if (state.status === "available") {
+  if (state.rosetta && state.status === "available") {
+    offeredAppleSiliconBuild = true;
+    await offerAppleSiliconBuild(state);
+  } else if (state.status === "available") {
     const answer = await show({
       type: "info",
       message: `My AI Slaves ${state.newVersion} is available`,

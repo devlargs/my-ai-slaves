@@ -3,6 +3,8 @@ import { macUpdateTarget, MAC_UPDATE_SCRIPT } from "../src/updater/mac-update";
 import { installerFileName, staleUpdateEntries, UPDATE_DIR_PREFIX } from "../src/updater/paths";
 import {
   isAllowedUpdateUrl,
+  isIntelBuildOnAppleSilicon,
+  machineArch,
   parseSha256Digest,
   pickUpdateAsset,
   releasePageUrl,
@@ -11,7 +13,7 @@ import {
 } from "../src/updater/release";
 import { singleFlight } from "../src/updater/single-flight";
 import { downloadProblem, isRedirectStatus, parseContentLength } from "../src/updater/verify";
-import { isNewerVersion, parseVersion } from "../src/updater/version";
+import { isNewerVersion, isSameVersion, parseVersion } from "../src/updater/version";
 
 const SHA = "a".repeat(64);
 const API = "https://api.github.com/repos/devlargs/my-ai-slaves/releases/assets";
@@ -40,6 +42,44 @@ describe("versions", () => {
     expect(isNewerVersion("0.1.9", "0.1.10")).toBe(false);
     expect(isNewerVersion("0.1.9", "0.1.9")).toBe(false);
     expect(isNewerVersion("garbage", "0.1.0")).toBe(false);
+  });
+
+  it("knows the same version, with or without a v", () => {
+    expect(isSameVersion("v0.1.9", "0.1.9")).toBe(true);
+    expect(isSameVersion("0.1.10", "0.1.9")).toBe(false);
+    expect(isSameVersion("garbage", "garbage")).toBe(false);
+  });
+});
+
+describe("the Intel build on an Apple Silicon Mac (Rosetta)", () => {
+  it("is only an x64 Mac build that macOS is translating", () => {
+    expect(isIntelBuildOnAppleSilicon("darwin", "x64", true)).toBe(true);
+    expect(isIntelBuildOnAppleSilicon("darwin", "x64", false)).toBe(false); // a real Intel Mac
+    expect(isIntelBuildOnAppleSilicon("darwin", "arm64", false)).toBe(false);
+    expect(isIntelBuildOnAppleSilicon("win32", "x64", true)).toBe(false); // Windows on ARM: no arm64 build to switch to
+  });
+
+  it("picks downloads for the real chip, not the one the translated process reports", () => {
+    expect(machineArch("darwin", "x64", true)).toBe("arm64");
+    expect(machineArch("darwin", "x64", false)).toBe("x64");
+    expect(machineArch("darwin", "arm64", false)).toBe("arm64");
+    expect(machineArch("win32", "x64", true)).toBe("x64");
+  });
+
+  it("moves an update over to the Apple Silicon DMG", () => {
+    const arch = machineArch("darwin", "x64", true);
+    expect(resolveUpdate(release(), "0.1.0", "darwin", arch, { sameVersion: true })?.url).toBe(armDmg.url);
+  });
+
+  it("offers the Apple Silicon build of the version it already has, but never an older one", () => {
+    expect(resolveUpdate(release(), "0.2.0", "darwin", "arm64", { sameVersion: true })).toEqual({
+      version: "0.2.0",
+      url: armDmg.url,
+      sha256: null,
+    });
+    expect(resolveUpdate(release(), "0.3.0", "darwin", "arm64", { sameVersion: true })).toBeNull();
+    // Without it (the right build already), the same version is no update.
+    expect(resolveUpdate(release(), "0.2.0", "darwin", "arm64")).toBeNull();
   });
 });
 

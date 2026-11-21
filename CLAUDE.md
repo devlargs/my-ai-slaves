@@ -50,7 +50,9 @@ packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder
                   <userData>/desktop.json), forks the bundled server on Electron's Node
                   (ELECTRON_RUN_AS_NODE, SLAVES_DATA_DIR/SLAVES_PORT/SLAVES_WEB_DIR), loads the same UI,
                   pulls the login shell's PATH on macOS (shell-env.ts), and src/updater/ (in-app updates
-                  from GitHub Releases, sha256-verified; token from GH_TOKEN/GITHUB_TOKEN or `gh auth token`).
+                  from GitHub Releases, sha256-verified; token from GH_TOKEN/GITHUB_TOKEN or `gh auth token`;
+                  downloads are picked for the Mac's real chip, and an Intel build running under Rosetta
+                  offers to replace itself with the Apple Silicon one).
                   scripts/build.mjs stages app/ (esbuild + node-pty prebuilds); electron-builder.config.cjs
                   packages it unsigned (macOS ad-hoc signed in scripts/after-pack.cjs, asar off).
 .github/workflows release.yml: every push to main (except *.md / .github/** only) runs checks.yml
@@ -114,6 +116,15 @@ desktop app also uses 3005 and refuses to start if it's taken).
   `scripts/postinstall.mjs` does); pass `windowsHide: true` to child processes; remember Windows has no
   SIGTERM to catch (the desktop app sends a `shutdown` IPC message instead). Remote/SSH and node-pty
   logins are the macOS-tested paths; check Windows behaviour when touching them.
+- **Performance:** the app must cost nothing while idle and next to nothing in the background. No
+  looping animation unless a task is running, and those stop while the window isn't the active one
+  (`lib/window-active.ts`, `.window-inactive` in `index.css`); live output is applied 10×/s in the active
+  window and 1×/s otherwise; raw CLI lines are only sent to an open "Raw output" view (`task-raw` topic);
+  long lists draw lazily (diff files, activity log, live rows). When the desktop app feels slow, check the
+  build before the code: `file "/Applications/My AI Slaves.app/Contents/MacOS/My AI Slaves"` must say
+  `arm64` on an Apple Silicon Mac (an `x86_64` build runs through Rosetta, 20 to 100 times slower). Then
+  measure in the real Electron app (a copy on scratch data with `SLAVES_DATA_DIR`, `SLAVES_PORT`,
+  `--user-data-dir` and `--remote-debugging-port`) instead of guessing.
 - Verify CLI flags against the official docs before using them; don't guess.
 
 ## Commits

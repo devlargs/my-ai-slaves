@@ -16,6 +16,10 @@ Download the latest installer from the
 | macOS, Intel              | `My-AI-Slaves-x64.dmg`    |
 | Windows (x64)             | `My-AI-Slaves-Setup.exe`  |
 
+On a Mac with an Apple chip (Apple menu → About This Mac shows "Chip: Apple M…"), take the **arm64** file.
+The Intel one also opens there, but macOS runs it through Rosetta and the whole app becomes many times
+slower. If that happens the app says so and offers to switch to the Apple Silicon build in one click.
+
 Requires macOS 13 or later. You also need the CLIs you want to use installed on your machine
 (`claude` and/or Cursor's `agent`); you log in to your accounts from inside the app.
 
