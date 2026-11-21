@@ -17,9 +17,8 @@ permissions:
   contents: write
 
 # One release at a time, and a run that has started is never cancelled:
-# stopping one between the GitHub Release and the version-bump push would leave
-# a release with no bump commit. A
-# newer push waits for the running release instead. GitHub keeps only the newest
+# stopping one between the version-bump push and publishing its release would
+# leave a tag whose release is still a draft. A newer push waits for the running release instead. GitHub keeps only the newest
 # waiting run, which is fine: every run releases the tip of main (see the
 # version job), so the newest one covers the pushes it replaced.
 concurrency:
@@ -69,8 +68,8 @@ jobs:
             echo "$CHANGES"
           fi
 
-          # The higher of package.json and the last tag: a release whose bump
-          # commit couldn't land (main moved, see the release job) still counts.
+          # The higher of package.json and the last tag (they match since the
+          # tag sits on the bump commit; older releases tagged the commit before it).
           PKG=$(node -p "require('./package.json').version")
           CURRENT=$(printf '%s\n%s\n' "$PKG" "${LAST_TAG#v}" | sort -V | tail -n1)
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
@@ -140,12 +139,22 @@ jobs:
           path: ${{ matrix.files }}
           if-no-files-found: error
 
+  # The tag goes on the "chore: bump version" commit, so the tag, package.json
+  # and package-lock.json always agree. That commit (and its tag) only land once
+  # the installers are built and uploaded to a draft release; the draft is
+  # published last. A run that fails before then leaves main and the tags as
+  # they were.
   release:
     needs: [version, build]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      # To start a new release run when main moved during this one.
+      actions: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
       SHA: ${{ needs.version.outputs.sha }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       # The exact commit that was built, so the bump commit sits right on top of it.
@@ -164,16 +173,22 @@ jobs:
           path: release
           merge-multiple: true
 
-      # The tag goes on the commit that was built, not on whatever main is now,
-      # so a release never claims commits that aren't in its installers.
-      # GitHub records a sha256 digest for every uploaded asset; the in-app
-      # updater verifies each download against it before installing.
-      - name: Create GitHub Release
+      # A draft left by an earlier failed attempt at this version.
+      - name: Remove stale draft
+        run: |
+          if [ "$(gh release view "v$VERSION" --json isDraft -q .isDraft 2>/dev/null)" = "true" ]; then
+            gh release delete "v$VERSION" --yes
+          fi
+
+      # A draft has no tag yet and isn't offered by the in-app updater
+      # (/releases/latest skips drafts). GitHub records a sha256 digest for every
+      # uploaded asset; the updater verifies each download against it.
+      - name: Create draft release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.VERSION }}
-          target_commitish: ${{ env.SHA }}
           name: v${{ env.VERSION }}
+          draft: true
           generate_release_notes: true
           files: |
             release/My-AI-Slaves-arm64.dmg
@@ -181,17 +196,34 @@ jobs:
             release/My-AI-Slaves-Setup.exe
 
       # Pushed with GITHUB_TOKEN, so this commit doesn't start another release.
-      # It only lands when main is still the built commit: if commits arrived
-      # during the build, rebasing the bump on top of them would put
-      # "bump version" after changes this release doesn't contain, and the run
-      # those commits queued bumps past this version instead.
-      - name: Commit version bump
+      # The branch and the tag are pushed atomically: both land or neither does.
+      # The push only succeeds while main is still the built commit; if commits
+      # arrived during the build, this release is dropped (no bump, no tag) and
+      # a fresh run releases the new tip, which includes these changes.
+      - name: Commit version bump and tag it
+        id: bump
         run: |
           npm version "$VERSION" --no-git-tag-version
           git config user.name "Ralph Largo"
           git config user.email "devlargs@gmail.com"
           git add package.json package-lock.json
           git commit -m "chore: bump version to v$VERSION"
-          if ! git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"; then
-            echo "::notice::main moved during the build; v$VERSION is tagged on $SHA and the next release bumps package.json."
+          git tag "v$VERSION"
+          if git push --atomic origin "HEAD:refs/heads/${GITHUB_REF_NAME}" "refs/tags/v$VERSION"; then
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Publish release
+        if: steps.bump.outputs.pushed == 'true'
+        run: gh release edit "v$VERSION" --tag "v$VERSION" --draft=false --latest
+
+      # Runs started by GITHUB_TOKEN pushes don't trigger workflows, but
+      # workflow_dispatch does; it waits behind this run (see concurrency).
+      - name: Drop release and start a new run
+        if: steps.bump.outputs.pushed != 'true'
+        run: |
+          gh release delete "v$VERSION" --yes
+          gh workflow run release.yml --ref "${GITHUB_REF_NAME}"
+          echo "::notice::main moved during the build; v$VERSION was not released. A new run releases the current main."
