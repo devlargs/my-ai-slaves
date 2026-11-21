@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
  * pre-ticked. Sent as written, in this order, after the global base prompt.
  */
 export function RepoPromptsEditor({ repoId }: { repoId: string }) {
-  const { data: prompts, setData, reload } = useApi<RepoPrompt[]>(() => api.getRepoPrompts(repoId), [repoId]);
+  const { data: prompts, setData, reload } = useApi<RepoPrompt[]>(() => api.getRepoPrompts(repoId), [repoId], `repo-prompts:${repoId}`);
   const [adding, setAdding] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>

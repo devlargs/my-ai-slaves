@@ -10,7 +10,7 @@ import { cn, formatTime } from "@/lib/utils";
 import { TaskHistory } from "./queue-page";
 
 export function HistoryPage() {
-  const { data, loading, reload } = useApi<HistoryItem[]>(() => api.history(), []);
+  const { data, loading, reload } = useApi<HistoryItem[]>(() => api.history(), [], "history");
   const repoName = useRepoName();
   const [selected, setSelected] = useState<string | null>(null);
   const item = data?.find((h) => h.taskId === selected) ?? null;

@@ -304,7 +304,7 @@ function QueueList({
 // ── Composer ────────────────────────────────────────────────────────────────
 
 function Composer() {
-  const { data: repos } = useApi<RepoView[]>(() => api.getRepos(), []);
+  const { data: repos } = useApi<RepoView[]>(() => api.getRepos(), [], "repos");
   const accounts = useStore((s) => s.accounts);
   const [repo, setRepo] = useState<string | undefined>(() => storageGet(REPO_KEY) ?? undefined);
   // Cross-repo work: other repos (same machine) opened alongside the main one.
@@ -658,7 +658,7 @@ function TaskDetail({ task }: { task: TaskView }) {
 }
 
 export function TaskHistory({ taskId, version }: { taskId: string; version?: string }) {
-  const { data, loading } = useApi(() => api.taskHistory(taskId), [taskId, version]);
+  const { data, loading } = useApi(() => api.taskHistory(taskId), [taskId, version], `task-history:${taskId}`);
   if (loading && !data) return <p className="text-sm text-muted-foreground">Loading…</p>;
   return <ActivityTimeline entries={data ?? []} />;
 }
@@ -812,7 +812,7 @@ export function DiscardTaskButton({ task, withLabel = false }: { task: TaskView;
  * exact text piped to the CLI. Shows the run that carried the base prompts (the session's first run).
  */
 function PromptReceived({ taskId, version }: { taskId: string; version: string }) {
-  const { data } = useApi(() => api.taskHistory(taskId), [taskId, version]);
+  const { data } = useApi(() => api.taskHistory(taskId), [taskId, version], `task-history:${taskId}`);
   const [open, setOpen] = useState(false);
   const starts = (data ?? []).filter((e) => e.event === "started");
   const fresh = [...starts].reverse().find((e) => e.data?.kind !== "reply");

@@ -3,20 +3,49 @@ import { ApiRequestError, api } from "./api";
 import { toast } from "sonner";
 import { ws } from "./store";
 
-/** Fetch on mount (and when deps change); exposes reload and a local setter. */
-export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
-  const [data, setData] = useState<T | undefined>(undefined);
+// Last result of every keyed useApi call, kept for the whole session. Opening a page again shows
+// what it showed last time straight away and refreshes it in the background, instead of starting
+// empty and showing "Loading…" on every visit.
+const apiCache = new Map<string, unknown>();
+
+/**
+ * Fetch on mount (and when deps change); exposes reload and a local setter. With a `cacheKey`, the
+ * last result is shown immediately on the next mount while a fresh copy loads (`loading` is then
+ * only true while there's nothing to show yet or during a reload).
+ */
+export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = [], cacheKey?: string) {
+  const [data, setDataState] = useState<T | undefined>(() =>
+    cacheKey === undefined ? undefined : (apiCache.get(cacheKey) as T | undefined),
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
+  const keyRef = useRef(cacheKey);
+  keyRef.current = cacheKey;
+
+  const setData = useCallback((next: T | undefined | ((prev: T | undefined) => T | undefined)) => {
+    setDataState((prev) => {
+      const value = typeof next === "function" ? (next as (prev: T | undefined) => T | undefined)(prev) : next;
+      if (keyRef.current !== undefined) {
+        if (value === undefined) apiCache.delete(keyRef.current);
+        else apiCache.set(keyRef.current, value);
+      }
+      return value;
+    });
+  }, []);
 
   const reload = useCallback(async () => {
     setLoading(true);
+    const key = keyRef.current;
     try {
       const result = await fetcherRef.current();
-      setData(result);
-      setError(null);
+      if (key !== undefined) apiCache.set(key, result);
+      // Ignore a late answer for a key the component has since moved away from.
+      if (key === keyRef.current) {
+        setDataState(result);
+        setError(null);
+      }
       return result;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -27,6 +56,13 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
       setLoading(false);
     }
   }, []);
+
+  // A changed key (e.g. another task selected) shows that key's cached data, not the previous one's.
+  const [shownKey, setShownKey] = useState(cacheKey);
+  if (shownKey !== cacheKey) {
+    setShownKey(cacheKey);
+    setDataState(cacheKey === undefined ? undefined : (apiCache.get(cacheKey) as T | undefined));
+  }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: deps are caller-supplied
   useEffect(() => {

@@ -25,7 +25,7 @@ function fileStats(file: FileData) {
 }
 
 export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void }) {
-  const { data, loading, reload } = useApi<DiffResponse>(() => api.taskDiff(task.id), [task.id, task.updatedAt]);
+  const { data, loading, reload } = useApi<DiffResponse>(() => api.taskDiff(task.id), [task.id, task.updatedAt], `diff:${task.id}`);
   const files = useMemo(() => {
     if (!data?.patch.trim()) return [];
     try {

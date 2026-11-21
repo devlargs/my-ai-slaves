@@ -32,7 +32,7 @@ import { useStore } from "@/lib/store";
 import { cn, storageGet, storageSet } from "@/lib/utils";
 
 export function ReposPage() {
-  const { data: repos, setData, reload } = useApi<RepoView[]>(() => api.getRepos(), []);
+  const { data: repos, setData, reload } = useApi<RepoView[]>(() => api.getRepos(), [], "repos");
   const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded());
 
   const sorted = useMemo(
@@ -637,7 +637,7 @@ function CommitterEditor({
   repo: Repo;
   onSave: (body: { committerId: string | null }) => Promise<unknown>;
 }) {
-  const { data: settings } = useApi<Settings>(() => api.getSettings(), []);
+  const { data: settings } = useApi<Settings>(() => api.getSettings(), [], "settings");
   const committers = settings?.committers ?? [];
   const fallback = committers.find((c) => c.id === settings?.defaultCommitterId);
   // A deleted committer falls back to the default, same as the server does.

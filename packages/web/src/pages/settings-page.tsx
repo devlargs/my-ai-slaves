@@ -318,7 +318,7 @@ async function saveCommitters(patch: Pick<Settings, "committers" | "defaultCommi
 }
 
 function CommittersCard() {
-  const { data, setData } = useApi<Settings>(() => api.getSettings(), []);
+  const { data, setData } = useApi<Settings>(() => api.getSettings(), [], "settings");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -533,7 +533,7 @@ function CommitterRow({
 // ── General settings ────────────────────────────────────────────────────────
 
 function GeneralSettingsCard() {
-  const { data, setData } = useApi<Settings>(() => api.getSettings(), []);
+  const { data, setData } = useApi<Settings>(() => api.getSettings(), [], "settings");
   const [draft, setDraft] = useState<UpdateSettingsRequest | null>(null);
   const [patterns, setPatterns] = useState("");
   const [busy, setBusy] = useState(false);

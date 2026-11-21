@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 
 /** The saved prompt library: reusable prompts you bind to a task message or reply. */
 export function PromptsPage() {
-  const { data: prompts, setData, reload } = useApi<SavedPromptView[]>(() => api.getPrompts(), []);
+  const { data: prompts, setData, reload } = useApi<SavedPromptView[]>(() => api.getPrompts(), [], "prompts");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
     setExpanded((prev) => {
