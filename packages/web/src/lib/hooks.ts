@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ApiRequestError, api } from "./api";
-import { toast } from "sonner";
+import { api } from "./api";
 import { ws } from "./store";
 
 // Last result of every keyed useApi call, kept for the whole session. Opening a page again shows
@@ -50,7 +49,6 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = [], cache
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
-      if (!(e instanceof ApiRequestError && e.status === 401)) toast.error(message);
       return undefined;
     } finally {
       setLoading(false);

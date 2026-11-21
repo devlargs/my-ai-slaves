@@ -136,7 +136,7 @@ export function HistoryPage() {
                 size="sm"
                 variant="outline"
                 onClick={() =>
-                  void attempt(api.createTask({ repo: item.repo, message: item.message }), "Queued again")
+                  void attempt(api.createTask({ repo: item.repo, message: item.message }))
                 }
               >
                 <RotateCcwIcon /> Queue again

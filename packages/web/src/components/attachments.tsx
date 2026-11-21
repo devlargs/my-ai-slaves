@@ -1,7 +1,6 @@
 import { type Attachment, ATTACHMENT_LIMITS, PREVIEWABLE_IMAGE_TYPES } from "@my-ai-slaves/shared";
 import { AlertCircleIcon, FileIcon, Loader2Icon, PaperclipIcon, XIcon } from "lucide-react";
 import { type ClipboardEvent, type DragEvent, useCallback, useRef, useState } from "react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -37,12 +36,8 @@ export function useAttachments() {
     if (incoming.length === 0) return;
     setFiles((current) => {
       const room = ATTACHMENT_LIMITS.maxFiles - current.length;
-      if (room <= 0) {
-        toast.error(`Attach at most ${ATTACHMENT_LIMITS.maxFiles} files.`);
-        return current;
-      }
+      if (room <= 0) return current;
       const accepted = incoming.slice(0, room);
-      if (accepted.length < incoming.length) toast.error(`Only the first ${room} file(s) were added.`);
 
       const next = accepted.map((file): PendingFile => {
         const key = `f${++counter}`;

@@ -63,7 +63,7 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
           disabled={busy}
           onClick={async () => {
             setBusy(true);
-            const ok = await attempt(api.finishTask(task.id), "Marked as finished");
+            const ok = await attempt(api.finishTask(task.id));
             setBusy(false);
             if (ok) onDone();
           }}
@@ -79,7 +79,7 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
           confirmLabel="Discard"
           disabled={busy}
           onConfirm={async () => {
-            if (await attempt(api.discardTask(task.id), "Discarded")) onDone();
+            if (await attempt(api.discardTask(task.id))) onDone();
           }}
         >
           <Trash2Icon /> Discard

@@ -182,7 +182,6 @@ function RegisterRepoCard({ onRegistered }: { onRegistered: (repo: RepoView) => 
     setBusy(true);
     const repo = await attempt(
       api.registerRepo({ path: p.trim(), host: where === "remote" ? host : null }),
-      "Repository registered",
     );
     setBusy(false);
     if (repo) {
@@ -463,8 +462,8 @@ function RepoCard({
   const [branch, setBranch] = useState(repo.defaultBranch);
   useEffect(() => setBranch(repo.defaultBranch), [repo.defaultBranch]);
 
-  const patch = async (body: Parameters<typeof api.updateRepo>[1], success?: string) => {
-    const updated = await attempt(api.updateRepo(repo.id, body), success);
+  const patch = async (body: Parameters<typeof api.updateRepo>[1]) => {
+    const updated = await attempt(api.updateRepo(repo.id, body));
     if (updated) onChange(updated);
     return updated;
   };
@@ -552,7 +551,7 @@ function RepoCard({
           description="Unregisters the repository and deletes its prompts from .data/knowledge. Your repository on disk is not touched."
           confirmLabel="Remove"
           onConfirm={async () => {
-            if (await attempt(api.deleteRepo(repo.id), "Repository removed")) onDeleted();
+            if (await attempt(api.deleteRepo(repo.id))) onDeleted();
           }}
         >
           <Trash2Icon /> Remove
@@ -572,7 +571,7 @@ function RepoCard({
             className="flex flex-col gap-1.5"
             onSubmit={(e) => {
               e.preventDefault();
-              if (name.trim() !== repo.name) void patch({ name: name.trim() }, "Renamed");
+              if (name.trim() !== repo.name) void patch({ name: name.trim() });
             }}
           >
             <Label htmlFor={`name-${repo.id}`}>Name</Label>
@@ -598,7 +597,7 @@ function RepoCard({
               className="flex gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (branch.trim() && branch !== repo.defaultBranch) void patch({ defaultBranch: branch.trim() }, "Saved");
+                if (branch.trim() && branch !== repo.defaultBranch) void patch({ defaultBranch: branch.trim() });
               }}
             >
               <Input
@@ -614,7 +613,7 @@ function RepoCard({
           </div>
           <LabelsEditor repo={repo} allLabels={allLabels} onSave={(labels) => patch({ labels })} />
           <ChainEditor repo={repo} onSave={(chain) => patch({ accountChain: chain })} />
-          <CommitterEditor repo={repo} onSave={(body) => patch(body, "Committer saved")} />
+          <CommitterEditor repo={repo} onSave={patch} />
         </div>
         <RepoPromptsEditor repoId={repo.id} />
         </fieldset>
@@ -771,7 +770,7 @@ function RemoteAccountActions({
     let label = base;
     for (let n = 2; accounts.some((a) => a.id === label); n++) label = `${base}-${n}`;
     setBusy(provider);
-    const account = await attempt(api.createAccount({ label, provider, host }), `Added ${label}`);
+    const account = await attempt(api.createAccount({ label, provider, host }));
     setBusy(null);
     if (account) onAdded(account.id);
   };

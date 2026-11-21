@@ -8,7 +8,6 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import { useDeferredValue, useEffect, useState } from "react";
-import { Toaster } from "sonner";
 import { UpdateControl } from "@/components/desktop-update";
 import { LiveDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -75,13 +74,6 @@ export function App() {
         {page === "settings" && <SettingsPage />}
         {page === "history" && <HistoryPage />}
       </main>
-      <Toaster
-        position="bottom-right"
-        closeButton
-        toastOptions={{
-          className: "!rounded-lg !border-rule !bg-surface !text-ink !shadow-float !font-sans !text-[13px]",
-        }}
-      />
     </div>
     </TooltipProvider>
   );

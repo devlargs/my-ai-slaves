@@ -88,7 +88,7 @@ function NewPromptCard({ onCreated }: { onCreated: (p: SavedPromptView) => void 
   const add = async () => {
     if (!canAdd) return;
     setBusy(true);
-    const created = await attempt(api.createPrompt({ name: name.trim(), body }), "Prompt saved");
+    const created = await attempt(api.createPrompt({ name: name.trim(), body }));
     setBusy(false);
     if (created) {
       setName("");
@@ -182,7 +182,7 @@ function PromptCard({
   const save = async () => {
     if (!dirty || !name.trim() || busy) return;
     setBusy(true);
-    const saved = await attempt(api.updatePrompt(prompt.id, { name: name.trim(), body }), "Prompt saved");
+    const saved = await attempt(api.updatePrompt(prompt.id, { name: name.trim(), body }));
     setBusy(false);
     if (saved) onSaved(saved);
   };
@@ -219,7 +219,7 @@ function PromptCard({
           description="It disappears from the library. Tasks already queued with it won't send it; their history says so."
           confirmLabel="Delete prompt"
           onConfirm={async () => {
-            if (await attempt(api.deletePrompt(prompt.id), "Prompt deleted")) onDeleted();
+            if (await attempt(api.deletePrompt(prompt.id))) onDeleted();
           }}
         >
           <Trash2Icon />

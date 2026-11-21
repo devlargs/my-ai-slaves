@@ -127,7 +127,6 @@ function NewRepoPrompt({
     setBusy(true);
     const created = await attempt(
       api.createRepoPrompt(repoId, { name: name.trim(), body, default: isDefault }),
-      "Repo prompt added",
     );
     setBusy(false);
     if (created) onCreated(created);
@@ -217,7 +216,7 @@ function RepoPromptRow({
   const save = async () => {
     if (!dirty || !name.trim() || busy) return;
     setBusy(true);
-    const saved = await attempt(api.updateRepoPrompt(repoId, prompt.id, { name: name.trim(), body }), "Repo prompt saved");
+    const saved = await attempt(api.updateRepoPrompt(repoId, prompt.id, { name: name.trim(), body }));
     setBusy(false);
     if (saved) onSaved(saved);
   };
@@ -265,7 +264,7 @@ function RepoPromptRow({
           description="It disappears from this repo's prompts. Tasks already queued with it won't send it; their history says so."
           confirmLabel="Delete prompt"
           onConfirm={async () => {
-            if (await attempt(api.deleteRepoPrompt(repoId, prompt.id), "Repo prompt deleted")) onDeleted();
+            if (await attempt(api.deleteRepoPrompt(repoId, prompt.id))) onDeleted();
           }}
         >
           <Trash2Icon />

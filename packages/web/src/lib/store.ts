@@ -7,7 +7,6 @@ import type {
   TaskView,
 } from "@my-ai-slaves/shared";
 import { startTransition, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { toast } from "sonner";
 
 // ── Live task output model ──────────────────────────────────────────────────
 
@@ -243,7 +242,6 @@ function dropLive(taskId: string) {
 // ── Notifications ───────────────────────────────────────────────────────────
 
 function notify(title: string, body: string) {
-  toast(title, { description: body });
   try {
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       new Notification(title, { body });

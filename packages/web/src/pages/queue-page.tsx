@@ -275,7 +275,7 @@ function QueueList({
                 aria-label="Retry"
                 onClick={(e) => {
                   e.stopPropagation();
-                  void attempt(api.retryTask(task.id), "Re-queued");
+                  void attempt(api.retryTask(task.id));
                 }}
               >
                 <RotateCcwIcon />
@@ -290,7 +290,7 @@ function QueueList({
                 aria-label={`Mark ${task.title} as finished`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  void attempt(api.finishTask(task.id), "Marked as finished");
+                  void attempt(api.finishTask(task.id));
                 }}
               >
                 <CheckCheckIcon />
@@ -370,7 +370,6 @@ function Composer() {
         extraRepos: extras,
         extraRepoPromptIds,
       }),
-      "Task queued",
     );
     setBusy(false);
     if (task) {
@@ -680,7 +679,7 @@ function ReplyBox({ taskId }: { taskId: string }) {
     const message = input.current?.value ?? "";
     if (!canSend || !message.trim()) return;
     setBusy(true);
-    const ok = await attempt(api.replyTask(taskId, message, files.ids, bound.ids), "Reply queued");
+    const ok = await attempt(api.replyTask(taskId, message, files.ids, bound.ids));
     setBusy(false);
     if (ok !== undefined) {
       if (input.current) input.current.value = "";
@@ -813,7 +812,7 @@ export function DiscardTaskButton({ task, withLabel = false }: { task: TaskView;
           </p>
         }
         confirmLabel={task.status === "running" ? "Stop and discard" : "Discard"}
-        onConfirm={() => attempt(api.discardTask(task.id), "Task discarded")}
+        onConfirm={() => attempt(api.discardTask(task.id))}
       >
         <Trash2Icon />
         {withLabel && "Discard"}

@@ -86,7 +86,7 @@ function AccountsCard() {
   const create = async () => {
     if (!labelValid) return;
     setBusy(true);
-    const account = await attempt(api.createAccount({ label, provider, host: remoteHost }), "Account added");
+    const account = await attempt(api.createAccount({ label, provider, host: remoteHost }));
     setBusy(false);
     if (account) {
       setLabel("");
@@ -258,7 +258,7 @@ function AccountRow({
           size="sm"
           variant="ghost"
           onClick={async () => {
-            await attempt(api.clearLimit(account.id), "Limit cleared");
+            await attempt(api.clearLimit(account.id));
             await refreshAccounts();
           }}
         >
@@ -295,7 +295,7 @@ function AccountRow({
         }
         confirmLabel="Delete account"
         onConfirm={async () => {
-          await attempt(api.deleteAccount(account.id), "Account deleted");
+          await attempt(api.deleteAccount(account.id));
           await refreshAccounts();
         }}
       >
@@ -310,11 +310,11 @@ function AccountRow({
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Saves only the committer fields, on top of the latest settings (the General card keeps its own draft). */
-async function saveCommitters(patch: Pick<Settings, "committers" | "defaultCommitterId">, success: string) {
+async function saveCommitters(patch: Pick<Settings, "committers" | "defaultCommitterId">) {
   const latest = await attempt(api.getSettings());
   if (!latest) return undefined;
   const { updatedAt: _ignored, ...rest } = latest;
-  return attempt(api.putSettings({ ...rest, ...patch }), success);
+  return attempt(api.putSettings({ ...rest, ...patch }));
 }
 
 function CommittersCard() {
@@ -333,9 +333,9 @@ function CommittersCard() {
   const { committers, defaultCommitterId } = data;
   const valid = name.trim() !== "" && EMAIL_RE.test(email.trim());
 
-  const save = async (next: Pick<Settings, "committers" | "defaultCommitterId">, success: string) => {
+  const save = async (next: Pick<Settings, "committers" | "defaultCommitterId">) => {
     setBusy(true);
-    const result = await saveCommitters(next, success);
+    const result = await saveCommitters(next);
     setBusy(false);
     if (result) setData(result);
     return result;
@@ -347,7 +347,6 @@ function CommittersCard() {
     // The first one becomes the default, so it applies right away.
     const result = await save(
       { committers: [...committers, committer], defaultCommitterId: defaultCommitterId ?? committer.id },
-      "Committer added",
     );
     if (result) {
       setName("");
@@ -374,17 +373,16 @@ function CommittersCard() {
                 committer={c}
                 isDefault={c.id === defaultCommitterId}
                 busy={busy}
-                onMakeDefault={() => void save({ committers, defaultCommitterId: c.id }, "Default committer set")}
+                onMakeDefault={() => void save({ committers, defaultCommitterId: c.id })}
                 onEdit={(edited) =>
-                  save({ committers: committers.map((x) => (x.id === c.id ? edited : x)), defaultCommitterId }, "Committer saved")
+                  save({ committers: committers.map((x) => (x.id === c.id ? edited : x)), defaultCommitterId })
                 }
                 onDelete={() =>
                   save(
                     {
                       committers: committers.filter((x) => x.id !== c.id),
                       defaultCommitterId: defaultCommitterId === c.id ? null : defaultCommitterId,
-                    },
-                    "Committer deleted",
+                    }
                   )
                 }
               />
@@ -588,7 +586,6 @@ function GeneralSettingsCard() {
         defaultCommitterId: latest.defaultCommitterId,
         providers: { ...draft.providers, "cursor-agent": { ...cursor, limitPatterns: patternList } },
       }),
-      "Settings saved",
     );
     setBusy(false);
     if (result) setData(result);

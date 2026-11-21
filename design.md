@@ -55,7 +55,7 @@ chips are pills.
 ## Depth
 
 Hairlines do the work: panels have a 1px `--color-rule` border and no shadow. Only floating layers
-(select menu, dialog, toast) get `--shadow-float`. Overlays dim with a warm ink scrim. No glass.
+(select menu, dialog) get `--shadow-float`. Overlays dim with a warm ink scrim. No glass.
 
 ## Motion
 

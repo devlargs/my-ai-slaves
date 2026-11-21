@@ -1,6 +1,5 @@
 import type { DesktopBridge, DesktopInfo, DesktopUpdateState } from "@my-ai-slaves/shared";
 import { useEffect, useSyncExternalStore } from "react";
-import { toast } from "sonner";
 
 // The desktop app's bridge (packages/desktop/src/preload.ts). Undefined in a browser tab, where
 // everything below renders nothing.
@@ -57,7 +56,7 @@ export async function desktopAction<T>(action: () => Promise<T>): Promise<T | un
   try {
     return await action();
   } catch (error) {
-    toast.error(cleanError(error));
+    console.error(cleanError(error));
     return undefined;
   }
 }

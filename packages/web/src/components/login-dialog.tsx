@@ -1,7 +1,6 @@
 import type { LoginState } from "@my-ai-slaves/shared";
 import { CheckCircle2, Copy, ExternalLink, Loader2, XCircle } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -119,10 +118,7 @@ function LoginFlow({ accountId, onClose }: { accountId: string; onClose: () => v
                   size="sm"
                   variant="ghost"
                   onClick={() => {
-                    void navigator.clipboard?.writeText(login.url ?? "").then(
-                      () => toast.success("Link copied"),
-                      () => toast.error("Couldn't copy the link"),
-                    );
+                    void navigator.clipboard?.writeText(login.url ?? "");
                   }}
                 >
                   <Copy className="size-4" /> Copy link

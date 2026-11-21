@@ -26,7 +26,6 @@ import type {
   UpdateRepoRequest,
   UpdateSettingsRequest,
 } from "@my-ai-slaves/shared";
-import { toast } from "sonner";
 import { markUnauthorized } from "./store";
 
 export class ApiRequestError extends Error {
@@ -141,16 +140,12 @@ export const api = {
   history: (offset = 0, limit = 50) => request<HistoryPage>("GET", `/history?offset=${offset}&limit=${limit}`),
 };
 
-/** Await an API call; on failure show a toast and resolve to undefined. */
-export async function attempt<T>(promise: Promise<T>, success?: string): Promise<T | undefined> {
+/** Await an API call; on failure log it and resolve to undefined. */
+export async function attempt<T>(promise: Promise<T>): Promise<T | undefined> {
   try {
-    const result = await promise;
-    if (success) toast.success(success);
-    return result;
+    return await promise;
   } catch (error) {
-    if (!(error instanceof ApiRequestError && error.status === 401)) {
-      toast.error(error instanceof Error ? error.message : String(error));
-    }
+    if (!(error instanceof ApiRequestError && error.status === 401)) console.error(error);
     return undefined;
   }
 }
