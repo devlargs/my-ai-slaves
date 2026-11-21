@@ -1,4 +1,4 @@
-import { ProviderId, SettingsFile, formatLocalIso } from "@my-ai-slaves/shared";
+import { LabelColor, ProviderId, SettingsFile, formatLocalIso } from "@my-ai-slaves/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AdapterRegistry } from "../providers";
@@ -119,6 +119,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return repos.toView(repo);
   });
   app.get("/api/remote/hosts", () => listRemoteHosts());
+  // One colour per label, shared by every repo that has it. App only; never sent to a CLI.
+  app.get("/api/label-colors", () => repos.labelColors());
+  app.put("/api/label-colors", async (req) => {
+    const body = parseBody(z.object({ label: z.string().max(40), color: LabelColor.nullable() }), req.body);
+    return repos.setLabelColor(body.label, body.color);
+  });
   app.patch("/api/repos/:id", async (req) => {
     const body = parseBody(
       z.object({

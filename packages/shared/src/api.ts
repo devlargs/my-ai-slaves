@@ -7,7 +7,7 @@ import type { ActivityEntry } from "./schemas/activity";
 import type { ProviderId } from "./schemas/common";
 import type { Task, TaskStatus } from "./schemas/queue";
 import type { SavedPrompt as SavedPromptT } from "./schemas/prompts";
-import type { KnowledgeFile, Repo } from "./schemas/repos";
+import type { KnowledgeFile, LabelColor, Repo } from "./schemas/repos";
 import type { SettingsFile } from "./schemas/settings";
 
 export interface ApiError {
@@ -119,6 +119,13 @@ export interface UpdateRepoRequest {
   committerId?: string | null;
   /** Replaces the repo's labels (trimmed, deduped case-insensitively, blanks dropped). */
   labels?: string[];
+}
+/** GET /api/label-colors → LabelColors · PUT /api/label-colors (body: SetLabelColorRequest) → LabelColors */
+export type LabelColors = Record<string, LabelColor>;
+export interface SetLabelColorRequest {
+  label: string;
+  /** "gray" (or null) = back to the plain pill. */
+  color: LabelColor | null;
 }
 /** DELETE /api/repos/:id → { ok: true } (refused with 409 while it has tasks in the queue) */
 

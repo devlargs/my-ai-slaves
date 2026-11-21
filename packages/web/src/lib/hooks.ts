@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import type { LabelColor, LabelColors } from "@my-ai-slaves/shared";
 import { api } from "./api";
 import { ws } from "./store";
 
@@ -134,4 +135,39 @@ export function useRepoName(): (id: string) => string {
     if (!repoNamesLoading) void refreshRepoNames();
   }, []);
   return (id) => names[id] ?? id;
+}
+
+// ── Repo label colours (one per label, shared by every repo; keyed by lowercased label) ──
+let labelColors: LabelColors = {};
+let labelColorsLoading: Promise<void> | null = null;
+const labelColorListeners = new Set<() => void>();
+
+function setLabelColors(next: LabelColors) {
+  labelColors = next;
+  for (const l of labelColorListeners) l();
+}
+
+/** Save one label's colour ("gray" = plain) and share the result with every view. */
+export async function saveLabelColor(label: string, color: LabelColor): Promise<void> {
+  setLabelColors(await api.setLabelColor(label, color));
+}
+
+/** label → its colour ("gray" when it has none). */
+export function useLabelColor(): (label: string) => LabelColor {
+  const colors = useSyncExternalStore(
+    (l) => {
+      labelColorListeners.add(l);
+      return () => labelColorListeners.delete(l);
+    },
+    () => labelColors,
+  );
+  useEffect(() => {
+    labelColorsLoading ??= api
+      .getLabelColors()
+      .then(setLabelColors)
+      .catch(() => {
+        labelColorsLoading = null;
+      });
+  }, []);
+  return (label) => colors[label.trim().replace(/\s+/g, " ").toLowerCase()] ?? "gray";
 }

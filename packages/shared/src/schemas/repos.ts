@@ -29,8 +29,19 @@ export const Repo = z.object({
 });
 export type Repo = z.infer<typeof Repo>;
 
+/** Colours a repo label can have (soft tint + matching ink). "gray" = the plain, untinted pill. */
+export const LABEL_COLORS = ["gray", "coral", "amber", "green", "teal", "blue", "violet", "pink"] as const;
+export const LabelColor = z.enum(LABEL_COLORS);
+export type LabelColor = z.infer<typeof LabelColor>;
+
 export const ReposFile = z.object({
   repos: z.array(Repo).default([]),
+  /**
+   * One colour per label, shared by every repo that has it. Keyed by the lowercased label (labels
+   * are matched ignoring case); labels without an entry are gray. Kept when a label goes unused, so
+   * adding it back brings its colour back.
+   */
+  labelColors: z.record(z.string(), LabelColor).default({}),
 });
 export type ReposFile = z.infer<typeof ReposFile>;
 

@@ -1,7 +1,9 @@
 import type { RepoView } from "@my-ai-slaves/shared";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
+import { labelColorAttr } from "@/components/label-badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useLabelColor } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 
 /** The repos a task works in: the first is the main one (the CLI runs there), the rest are opened as they are. */
@@ -27,6 +29,7 @@ export function RepoPicker({
   onChange: (next: RepoSelection) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const colorOf = useLabelColor();
   const main = repos.find((r) => r.id === value.main);
   const extras = value.extras.map((id) => repos.find((r) => r.id === id)).filter((r): r is RepoView => Boolean(r));
   const selected = new Set([value.main, ...value.extras]);
@@ -109,7 +112,17 @@ export function RepoPicker({
                     {repo.name}
                     {repo.host && <span className="text-muted-foreground"> · {repo.host}</span>}
                     {repo.labels.length > 0 && (
-                      <span className="text-[11px] text-muted-foreground"> · {repo.labels.join(", ")}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {" · "}
+                        {repo.labels.map((label, i) => (
+                          <span key={label}>
+                            {i > 0 && ", "}
+                            <span className="label-ink" {...labelColorAttr(colorOf(label))}>
+                              {label}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
                     )}
                     {repo.availability.state === "unreachable" && (
                       <span className="text-warning-ink"> (unreachable)</span>

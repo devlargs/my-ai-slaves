@@ -13,6 +13,8 @@ import type {
   CreateRepoPromptRequest,
   RepoPrompt,
   UpdateRepoPromptRequest,
+  LabelColor,
+  LabelColors,
   LoginState,
   PromptPreviewRequest,
   PromptPreviewResponse,
@@ -87,6 +89,9 @@ export const api = {
   getRepos: () => request<RepoView[]>("GET", "/repos"),
   registerRepo: (body: RegisterRepoRequest) => request<RepoView>("POST", "/repos", body),
   checkRepo: (id: string) => request<RepoView>("POST", `/repos/${enc(id)}/check`),
+  getLabelColors: () => request<LabelColors>("GET", "/label-colors"),
+  setLabelColor: (label: string, color: LabelColor | null) =>
+    request<LabelColors>("PUT", "/label-colors", { label, color }),
   getRemoteHosts: () => request<RemoteHost[]>("GET", "/remote/hosts"),
   updateRepo: (id: string, body: UpdateRepoRequest) => request<Repo>("PATCH", `/repos/${enc(id)}`, body),
   deleteRepo: (id: string) => request<Ok>("DELETE", `/repos/${enc(id)}`),

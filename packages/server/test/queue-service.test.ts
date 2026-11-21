@@ -452,6 +452,16 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect((await repos.update(repo.id, { labels: [] })).labels).toEqual([]);
   });
 
+  it("colours a label for every repo, matched ignoring case; gray clears it", async () => {
+    const { repos } = await setup();
+    expect(await repos.labelColors()).toEqual({});
+    expect(await repos.setLabelColor(" Company ", "blue")).toEqual({ company: "blue" });
+    expect(await repos.setLabelColor("client  A", "green")).toEqual({ company: "blue", "client a": "green" });
+    expect(await repos.setLabelColor("COMPANY", "gray")).toEqual({ "client a": "green" });
+    expect(await repos.setLabelColor("client a", null)).toEqual({});
+    await expect(repos.setLabelColor("  ", "blue")).rejects.toThrow("Label is empty.");
+  });
+
   it("runs only one task per repo at a time", async () => {
     const { queue, repo } = await setup();
     const a = await queue.create({ repo: repo.id, message: "SLOW one" });

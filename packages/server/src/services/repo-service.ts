@@ -5,6 +5,7 @@ import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import {
   type FsBrowseResponse,
   formatLocalIso,
+  type LabelColor,
   type Repo,
   type RepoAvailability,
   type RepoView,
@@ -262,6 +263,22 @@ export class RepoService {
       updated.updatedAt = formatLocalIso(this.now());
     });
     return updated as Repo;
+  }
+
+  /** Label colours (keyed by lowercased label). */
+  async labelColors(): Promise<Record<string, LabelColor>> {
+    return (await this.stores.repos.read()).labelColors;
+  }
+
+  /** Sets one label's colour for every repo that has it; "gray" / null = back to the plain pill. */
+  async setLabelColor(label: string, color: LabelColor | null): Promise<Record<string, LabelColor>> {
+    const key = normalizeLabels([label])[0]?.toLowerCase();
+    if (!key) throw badRequest("Label is empty.");
+    const saved = await this.stores.repos.update((file) => {
+      if (!color || color === "gray") delete file.labelColors[key];
+      else file.labelColors[key] = color;
+    });
+    return saved.labelColors;
   }
 
   /**

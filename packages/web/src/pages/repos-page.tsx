@@ -16,6 +16,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FolderBrowserDialog } from "@/components/folder-browser";
+import { LabelBadge, LabelColorPicker, labelColorAttr } from "@/components/label-badge";
 import { PageHeader } from "@/components/page-header";
 import { RepoPromptsEditor } from "@/components/repo-prompts";
 import { SortableList } from "@/components/sortable-list";
@@ -27,7 +28,7 @@ import { Input, Label } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Tooltip } from "@/components/ui/tooltip";
 import { api, attempt } from "@/lib/api";
-import { setRepoNames, useApi } from "@/lib/hooks";
+import { setRepoNames, useApi, useLabelColor } from "@/lib/hooks";
 import { useStore } from "@/lib/store";
 import { cn, storageGet, storageRemove, storageSet } from "@/lib/utils";
 
@@ -74,6 +75,7 @@ export function ReposPage() {
     storageSet(FILTER_KEY, next ?? "");
   };
   const allLabels = useMemo(() => collectLabels(repos ?? []), [repos]);
+  const colorOf = useLabelColor();
   const activeFilter =
     filter === NO_LABEL
       ? NO_LABEL
@@ -118,7 +120,7 @@ export function ReposPage() {
               </FilterChip>
               {allLabels.map(({ label, count }) => (
                 <FilterChip key={label} active={activeFilter === label} onClick={() => pickFilter(label)} count={count}>
-                  <TagIcon className="size-3" />
+                  <TagIcon className={cn("size-3", activeFilter !== label && "label-dot")} {...labelColorAttr(colorOf(label))} />
                   {label}
                 </FilterChip>
               ))}
@@ -361,6 +363,7 @@ function LabelsEditor({
   onSave: (labels: string[]) => Promise<unknown>;
 }) {
   const [draft, setDraft] = useState("");
+  const colorOf = useLabelColor();
   const has = (label: string) => repo.labels.some((l) => l.toLowerCase() === label.toLowerCase());
   const suggestions = (allLabels.length ? allLabels : SUGGESTED_LABELS).filter((l) => !has(l));
   const add = async (raw: string) => {
@@ -377,14 +380,28 @@ function LabelsEditor({
       {repo.labels.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {repo.labels.map((label) => (
-            <Badge key={label} variant="default" className="gap-1 pr-1">
-              <TagIcon className="size-3 text-muted-foreground" />
-              {label}
+            <Badge
+              key={label}
+              variant="default"
+              className="label-tint gap-0.5 pr-1 pl-0"
+              {...labelColorAttr(colorOf(label))}
+            >
+              <LabelColorPicker label={label} color={colorOf(label)}>
+                <button
+                  type="button"
+                  aria-label={`Change colour of label ${label}`}
+                  title="Change colour"
+                  className="-my-0.5 flex h-5 cursor-pointer items-center gap-1 rounded-full pr-0.5 pl-2 focus-visible:outline-2 focus-visible:outline-(--color-focus)"
+                >
+                  <TagIcon className={cn("size-3", colorOf(label) === "gray" ? "text-muted-foreground" : "opacity-80")} />
+                  {label}
+                </button>
+              </LabelColorPicker>
               <button
                 type="button"
                 aria-label={`Remove label ${label}`}
                 onClick={() => void onSave(repo.labels.filter((l) => l !== label))}
-                className="flex size-4 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-paper hover:text-ink"
+                className="flex size-4 cursor-pointer items-center justify-center rounded-full opacity-70 transition-colors hover:bg-paper hover:text-ink hover:opacity-100"
               >
                 <XIcon className="size-3" />
               </button>
@@ -427,7 +444,7 @@ function LabelsEditor({
         </div>
       )}
       <span className="text-[11px] text-muted-foreground">
-        Only for keeping track here (filter the list above); never sent to the agent.
+        Only for keeping track here (filter the list above); never sent to the agent. Click a label to pick its colour.
       </span>
     </div>
   );
@@ -449,6 +466,7 @@ function RepoCard({
   onDeleted: () => void;
 }) {
   const unreachable = repo.availability.state === "unreachable";
+  const colorOf = useLabelColor();
   const [checking, setChecking] = useState(false);
   const checkAgain = async () => {
     setChecking(true);
@@ -487,10 +505,7 @@ function RepoCard({
           <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
           <CardTitle className="shrink-0">{repo.name}</CardTitle>
           {repo.labels.map((label) => (
-            <Badge key={label} variant="default" className="shrink-0 gap-1">
-              <TagIcon className="size-3 text-muted-foreground" />
-              {label}
-            </Badge>
+            <LabelBadge key={label} label={label} color={colorOf(label)} className="shrink-0" />
           ))}
           {repo.host && (
             <Badge variant="outline" className="shrink-0 gap-1 font-mono" title={`On ${repo.host} (SSH)`}>

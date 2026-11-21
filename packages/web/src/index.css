@@ -199,3 +199,19 @@
   background: var(--color-paper-2);
   color: var(--color-muted);
 }
+
+/* Repo label colours (one hue each; lightness/chroma from tokens.css so dark mode follows).
+ * Unlayered on purpose: they must beat the Badge's bg/text utilities. */
+[data-label-color="coral"] { --label-h: 35; }
+[data-label-color="amber"] { --label-h: 70; }
+[data-label-color="green"] { --label-h: 150; }
+[data-label-color="teal"] { --label-h: 190; }
+[data-label-color="blue"] { --label-h: 250; }
+[data-label-color="violet"] { --label-h: 295; }
+[data-label-color="pink"] { --label-h: 350; }
+.label-tint[data-label-color] {
+  background-color: oklch(var(--label-soft) var(--label-h));
+  color: oklch(var(--label-ink) var(--label-h));
+}
+.label-ink[data-label-color] { color: oklch(var(--label-ink) var(--label-h)); }
+.label-dot[data-label-color] { color: oklch(var(--label-dot) var(--label-h)); }
