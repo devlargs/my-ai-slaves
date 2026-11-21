@@ -137,8 +137,10 @@ export async function fetchGitHubJson(url: string, token: string | null): Promis
     "User-Agent": USER_AGENT,
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
+    // Always the live answer: a check must never be served from a cache.
+    "Cache-Control": "no-cache",
   };
   if (token && sendsToken(url)) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(IDLE_TIMEOUT_MS) });
+  const response = await fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(IDLE_TIMEOUT_MS) });
   return { status: response.status, body: response.ok ? await response.json() : null };
 }

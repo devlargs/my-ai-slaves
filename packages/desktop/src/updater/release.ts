@@ -1,11 +1,17 @@
 import { isNewerVersion, isSameVersion } from "./version";
 
-// Reading GitHub's "latest release" answer: which asset to install, where it
+// Reading GitHub's releases: which asset to install, where it
 // may be downloaded from, and the checksum to verify it against. Pure
 // (test/updater.test.ts).
 
 export const REPO = "devlargs/my-ai-slaves";
-export const LATEST_RELEASE_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
+/**
+ * The newest releases, newest first. Checks read this list rather than only
+ * /releases/latest: GitHub can keep answering "latest" with the previous
+ * release for a while after a new one is published (a CI release goes from
+ * draft to published), which left "Check for updates" saying "up to date".
+ */
+export const RECENT_RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=20`;
 /** Asset downloads go through the API (works for a private repo with a token, and a public one without). */
 const ASSET_API_PREFIX = `https://api.github.com/repos/${REPO}/releases/assets/`;
 
@@ -135,4 +141,29 @@ export function resolveUpdate(
   if (!url || !url.startsWith(ASSET_API_PREFIX) || !isAllowedUpdateUrl(url)) return null;
   // GitHub publishes a sha256 digest per release asset
   return { version: latest, url, sha256: parseSha256Digest(asset?.digest) };
+}
+
+/**
+ * The update to offer from a list of releases (GitHub's /releases answer): the
+ * highest published, non-prerelease version that resolveUpdate accepts for this
+ * machine. Drafts (visible with the owner's token while CI uploads the
+ * installers) and pre-releases are skipped. Null when none qualifies.
+ */
+export function resolveUpdateFromReleases(
+  releases: unknown,
+  currentVersion: string,
+  platform: NodeJS.Platform,
+  arch: string,
+  options: { sameVersion?: boolean } = {},
+): PendingUpdate | null {
+  if (!Array.isArray(releases)) return null;
+  let best: PendingUpdate | null = null;
+  for (const release of releases) {
+    if (typeof release !== "object" || release === null) continue;
+    const { draft, prerelease } = release as { draft?: unknown; prerelease?: unknown };
+    if (draft === true || prerelease === true) continue;
+    const update = resolveUpdate(release, currentVersion, platform, arch, options);
+    if (update && (!best || isNewerVersion(update.version, best.version))) best = update;
+  }
+  return best;
 }

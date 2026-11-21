@@ -9,6 +9,7 @@ import {
   pickUpdateAsset,
   releasePageUrl,
   resolveUpdate,
+  resolveUpdateFromReleases,
   sendsToken,
 } from "../src/updater/release";
 import { singleFlight } from "../src/updater/single-flight";
@@ -80,6 +81,30 @@ describe("the Intel build on an Apple Silicon Mac (Rosetta)", () => {
     expect(resolveUpdate(release(), "0.3.0", "darwin", "arm64", { sameVersion: true })).toBeNull();
     // Without it (the right build already), the same version is no update.
     expect(resolveUpdate(release(), "0.2.0", "darwin", "arm64")).toBeNull();
+  });
+});
+
+describe("resolveUpdateFromReleases", () => {
+  it("offers the highest published release, whatever order the list is in", () => {
+    const list = [release({ tag_name: "v0.1.19" }), release({ tag_name: "v0.1.20" }), release({ tag_name: "v0.1.18" })];
+    expect(resolveUpdateFromReleases(list, "0.1.18", "win32", "x64")?.version).toBe("0.1.20");
+  });
+
+  it("skips drafts (CI still uploading) and pre-releases", () => {
+    const list = [release({ tag_name: "v0.1.21", draft: true }), release({ tag_name: "v0.1.20", prerelease: true }), release({ tag_name: "v0.1.19" })];
+    expect(resolveUpdateFromReleases(list, "0.1.18", "win32", "x64")?.version).toBe("0.1.19");
+  });
+
+  it("falls back to an older newer-than-current release when the newest has no build for this machine", () => {
+    const list = [release({ tag_name: "v0.1.20", assets: [exe] }), release({ tag_name: "v0.1.19" })];
+    expect(resolveUpdateFromReleases(list, "0.1.18", "darwin", "x64")?.version).toBe("0.1.19");
+  });
+
+  it("is null when nothing is newer, or the answer isn't a list", () => {
+    expect(resolveUpdateFromReleases([release({ tag_name: "v0.1.18" })], "0.1.18", "win32", "x64")).toBeNull();
+    expect(resolveUpdateFromReleases([], "0.1.18", "win32", "x64")).toBeNull();
+    expect(resolveUpdateFromReleases({ message: "Not Found" }, "0.1.18", "win32", "x64")).toBeNull();
+    expect(resolveUpdateFromReleases([null, 42], "0.1.18", "win32", "x64")).toBeNull();
   });
 });
 

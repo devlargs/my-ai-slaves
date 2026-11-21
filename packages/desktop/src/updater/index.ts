@@ -6,15 +6,15 @@ import { createUpdateDir, installUpdate, installerPathIn, removeStaleUpdates } f
 import {
   isIntelBuildOnAppleSilicon,
   LATEST_RELEASE_PAGE_URL,
-  LATEST_RELEASE_URL,
   machineArch,
   type PendingUpdate,
+  RECENT_RELEASES_URL,
   releasePageUrl,
-  resolveUpdate,
+  resolveUpdateFromReleases,
 } from "./release";
 import { singleFlight } from "./single-flight";
 
-// In-app updater, ported from Largs Hub: checks the latest GitHub release of
+// In-app updater, ported from Largs Hub: checks the newest GitHub releases of
 // devlargs/my-ai-slaves, downloads the installer for this machine, verifies it
 // against the sha256 GitHub publishes for the asset, and runs it (NSIS on
 // Windows, a swap-and-relaunch script on macOS). The main process owns the
@@ -78,11 +78,16 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   const checkFlight = singleFlight(async (): Promise<DesktopUpdateState> => {
     set({ status: "checking", error: null });
     try {
-      const token = await deps.getToken();
-      const { status, body } = await fetchGitHubJson(LATEST_RELEASE_URL, token);
+      let token = await deps.getToken();
+      let { status, body } = await fetchGitHubJson(RECENT_RELEASES_URL, token);
+      // A stale or revoked token: the repo is public, so ask again without it.
+      if (status === 401 && token) {
+        token = null;
+        ({ status, body } = await fetchGitHubJson(RECENT_RELEASES_URL, null));
+      }
       const checkedAt = new Date().toISOString();
       if (status === 404) {
-        // No release yet, or a private repo this machine has no token for.
+        // A private repo this machine has no token for.
         pending = null;
         set(
           token
@@ -96,7 +101,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
         return state;
       }
       if (status !== 200) throw new Error(`GitHub answered HTTP ${status}`);
-      const update = resolveUpdate(body, app.getVersion(), process.platform, arch, { sameVersion: rosetta });
+      const update = resolveUpdateFromReleases(body, app.getVersion(), process.platform, arch, { sameVersion: rosetta });
       pending = update;
       if (!update) {
         set({ status: "latest", newVersion: null, releaseUrl: null, checkedAt });

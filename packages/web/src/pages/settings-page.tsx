@@ -29,7 +29,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { api, attempt } from "@/lib/api";
-import { desktop, desktopAction, useDesktop } from "@/lib/desktop";
+import { checkedLabel, desktop, desktopAction, useDesktop, useUpdateCheck } from "@/lib/desktop";
 import { useApi } from "@/lib/hooks";
 import { getState, setAccounts, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -752,16 +752,16 @@ function GeneralSettingsCard() {
 
 function DesktopCard() {
   const { info, update } = useDesktop();
+  const { check, checking } = useUpdateCheck();
   if (!desktop || !info) return null;
   const status = update?.status ?? "idle";
-  const checking = status === "checking";
+  const checked = checkedLabel(update?.checkedAt ?? null);
 
   const updateLine = (() => {
+    if (checking) return "Checking for updates…";
     switch (status) {
-      case "checking":
-        return "Checking for updates…";
       case "latest":
-        return "This is the latest version.";
+        return `This is the latest version${checked ? ` (${checked})` : ""}.`;
       case "available":
         return update?.rosetta
           ? `The Apple Silicon build of version ${update.newVersion} is ready to install.`
@@ -806,7 +806,7 @@ function DesktopCard() {
               size="sm"
               variant="outline"
               disabled={checking || status === "downloading" || status === "installing"}
-              onClick={() => void desktopAction(() => desktop!.checkForUpdates())}
+              onClick={check}
             >
               <RefreshCwIcon className={cn(checking && "animate-spin")} /> Check for updates
             </Button>
