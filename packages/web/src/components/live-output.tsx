@@ -9,21 +9,29 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Markdown } from "@/components/markdown";
 import { Switch } from "@/components/ui/switch";
-import { type LiveItem, useStore } from "@/lib/store";
+import { type LiveItem, type LiveState, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+const NO_ITEMS: LiveItem[] = [];
+const NO_RAW: LiveState["raw"] = [];
+
 export function LiveOutput({ taskId }: { taskId: string }) {
-  const live = useStore((s) => s.live[taskId]);
   const [raw, setRaw] = useState(false);
+  // Separate selections, so a raw CLI line (most of what a run sends) only re-renders this view
+  // while the raw output is shown.
+  const items = useStore((s) => s.live[taskId]?.items ?? NO_ITEMS);
+  const streaming = useStore((s) => s.live[taskId]?.streaming ?? "");
+  const hasRaw = useStore((s) => (s.live[taskId]?.raw.length ?? 0) > 0);
+  const rawLines = useStore((s) => (raw ? (s.live[taskId]?.raw ?? NO_RAW) : NO_RAW));
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
-  const itemCount = live?.items.length ?? 0;
-  const rawCount = live?.raw.length ?? 0;
-  const streamingLength = live?.streaming.length ?? 0;
+  const itemCount = items.length;
+  const rawCount = rawLines.length;
+  const streamingLength = streaming.length;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when content grows
   useEffect(() => {
@@ -47,11 +55,11 @@ export function LiveOutput({ taskId }: { taskId: string }) {
         }}
         className="scroll-quiet min-h-0 flex-1 overflow-auto rounded-lg border border-rule bg-surface"
       >
-        {!live || (live.items.length === 0 && !live.streaming && live.raw.length === 0) ? (
+        {items.length === 0 && !streaming && !hasRaw ? (
           <p className="p-4 text-[13px] text-muted-foreground">No output yet. It streams here while the task runs.</p>
         ) : raw ? (
           <pre className="min-h-full bg-paper-2 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-ink-2">
-            {live.raw.map((r, i) => (
+            {rawLines.map((r, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only
               <div key={i} className={cn(r.src === "stderr" && "text-danger-ink")}>
                 {r.line}
@@ -60,13 +68,13 @@ export function LiveOutput({ taskId }: { taskId: string }) {
           </pre>
         ) : (
           <div className="flex max-w-3xl flex-col gap-2 px-4 py-3.5">
-            {live.items.map((item, i) => (
+            {items.map((item, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only
               <LiveRow key={i} item={item} />
             ))}
-            {live.streaming && (
+            {streaming && (
               <div>
-                <Markdown>{live.streaming}</Markdown>
+                <Markdown>{streaming}</Markdown>
                 <span className="mt-1 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-signal align-middle motion-reduce:animate-none" />
               </div>
             )}
@@ -77,7 +85,9 @@ export function LiveOutput({ taskId }: { taskId: string }) {
   );
 }
 
-function LiveRow({ item }: { item: LiveItem }) {
+// Items never change once added (a finished tool call is replaced by a new object), so a row
+// re-renders only when its own item does, and old messages aren't re-parsed on every token.
+const LiveRow = memo(function LiveRow({ item }: { item: LiveItem }) {
   switch (item.type) {
     case "user":
       return (
@@ -148,4 +158,4 @@ function LiveRow({ item }: { item: LiveItem }) {
         </div>
       );
   }
-}
+});

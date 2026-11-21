@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -50,7 +51,8 @@ const components: Components = {
   td: ({ node: _, ...p }) => <td className="border-t border-rule px-2.5 py-1.5 align-top text-ink-2" {...p} />,
 };
 
-export function Markdown({ children, className }: { children: string; className?: string }) {
+// Memoized: parsing is the expensive part, and the same text is often rendered again unchanged.
+export const Markdown = memo(function Markdown({ children, className }: { children: string; className?: string }) {
   return (
     <div className={cn("min-w-0 text-[13px] leading-relaxed text-ink break-words", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
@@ -58,4 +60,4 @@ export function Markdown({ children, className }: { children: string; className?
       </ReactMarkdown>
     </div>
   );
-}
+});

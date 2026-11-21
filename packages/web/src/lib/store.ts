@@ -99,14 +99,14 @@ function setState(update: Partial<AppState> | ((s: AppState) => Partial<AppState
   for (const l of listeners) l();
 }
 
+// Module-level so React doesn't unsubscribe and resubscribe on every render.
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
 export function useStore<T>(selector: (s: AppState) => T): T {
-  return useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb);
-      return () => listeners.delete(cb);
-    },
-    () => selector(state),
-  );
+  return useSyncExternalStore(subscribe, () => selector(state));
 }
 
 export function getState(): AppState {
@@ -125,8 +125,62 @@ export function setTasks(tasks: TaskView[]) {
   setState({ tasks, tasksLoaded: true });
 }
 
-function updateLive(taskId: string, fn: (live: LiveState) => LiveState) {
-  setState((s) => ({ live: { ...s.live, [taskId]: fn(s.live[taskId] ?? emptyLive()) } }));
+// A running task sends a message for every token and every raw CLI line, often 100+ a second.
+// Re-rendering the live output for each one kept the main thread busy enough that clicks lagged,
+// so live messages are queued and applied together, at most once every LIVE_FLUSH_MS.
+type LiveMessage = Extract<ServerMessage, { type: "task.replay" | "task.event" | "task.raw" | "task.status" }>;
+const LIVE_FLUSH_MS = 50;
+let pendingLive: LiveMessage[] = [];
+let liveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function queueLive(msg: LiveMessage) {
+  pendingLive.push(msg);
+  // A timer, not requestAnimationFrame: that one stops while the window is hidden and the queue would pile up.
+  liveTimer ??= setTimeout(flushLive, LIVE_FLUSH_MS);
+}
+
+function flushLive() {
+  liveTimer = null;
+  const batch = pendingLive;
+  pendingLive = [];
+  if (batch.length === 0) return;
+  const live = { ...state.live };
+  // Raw lines are collected per task and appended with one copy, after the other changes.
+  const rawAdds = new Map<string, RawLine[]>();
+  const appendRaw = (taskId: string) => {
+    const adds = rawAdds.get(taskId);
+    if (!adds) return;
+    rawAdds.delete(taskId);
+    const current = live[taskId] ?? emptyLive();
+    live[taskId] = { ...current, raw: [...current.raw, ...adds].slice(-RAW_CAP) };
+  };
+  for (const msg of batch) {
+    const id = msg.taskId;
+    switch (msg.type) {
+      case "task.replay": {
+        rawAdds.delete(id);
+        let next: LiveState = { ...emptyLive(), raw: msg.raw.slice(-RAW_CAP) };
+        for (const e of msg.events) next = applyEvent(next, e);
+        live[id] = next;
+        break;
+      }
+      case "task.event":
+        appendRaw(id); // keep raw lines and events in arrival order
+        live[id] = applyEvent(live[id] ?? emptyLive(), msg.event);
+        break;
+      case "task.raw": {
+        const adds = rawAdds.get(id);
+        if (adds) adds.push(msg.raw);
+        else rawAdds.set(id, [msg.raw]);
+        break;
+      }
+      case "task.status":
+        live[id] = { ...(live[id] ?? emptyLive()), lastStatus: { status: msg.status, detail: msg.detail } };
+        break;
+    }
+  }
+  for (const id of [...rawAdds.keys()]) appendRaw(id);
+  setState({ live });
 }
 
 // ── Notifications ───────────────────────────────────────────────────────────
@@ -211,24 +265,10 @@ class WsClient {
         setAccounts(msg.accounts);
         break;
       case "task.replay":
-        updateLive(msg.taskId, () => {
-          let live: LiveState = { ...emptyLive(), raw: msg.raw.slice(-RAW_CAP) };
-          for (const e of msg.events) live = applyEvent(live, e);
-          return live;
-        });
-        break;
       case "task.event":
-        updateLive(msg.taskId, (live) => applyEvent(live, msg.event));
-        break;
       case "task.raw":
-        updateLive(msg.taskId, (live) => {
-          const raw = live.raw.length >= RAW_CAP ? live.raw.slice(-RAW_CAP + 1) : live.raw.slice();
-          raw.push(msg.raw);
-          return { ...live, raw };
-        });
-        break;
       case "task.status":
-        updateLive(msg.taskId, (live) => ({ ...live, lastStatus: { status: msg.status, detail: msg.detail } }));
+        queueLive(msg);
         break;
       case "notify":
         notify(msg.title, msg.body);
