@@ -183,17 +183,26 @@ jobs:
       # A draft has no tag yet and isn't offered by the in-app updater
       # (/releases/latest skips drafts). GitHub records a sha256 digest for every
       # uploaded asset; the updater verifies each download against it.
+      #
+      # GitHub's upload endpoint sometimes answers a large file with a 500
+      # ("Unicorn!") page, so each installer is retried a few times; --clobber
+      # replaces whatever a failed attempt left behind.
       - name: Create draft release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: v${{ env.VERSION }}
-          name: v${{ env.VERSION }}
-          draft: true
-          generate_release_notes: true
-          files: |
-            release/My-AI-Slaves-arm64.dmg
-            release/My-AI-Slaves-x64.dmg
-            release/My-AI-Slaves-Setup.exe
+        run: |
+          gh release create "v$VERSION" --draft --title "v$VERSION" --target "$SHA" --generate-notes
+          for file in release/My-AI-Slaves-arm64.dmg release/My-AI-Slaves-x64.dmg release/My-AI-Slaves-Setup.exe; do
+            for attempt in 1 2 3 4 5; do
+              if gh release upload "v$VERSION" "$file" --clobber; then
+                break
+              fi
+              if [ "$attempt" = 5 ]; then
+                echo "::error::Uploading $file failed $attempt times."
+                exit 1
+              fi
+              echo "::warning::Uploading $file failed (attempt $attempt), retrying in $((attempt * 15))s..."
+              sleep $((attempt * 15))
+            done
+          done
 
       # Pushed with GITHUB_TOKEN, so this commit doesn't start another release.
       # The branch and the tag are pushed atomically: both land or neither does.
