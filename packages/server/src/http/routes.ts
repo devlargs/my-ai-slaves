@@ -185,7 +185,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       }),
       req.body,
     );
-    if (!body.message.trim()) return { prompt: "", layers: [] };
+    if (!body.message.trim() && !body.attachmentIds?.length) return { prompt: "", layers: [] };
     const extras = await repos.extras(await repos.get(body.repo), body.extraRepos);
     const files = await attachments.resolve(body.attachmentIds);
     const bound = await prompts.resolve(await prompts.validate(body.promptIds));

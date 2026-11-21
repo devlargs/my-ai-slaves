@@ -353,11 +353,13 @@ function Composer() {
   const currentRepo = repos?.find((r) => r.id === repo);
   const downRepo = repos?.find((r) => (r.id === repo || extras.includes(r.id)) && r.availability.state === "unreachable");
   const chainEmpty = currentRepo && currentRepo.accountChain.length === 0 && account === CHAIN;
-  const canSend = Boolean(repo && hasText) && !busy && !files.uploading && !files.failed;
+  // A pasted image (or any attached file) on its own is a valid task.
+  const hasContent = hasText || files.files.length > 0;
+  const canSend = Boolean(repo && hasContent) && !busy && !files.uploading && !files.failed;
 
   const submit = async () => {
     const message = input.current?.value ?? "";
-    if (!repo || !canSend || !message.trim()) return;
+    if (!repo || !canSend || (!message.trim() && files.ids.length === 0)) return;
     setBusy(true);
     const task = await attempt(
       api.createTask({
@@ -518,7 +520,7 @@ function PromptPreview({
 
   useEffect(() => {
     let cancelled = false;
-    if (!debounced.trim()) {
+    if (!debounced.trim() && attachmentIds.length === 0) {
       setResult(null);
       setError(null);
       return;
@@ -674,10 +676,10 @@ function ReplyBox({ taskId }: { taskId: string }) {
   const files = useAttachments();
   const library = usePromptLibrary();
   const bound = useBoundPrompts();
-  const canSend = hasText && !busy && !files.uploading && !files.failed;
+  const canSend = (hasText || files.files.length > 0) && !busy && !files.uploading && !files.failed;
   const send = async () => {
     const message = input.current?.value ?? "";
-    if (!canSend || !message.trim()) return;
+    if (!canSend || (!message.trim() && files.ids.length === 0)) return;
     setBusy(true);
     const ok = await attempt(api.replyTask(taskId, message, files.ids, bound.ids));
     setBusy(false);

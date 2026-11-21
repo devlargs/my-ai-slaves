@@ -57,7 +57,7 @@ const isBlank = (text: string) => text.trim() === "";
 
 export class EmptyMessageError extends Error {
   constructor() {
-    super("The task message is empty.");
+    super("The task message is empty. Type a message or attach a file.");
   }
 }
 
@@ -72,7 +72,8 @@ export function assemblePrompt({
   otherRepos = [],
   attachmentPaths = [],
 }: PromptLayers): AssembledPrompt {
-  if (isBlank(message)) throw new EmptyMessageError();
+  // A pasted screenshot on its own is a valid task: the attachments list is then the message.
+  if (isBlank(message) && attachmentPaths.length === 0) throw new EmptyMessageError();
   const ordered: [PromptLayerName, string][] = [
     ["global", globalBase],
     ["repo", joinBound(repoPrompts)],
@@ -95,7 +96,7 @@ export function assemblePrompt({
  * so only the reply itself is sent.
  */
 export function assembleReply(message: string, attachmentPaths: string[] = [], boundPrompts: string[] = []): AssembledPrompt {
-  if (isBlank(message)) throw new EmptyMessageError();
+  if (isBlank(message) && attachmentPaths.length === 0) throw new EmptyMessageError();
   const bound = joinBound(boundPrompts);
   const files = attachmentsLayer(attachmentPaths);
   return {
@@ -104,7 +105,7 @@ export function assembleReply(message: string, attachmentPaths: string[] = [], b
       { name: "global", included: false },
       { name: "repo", included: false },
       { name: "prompts", included: bound !== "" },
-      { name: "message", included: true },
+      { name: "message", included: !isBlank(message) },
       { name: "repos", included: false },
       { name: "attachments", included: files !== "" },
     ],

@@ -113,6 +113,13 @@ describe("assembleReply", () => {
     expect(assembleReply("looks good, now add tests").prompt).toBe("looks good, now add tests");
   });
 
+  it("sends attachments alone when the message is empty", () => {
+    const task = assemblePrompt({ globalBase: "G", message: "  ", attachmentPaths: ["/a/shot.png"] });
+    expect(task.prompt).toBe("G\n\nAttached files:\n- /a/shot.png");
+    expect(task.layers.find((l) => l.name === "message")?.included).toBe(false);
+    expect(assembleReply("", ["/a/shot.png"]).prompt).toBe("Attached files:\n- /a/shot.png");
+  });
+
   it("refuses an empty reply", () => {
     expect(() => assembleReply("")).toThrow(EmptyMessageError);
   });

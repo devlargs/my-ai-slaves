@@ -241,7 +241,7 @@ export class QueueService {
 
   async create(req: CreateTaskRequest): Promise<TaskView> {
     const message = req.message ?? "";
-    if (!message.trim()) throw badRequest("The task message is empty.");
+    if (!message.trim() && !req.attachmentIds?.length) throw badRequest("The task message is empty. Type a message or attach a file.");
     const repo = await this.deps.repos.get(req.repo);
     const override = req.accountOverride || null;
     if (override) await this.deps.accounts.get(override);
@@ -260,7 +260,8 @@ export class QueueService {
       extraRepos.push({ repo: extra.id, promptIds: ticked === undefined ? await list.defaultIds() : await list.validate(ticked) });
     }
 
-    const firstLine = message.trim().split("\n")[0] ?? "";
+    // An attachments-only task is titled after its files.
+    const firstLine = message.trim().split("\n")[0] || attachments.map((a) => a.name).join(", ");
     const title = firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
     const slug = slugify(firstLine.split(/\s+/).slice(0, 6).join(" ")) || "task";
 
@@ -365,7 +366,7 @@ export class QueueService {
   }
 
   async reply(id: string, message: string, attachmentIds: string[] = [], promptIdsIn: string[] = []): Promise<void> {
-    if (!message.trim()) throw badRequest("The reply is empty.");
+    if (!message.trim() && attachmentIds.length === 0) throw badRequest("The reply is empty. Type a message or attach a file.");
     const task = await this.getTask(id);
     if (task.status !== "needs-review" || !task.session) {
       throw conflict("You can reply to a task once it's finished a run and is waiting for review.");
