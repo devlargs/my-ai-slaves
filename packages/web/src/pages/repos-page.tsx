@@ -55,7 +55,10 @@ export function ReposPage() {
   // Reachability is re-checked on the server every minute; refresh what we show as well.
   // biome-ignore lint/correctness/useExhaustiveDependencies: interval
   useEffect(() => {
-    const t = setInterval(() => void api.getRepos().then(setData).catch(() => {}), 30_000);
+    const t = setInterval(() => {
+      if (document.hidden) return; // nothing to refresh while the window isn't shown
+      void api.getRepos().then(setData).catch(() => {});
+    }, 30_000);
     return () => clearInterval(t);
   }, []);
 

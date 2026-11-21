@@ -37,8 +37,14 @@ export class WsHub implements Broadcaster {
     if (client.socket.readyState === client.socket.OPEN) client.socket.send(JSON.stringify(message));
   }
 
+  /** Serialised once (not once per client), and not at all when nobody is listening. */
   private broadcast(filter: (c: Client) => boolean, message: ServerMessage): void {
-    for (const c of this.clients) if (filter(c)) this.send(c, message);
+    let json: string | null = null;
+    for (const c of this.clients) {
+      if (!filter(c) || c.socket.readyState !== c.socket.OPEN) continue;
+      json ??= JSON.stringify(message);
+      c.socket.send(json);
+    }
   }
 
   handle(socket: WebSocket): void {

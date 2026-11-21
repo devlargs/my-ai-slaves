@@ -52,7 +52,7 @@ const accountTone: Record<string, { variant: BadgeVariant; label: string }> = {
 };
 
 export function AccountStatusBadge({ account }: { account: AccountView }) {
-  const now = useNow();
+  const now = useNow(1000, account.status === "limited");
   const tone = accountTone[account.status] ?? accountTone.unknown!;
   const left = account.status === "limited" ? secondsLeft(account, now) : null;
   return (

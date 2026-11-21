@@ -31,7 +31,9 @@ const isProduction = process.env.NODE_ENV === "production";
 const webRoot = process.env.SLAVES_WEB_DIR ? resolve(process.env.SLAVES_WEB_DIR) : join(PROJECT_ROOT, "packages", "web");
 
 // ── data + services ─────────────────────────────────────────────────────────
-const { stores } = await openDataStores({ dataDir: resolveDataDir() });
+// Activity is written at most about once a second: a streaming run logs many entries, and each write
+// rewrites the current (up to 5 MB) file. Shutdown writes whatever is still waiting.
+const { stores } = await openDataStores({ dataDir: resolveDataDir(), activityFlushDelayMs: 1000 });
 const adapters = createAdapters();
 const hub = new WsHub();
 const accounts = new AccountService(stores, adapters, hub);

@@ -91,7 +91,10 @@ export class RepoService {
       const before = this.availability.get(repo.id)?.state;
       let result: RepoAvailability;
       try {
-        await runOn(repo.host, "git", ["rev-parse", "--git-dir"], repo.path, { timeoutMs: 20_000 });
+        // Local checkouts: seeing their .git is enough, and costs no process every minute per repo.
+        // Anything else (remote, or a layout without .git at the top) asks git.
+        const quick = !repo.host && (await stat(join(repo.path, ".git")).then(() => true, () => false));
+        if (!quick) await runOn(repo.host, "git", ["rev-parse", "--git-dir"], repo.path, { timeoutMs: 20_000 });
         result = { state: "ok", message: null, checkedAt: formatLocalIso(this.now()) };
       } catch (error) {
         result = { state: "unreachable", message: failureReason(error), checkedAt: formatLocalIso(this.now()) };

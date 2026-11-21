@@ -156,8 +156,11 @@ type LiveMessage = Extract<ServerMessage, { type: "task.replay" | "task.event" |
 const LIVE_FLUSH_MS = 100;
 let pendingLive: LiveMessage[] = [];
 let liveTimer: ReturnType<typeof setTimeout> | null = null;
+/** Tasks whose view is open. Only these keep live output in memory (task.status goes to every queue view). */
+const liveTasks = new Set<string>();
 
 function queueLive(msg: LiveMessage) {
+  if (!liveTasks.has(msg.taskId)) return;
   pendingLive.push(msg);
   // A timer, not requestAnimationFrame: that one stops while the window is hidden and the queue would pile up.
   liveTimer ??= setTimeout(flushLive, LIVE_FLUSH_MS);
@@ -165,7 +168,7 @@ function queueLive(msg: LiveMessage) {
 
 function flushLive() {
   liveTimer = null;
-  const batch = pendingLive;
+  const batch = pendingLive.filter((msg) => liveTasks.has(msg.taskId));
   pendingLive = [];
   if (batch.length === 0) return;
   const live = { ...state.live };
@@ -225,6 +228,15 @@ function flushLive() {
       d.items = before.items;
     }
   }
+  setState({ live });
+}
+
+/** A task's view closed: forget its output (re-sent as a replay when it opens again). */
+function dropLive(taskId: string) {
+  liveTasks.delete(taskId);
+  if (!(taskId in state.live)) return;
+  const live = { ...state.live };
+  delete live[taskId];
   setState({ live });
 }
 
@@ -345,6 +357,7 @@ class WsClient {
   subscribeTask(taskId: string): () => void {
     const count = this.taskRefs.get(taskId) ?? 0;
     this.taskRefs.set(taskId, count + 1);
+    liveTasks.add(taskId);
     if (count === 0) this.persist(`task:${taskId}`, { type: "subscribe", topic: "task", taskId });
     return () => {
       const n = (this.taskRefs.get(taskId) ?? 1) - 1;
@@ -352,6 +365,7 @@ class WsClient {
         this.taskRefs.delete(taskId);
         this.unpersist(`task:${taskId}`);
         this.send({ type: "unsubscribe", topic: "task", taskId });
+        dropLive(taskId);
       } else {
         this.taskRefs.set(taskId, n);
       }

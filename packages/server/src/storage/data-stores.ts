@@ -32,6 +32,8 @@ export interface OpenDataStoresOptions {
   logger?: Logger;
   now?: () => Date;
   activityMaxBytes?: number;
+  /** See `ActivityLogOptions.flushDelayMs`. */
+  activityFlushDelayMs?: number;
 }
 
 /** The only entry point to `.data/`. Loads (or creates/recovers) every file and reports what happened. */
@@ -80,6 +82,7 @@ export async function openDataStores(
   const activity = new ActivityLog({
     dir: paths.activityDir,
     maxBytes: options.activityMaxBytes,
+    flushDelayMs: options.activityFlushDelayMs,
     ...common,
   });
   await activity.init();

@@ -74,11 +74,43 @@ export interface ActivityLogOptions {
   dir: string;
   /** Rotate before a file would exceed this. Default 5 MB. */
   maxBytes?: number;
+  /**
+   * Wait this long before writing, so a burst of appends (a run streaming tool calls) becomes one
+   * write of the file instead of one rewrite per entry. Default 0 (write as soon as possible).
+   */
+  flushDelayMs?: number;
   logger?: Logger;
   now?: () => Date;
 }
 
 export type NewActivityEntry = Omit<ActivityEntry, "at"> & { at?: string };
+
+/**
+ * What the History list needs from one task's entries, kept up to date as entries are appended so the
+ * list never has to read and parse every activity file.
+ */
+export interface TaskSummary {
+  taskId: string;
+  /** `at` of the task's first entry. */
+  firstAt: string;
+  /** The first "queued" entry's data (title, message). */
+  queued: Record<string, unknown> | null;
+  /** The last entry whose event is a terminal one (see `TERMINAL_EVENTS`). */
+  terminal: { event: string; repo: string; at: string } | null;
+  /** The last "started" entry's data (ref / branch). */
+  started: Record<string, unknown> | null;
+  /** The account of the last entry that had one. */
+  lastAccount: string | null;
+}
+
+export const TERMINAL_EVENTS: ReadonlySet<string> = new Set([
+  "kept",
+  "pushed",
+  "marked-finished",
+  "discarded",
+  "failed",
+  "cancelled",
+]);
 
 /**
  * Append-only task history spread over `0001_activity.json`, `0002_…`, ….
@@ -94,10 +126,15 @@ export class ActivityLog {
   private current: ActivityFileState | null = null;
   /** taskId → names of the files holding its entries, oldest first. */
   private readonly index = new Map<string, string[]>();
+  private readonly summaries = new Map<string, TaskSummary>();
+  private flushDelayMs: number;
+  /** Files whose write is waiting out `flushDelayMs`, with a way to start it right away. */
+  private readonly delayed = new Map<ActivityFileState, () => void>();
 
   constructor(options: ActivityLogOptions) {
     this.dir = options.dir;
     this.maxBytes = options.maxBytes ?? DEFAULT_ACTIVITY_MAX_BYTES;
+    this.flushDelayMs = options.flushDelayMs ?? 0;
     this.logger = options.logger ?? consoleLogger;
     this.now = options.now ?? (() => new Date());
   }
@@ -130,7 +167,10 @@ export class ActivityLog {
         );
         continue;
       }
-      for (const entry of file.entries) this.addToIndex(entry.taskId, name);
+      for (const entry of file.entries) {
+        this.addToIndex(entry.taskId, name);
+        this.summarize(entry);
+      }
       if (number === highest) {
         latest = new ActivityFileState(number, name, path, file.createdAt);
         for (const entry of file.entries) latest.push(entry, entryBlock(entry));
@@ -138,7 +178,11 @@ export class ActivityLog {
     }
 
     this.current = latest ?? this.newFile(highest);
-    if (!latest) await this.flush(this.current);
+    if (!latest) {
+      const written = this.flush(this.current);
+      this.delayed.get(this.current)?.(); // a fresh file is written straight away
+      await written;
+    }
   }
 
   /** Name of the file new entries currently go to. */
@@ -152,13 +196,28 @@ export class ActivityLog {
 
     let target = this.requireCurrent();
     if (target.count > 0 && target.size(byteLength(block)) > this.maxBytes) {
+      this.delayed.get(target)?.(); // the old file is done: write it now, not after the delay
       target = this.newFile(target.number + 1);
       this.current = target;
     }
     target.push(entry, block);
     this.addToIndex(entry.taskId, target.name);
+    this.summarize(entry);
     await this.flush(target);
     return entry;
+  }
+
+  /** Write anything still waiting out the flush delay (call before the process exits). */
+  async close(): Promise<void> {
+    this.flushDelayMs = 0; // anything logged while shutting down is written straight away
+    const waiting = [...this.delayed.keys()].map((state) => state.pendingWrite);
+    for (const start of [...this.delayed.values()]) start();
+    await Promise.all(waiting);
+  }
+
+  /** One summary per task that has entries (any order). */
+  taskSummaries(): TaskSummary[] {
+    return [...this.summaries.values()];
   }
 
   /** Every entry for a task, across all files, in the order they were written. */
@@ -214,12 +273,38 @@ export class ActivityLog {
   /** Write `state` soon; appends made before the write starts share it. */
   private flush(state: ActivityFileState): Promise<void> {
     if (!state.pendingWrite) {
-      state.pendingWrite = enqueueFileJob(state.path, async () => {
-        state.pendingWrite = null;
-        await writeFileAtomic(state.path, state.serialize());
-      });
+      const write = () =>
+        enqueueFileJob(state.path, async () => {
+          state.pendingWrite = null;
+          await writeFileAtomic(state.path, state.serialize());
+        });
+      if (this.flushDelayMs <= 0) {
+        state.pendingWrite = write();
+      } else {
+        state.pendingWrite = new Promise<void>((resolve, reject) => {
+          const start = () => {
+            clearTimeout(timer);
+            if (!this.delayed.delete(state)) return;
+            write().then(resolve, reject);
+          };
+          const timer = setTimeout(start, this.flushDelayMs);
+          this.delayed.set(state, start);
+        });
+      }
     }
     return state.pendingWrite;
+  }
+
+  private summarize(entry: ActivityEntry): void {
+    let s = this.summaries.get(entry.taskId);
+    if (!s) {
+      s = { taskId: entry.taskId, firstAt: entry.at, queued: null, terminal: null, started: null, lastAccount: null };
+      this.summaries.set(entry.taskId, s);
+    }
+    if (entry.event === "queued" && !s.queued) s.queued = pick(entry.data, ["title", "message"]);
+    if (entry.event === "started") s.started = pick(entry.data, ["ref", "branch"]);
+    if (TERMINAL_EVENTS.has(entry.event)) s.terminal = { event: entry.event, repo: entry.repo, at: entry.at };
+    if (entry.account) s.lastAccount = entry.account;
   }
 
   private addToIndex(taskId: string, fileName: string): void {
@@ -232,4 +317,11 @@ export class ActivityLog {
     if (!this.current) throw new Error("ActivityLog.init() must be called first");
     return this.current;
   }
+}
+
+/** Only the fields a summary needs, so it doesn't keep a run's whole prompt alive. */
+function pick(data: Record<string, unknown> | null | undefined, keys: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of keys) if (data && key in data) out[key] = data[key];
+  return out;
 }

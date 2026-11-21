@@ -80,13 +80,15 @@ export function useTaskSubscription(taskId: string | null) {
   }, [taskId]);
 }
 
-/** Re-render every second (for countdowns). */
-export function useNow(intervalMs = 1000): number {
+/** Re-render every second (for countdowns), only while `enabled`: an idle timer per badge adds up. */
+export function useNow(intervalMs = 1000, enabled = true): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    if (!enabled) return;
+    setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), intervalMs);
     return () => clearInterval(t);
-  }, [intervalMs]);
+  }, [intervalMs, enabled]);
   return now;
 }
 

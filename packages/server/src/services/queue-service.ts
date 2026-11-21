@@ -175,6 +175,7 @@ export class QueueService {
   async shutdown(): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
     await Promise.all([...this.live.values()].map((run) => run.handle.cancel().catch(() => {})));
+    await this.stores.activity.close().catch(() => {});
   }
 
   // ── reads ────────────────────────────────────────────────────────────────
@@ -434,13 +435,6 @@ export class QueueService {
 
   async history(): Promise<HistoryItem[]> {
     const inQueue = new Set((await this.stores.queue.read()).tasks.map((t) => t.id));
-    const byTask = new Map<string, ActivityEntry[]>();
-    for (const entry of await this.stores.activity.readAll()) {
-      if (inQueue.has(entry.taskId)) continue;
-      const list = byTask.get(entry.taskId);
-      if (list) list.push(entry);
-      else byTask.set(entry.taskId, [entry]);
-    }
     const outcomes: Record<string, HistoryItem["outcome"]> = {
       kept: "done",
       pushed: "done",
@@ -449,22 +443,20 @@ export class QueueService {
       failed: "failed",
       cancelled: "cancelled",
     };
+    // From the activity log's in-memory summaries: no re-reading every activity file per page.
     const items: HistoryItem[] = [];
-    for (const [taskId, entries] of byTask) {
-      const terminal = [...entries].reverse().find((e) => e.event in outcomes);
-      if (!terminal) continue;
-      const queued = entries.find((e) => e.event === "queued");
-      const started = [...entries].reverse().find((e) => e.event === "started");
+    for (const s of this.stores.activity.taskSummaries()) {
+      if (inQueue.has(s.taskId) || !s.terminal) continue;
       items.push({
-        taskId,
-        title: String(queued?.data?.title ?? taskId),
-        repo: terminal.repo,
-        message: String(queued?.data?.message ?? ""),
-        outcome: outcomes[terminal.event] as HistoryItem["outcome"],
-        lastAccount: [...entries].reverse().find((e) => e.account)?.account ?? null,
-        branch: ((started?.data?.ref ?? started?.data?.branch) as string | undefined) ?? null,
-        queuedAt: entries[0]?.at ?? terminal.at,
-        endedAt: terminal.at,
+        taskId: s.taskId,
+        title: String(s.queued?.title ?? s.taskId),
+        repo: s.terminal.repo,
+        message: String(s.queued?.message ?? ""),
+        outcome: outcomes[s.terminal.event] as HistoryItem["outcome"],
+        lastAccount: s.lastAccount,
+        branch: ((s.started?.ref ?? s.started?.branch) as string | undefined) ?? null,
+        queuedAt: s.firstAt,
+        endedAt: s.terminal.at,
       });
     }
     return items.sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));

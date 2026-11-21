@@ -158,4 +158,39 @@ describe("ActivityLog", () => {
     const { log } = await openLog(dir);
     await expect(log.append(entry("task_0001_a", "x", { event: "exploded" as never }))).rejects.toThrow();
   });
+
+  it("batches appends made within the flush delay into one write, and close() writes right away", async () => {
+    const dir = await tempDir();
+    const log = new ActivityLog({ dir, logger: memoryLogger(), now: fixedNow, flushDelayMs: 60_000 });
+    await log.init();
+    void log.append(entry("task_a", "one"));
+    void log.append(entry("task_a", "two"));
+    expect((await readActivity(dir, "0001_activity.json")).entries).toHaveLength(0);
+    await log.close();
+    expect((await readActivity(dir, "0001_activity.json")).entries.map((e) => e.detail)).toEqual(["one", "two"]);
+    await log.append(entry("task_a", "three")); // after close: no delay
+    expect((await readActivity(dir, "0001_activity.json")).entries).toHaveLength(3);
+  });
+
+  it("keeps a per-task summary for History, rebuilt from the files after a restart", async () => {
+    const dir = await tempDir();
+    const { log } = await openLog(dir, 600);
+    await log.append(entry("task_a", "q", { event: "queued", account: null, data: { title: "Fix it", message: "Fix it now", big: "x" } }));
+    await log.append(entry("task_a", "s", { event: "started", data: { ref: "main", prompt: "long prompt" } }));
+    await log.append(entry("task_a", "m".repeat(400)));
+    await log.append(entry("task_a", "k", { event: "kept", account: "other-acct" }));
+    await log.append(entry("task_b", "q", { event: "queued", data: { title: "B", message: "b" } }));
+    const expected = {
+      taskId: "task_a",
+      firstAt: "2026-11-18T18:02:00+08:00",
+      queued: { title: "Fix it", message: "Fix it now" },
+      terminal: { event: "kept", repo: "supertri-web", at: "2026-11-18T18:02:00+08:00" },
+      started: { ref: "main" },
+      lastAccount: "other-acct",
+    };
+    expect(log.taskSummaries().find((s) => s.taskId === "task_a")).toEqual(expected);
+    expect(log.taskSummaries().find((s) => s.taskId === "task_b")?.terminal).toBeNull();
+    const { log: reopened } = await openLog(dir, 600);
+    expect(reopened.taskSummaries().find((s) => s.taskId === "task_a")).toEqual(expected);
+  });
 });
