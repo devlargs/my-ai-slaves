@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "stage": "node scripts/build.mjs",
-    "dist": "electron-builder --config electron-builder.config.cjs --publish never",
+    "dist": "node -e \"require('node:fs').rmSync('release', { recursive: true, force: true })\" && electron-builder --config electron-builder.config.cjs --publish never",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
   },
