@@ -452,7 +452,7 @@ function Composer() {
               Preview prompt
             </label>
             <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">
-              <kbd className="font-mono">⌘↵</kbd>
+              <kbd className="font-mono">⇧↵</kbd> to queue
             </span>
             <Button size="sm" variant="signal" className="ml-1.5" disabled={!canSend} onClick={() => void submit()}>
               <SendIcon /> {files.uploading ? "Uploading…" : "Queue"}
@@ -777,7 +777,8 @@ function MessageInput({
       }}
       onPaste={onPaste}
       onKeyDown={(e) => {
-        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        // Shift+Enter sends (⌘/Ctrl+Enter too); plain Enter adds a new line. Skip while an IME is composing.
+        if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
           e.preventDefault();
           onSubmit();
         }
