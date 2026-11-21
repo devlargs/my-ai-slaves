@@ -13,7 +13,6 @@ import {
   MousePointerClickIcon,
   RotateCcwIcon,
   SendIcon,
-  SquareIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -251,7 +250,7 @@ function QueueList({
                   void attempt(api.cancelTask(task.id));
                 }}
               >
-                <SquareIcon />
+                <span aria-hidden className="block size-2.5 rounded-[2px] bg-white" />
               </Button>
             )}
             {task.status === "pending" && task.pendingReply !== null && (
