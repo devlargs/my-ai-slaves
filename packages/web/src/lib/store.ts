@@ -404,6 +404,15 @@ class WsClient {
     };
   }
 
+  /** The script runs of a repo (latest per script, then live changes) until the returned function is called. */
+  subscribeRepoScripts(repoId: string): () => void {
+    this.persist(`scripts:${repoId}`, { type: "subscribe", topic: "repo-scripts", repoId });
+    return () => {
+      this.unpersist(`scripts:${repoId}`);
+      this.send({ type: "unsubscribe", topic: "repo-scripts", repoId });
+    };
+  }
+
   /** Receive a task's raw CLI lines (the ones kept so far, then new ones) until the returned function is called. */
   subscribeTaskRaw(taskId: string): () => void {
     rawTasks.add(taskId);

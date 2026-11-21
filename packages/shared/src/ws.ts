@@ -1,7 +1,7 @@
 /**
  * One WebSocket at /ws (same origin). JSON text frames.
  */
-import type { AccountView, LoginState, TaskView } from "./api";
+import type { AccountView, LoginState, ScriptRun, ScriptRunInfo, TaskView } from "./api";
 import type { QueuedTaskStatus } from "./schemas/queue";
 import type { RawLine, StreamEvent } from "./stream";
 
@@ -14,7 +14,10 @@ export type ClientMessage =
    * run sends (every token and tool chunk is a line), and nothing else shows them.
    */
   | { type: "subscribe"; topic: "task-raw"; taskId: string }
-  | { type: "unsubscribe"; topic: "task-raw"; taskId: string };
+  | { type: "unsubscribe"; topic: "task-raw"; taskId: string }
+  /** The script runs of a repo (output included), only while its Scripts panel is open. */
+  | { type: "subscribe"; topic: "repo-scripts"; repoId: string }
+  | { type: "unsubscribe"; topic: "repo-scripts"; repoId: string };
 
 export type ServerMessage =
   | { type: "queue.updated"; tasks: TaskView[] }
@@ -29,5 +32,11 @@ export type ServerMessage =
   /** One new raw line, to `task-raw` subscribers only. */
   | { type: "task.raw"; taskId: string; raw: RawLine }
   | { type: "task.status"; taskId: string; status: QueuedTaskStatus | "done" | "failed"; detail: string | null }
+  /** Sent right after subscribing to a repo's scripts: its latest run of each script. */
+  | { type: "scripts.replay"; repoId: string; runs: ScriptRun[] }
+  /** A script run started or ended. */
+  | { type: "script.updated"; repoId: string; run: ScriptRunInfo }
+  /** New output of a running script (batched, about 10 per second at most). */
+  | { type: "script.output"; repoId: string; runId: string; chunk: string }
   /** Show a browser notification. */
   | { type: "notify"; taskId: string; title: string; body: string };

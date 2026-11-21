@@ -4,12 +4,15 @@ import type {
   LoginState,
   QueuedTaskStatus,
   RawLine,
+  ScriptRun,
+  ScriptRunInfo,
   ServerMessage,
   StreamEvent,
   TaskView,
 } from "@my-ai-slaves/shared";
 import type { WebSocket } from "ws";
 import type { Broadcaster } from "../services/common";
+import type { ScriptListener } from "../services/script-service";
 
 interface Client {
   socket: WebSocket;
@@ -18,16 +21,19 @@ interface Client {
   tasks: Set<string>;
   /** Tasks whose raw CLI lines this client is showing. */
   rawTasks: Set<string>;
+  /** Repos whose Scripts panel this client is showing. */
+  scriptRepos: Set<string>;
 }
 
 export interface HubSources {
   listQueue(): Promise<TaskView[]>;
   listAccounts(): Promise<AccountView[]>;
   replay(taskId: string): { events: StreamEvent[]; raw: RawLine[] };
+  scriptRuns(repoId: string): ScriptRun[];
 }
 
 /** One WebSocket per browser tab: queue/account lists, login progress, task streams. */
-export class WsHub implements Broadcaster {
+export class WsHub implements Broadcaster, ScriptListener {
   private readonly clients = new Set<Client>();
   private sources: HubSources | null = null;
 
@@ -50,7 +56,7 @@ export class WsHub implements Broadcaster {
   }
 
   handle(socket: WebSocket): void {
-    const client: Client = { socket, queue: false, accounts: false, tasks: new Set(), rawTasks: new Set() };
+    const client: Client = { socket, queue: false, accounts: false, tasks: new Set(), rawTasks: new Set(), scriptRepos: new Set() };
     this.clients.add(client);
     socket.on("message", (data) => {
       let msg: ClientMessage;
@@ -67,6 +73,15 @@ export class WsHub implements Broadcaster {
   private async onMessage(client: Client, msg: ClientMessage): Promise<void> {
     const sources = this.sources;
     if (!sources) return;
+    if (msg.type === "unsubscribe" && msg.topic === "repo-scripts") {
+      client.scriptRepos.delete(msg.repoId);
+      return;
+    }
+    if (msg.type === "subscribe" && msg.topic === "repo-scripts") {
+      client.scriptRepos.add(msg.repoId);
+      this.send(client, { type: "scripts.replay", repoId: msg.repoId, runs: sources.scriptRuns(msg.repoId) });
+      return;
+    }
     if (msg.type === "unsubscribe") {
       // Closing a task's view also ends its raw lines.
       if (msg.topic === "task") client.tasks.delete(msg.taskId);
@@ -107,6 +122,12 @@ export class WsHub implements Broadcaster {
   }
   taskStatus(taskId: string, status: QueuedTaskStatus | "done" | "failed", detail: string | null): void {
     this.broadcast((c) => c.queue || c.tasks.has(taskId), { type: "task.status", taskId, status, detail });
+  }
+  scriptUpdated(repoId: string, run: ScriptRunInfo): void {
+    this.broadcast((c) => c.scriptRepos.has(repoId), { type: "script.updated", repoId, run });
+  }
+  scriptOutput(repoId: string, runId: string, chunk: string): void {
+    this.broadcast((c) => c.scriptRepos.has(repoId), { type: "script.output", repoId, runId, chunk });
   }
   notify(taskId: string, title: string, body: string): void {
     this.broadcast((c) => c.queue, { type: "notify", taskId, title, body });

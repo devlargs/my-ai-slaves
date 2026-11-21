@@ -1,5 +1,7 @@
 import type {
   RepoGraph,
+  RepoScripts,
+  ScriptRunInfo,
   AccountView,
   Attachment,
   CreatePromptRequest,
@@ -91,6 +93,9 @@ export const api = {
   registerRepo: (body: RegisterRepoRequest) => request<RepoView>("POST", "/repos", body),
   checkRepo: (id: string) => request<RepoView>("POST", `/repos/${enc(id)}/check`),
   getRepoGraph: (id: string, limit: number) => request<RepoGraph>("GET", `/repos/${enc(id)}/graph?limit=${limit}`),
+  getRepoScripts: (id: string) => request<RepoScripts>("GET", `/repos/${enc(id)}/scripts`),
+  runRepoScript: (id: string, script: string) => request<ScriptRunInfo>("POST", `/repos/${enc(id)}/scripts/run`, { script }),
+  stopRepoScript: (id: string, script: string) => request<Ok>("POST", `/repos/${enc(id)}/scripts/stop`, { script }),
   getLabelColors: () => request<LabelColors>("GET", "/label-colors"),
   setLabelColor: (label: string, color: LabelColor | null) =>
     request<LabelColors>("PUT", "/label-colors", { label, color }),

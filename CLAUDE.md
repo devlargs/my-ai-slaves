@@ -39,7 +39,8 @@ packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with t
                   AttachmentStore. The only code that touches .data/.
   src/providers   ProviderAdapter per CLI: claude-code/, cursor-agent/ (args, stream parser, limit detection)
   src/services    PromptAssembler, AccountRouter (pure) + AccountService, RepoService, BranchService,
-                  QueueService (scheduler, runs, fallback, replies, review actions)
+                  QueueService (scheduler, runs, fallback, replies, review actions), ScriptService
+                  (runs a repo's package.json scripts from the Repos page, locally or over ssh; stopped on quit)
   src/login       LoginService: drives `claude auth login` / `agent login` in a hidden pty
   src/remote        machine.ts (run git/CLIs locally or over ssh), hosts.ts (~/.ssh/config aliases)
   src/http, src/ws, src/security (Host / Origin / Sec-Fetch-Site guard; no token)

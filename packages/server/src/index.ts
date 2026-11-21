@@ -13,6 +13,7 @@ import { PromptLibrary } from "./services/prompt-library";
 import { QueueService } from "./services/queue-service";
 import { RepoService } from "./services/repo-service";
 import { RepoGit } from "./services/repo-git";
+import { ScriptService } from "./services/script-service";
 import { AttachmentStore } from "./storage/attachment-store";
 import { openDataStores } from "./storage/data-stores";
 import { LoginService } from "./login/login-service";
@@ -41,6 +42,7 @@ const repos = new RepoService(stores);
 const git = new RepoGit();
 const attachments = new AttachmentStore(stores.paths.attachmentsDir);
 const prompts = new PromptLibrary(stores);
+const scripts = new ScriptService(hub);
 const assembler = new PromptAssembler({
   globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
 });
@@ -53,6 +55,7 @@ hub.setSources({
   listQueue: () => queue.list(),
   listAccounts: () => accounts.list(),
   replay: (taskId) => queue.replay(taskId),
+  scriptRuns: (repoId) => scripts.replay(repoId),
 });
 
 // ── http ────────────────────────────────────────────────────────────────────
@@ -62,7 +65,7 @@ await app.register(fastifyWebsocket);
 app.register(async (scope) => {
   scope.get("/ws", { websocket: true }, (socket) => hub.handle(socket));
 });
-registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments, prompts, git });
+registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments, prompts, git, scripts });
 
 let closeVite: (() => Promise<void>) | null = null;
 if (isProduction) {
@@ -125,6 +128,7 @@ async function shutdown(signal: string) {
   console.log(`\n${signal}: stopping. Running tasks will show as interrupted next time.`);
   logins.closeAll();
   await queue.shutdown().catch(() => {});
+  await scripts.stopAll().catch(() => {});
   await closeVite?.().catch(() => {});
   await app.close().catch(() => {});
   process.exit(0);

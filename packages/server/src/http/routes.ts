@@ -11,6 +11,7 @@ import type { PromptLibrary } from "../services/prompt-library";
 import type { QueueService } from "../services/queue-service";
 import type { RepoGit } from "../services/repo-git";
 import type { RepoService } from "../services/repo-service";
+import type { ScriptService } from "../services/script-service";
 import { AttachmentError, type AttachmentStore } from "../storage/attachment-store";
 import type { DataStores } from "../storage/data-stores";
 import { ATTACHMENT_LIMITS, PREVIEWABLE_IMAGE_TYPES } from "@my-ai-slaves/shared";
@@ -27,6 +28,7 @@ export interface RouteDeps {
   attachments: AttachmentStore;
   prompts: PromptLibrary;
   git: RepoGit;
+  scripts: ScriptService;
 }
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -42,7 +44,7 @@ const Ids = z.object({ ids: z.array(z.string()) });
 const params = (req: { params: unknown }) => req.params as { id: string };
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
-  const { stores, accounts, repos, queue, assembler, logins, attachments, prompts, git } = deps;
+  const { stores, accounts, repos, queue, assembler, logins, attachments, prompts, git, scripts } = deps;
 
   app.setErrorHandler((error, _req, reply) => {
     if (error instanceof HttpError) return reply.code(error.status).send({ error: error.message });
@@ -128,6 +130,19 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
   app.get("/api/remote/hosts", () => listRemoteHosts());
   // One colour per label, shared by every repo that has it. App only; never sent to a CLI.
+  // ── repo scripts (package.json) ───────────────────────────────────────────
+  app.get("/api/repos/:id/scripts", async (req) => scripts.list(await repos.get(params(req).id)));
+  const ScriptBody = z.object({ script: z.string().min(1) });
+  app.post("/api/repos/:id/scripts/run", async (req) => {
+    const { script } = parseBody(ScriptBody, req.body);
+    return scripts.run(await repos.get(params(req).id), script);
+  });
+  app.post("/api/repos/:id/scripts/stop", async (req) => {
+    const { script } = parseBody(ScriptBody, req.body);
+    await scripts.stop(params(req).id, script);
+    return { ok: true };
+  });
+
   app.get("/api/label-colors", () => repos.labelColors());
   app.put("/api/label-colors", async (req) => {
     const body = parseBody(z.object({ label: z.string().max(40), color: LabelColor.nullable() }), req.body);
@@ -149,6 +164,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return repo;
   });
   app.delete("/api/repos/:id", async (req) => {
+    await scripts.stopAll(params(req).id);
     await repos.remove(params(req).id);
     return { ok: true };
   });

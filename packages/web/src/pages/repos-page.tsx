@@ -18,6 +18,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FolderBrowserDialog } from "@/components/folder-browser";
 import { GitGraphDialog } from "@/components/git-graph";
+import { RepoScriptsPanel } from "@/components/repo-scripts";
 import { LabelBadge, LabelColorPicker, labelColorAttr } from "@/components/label-badge";
 import { PageHeader } from "@/components/page-header";
 import { RepoPromptsEditor } from "@/components/repo-prompts";
@@ -656,7 +657,10 @@ function RepoCard({
           <ChainEditor repo={repo} onSave={(chain) => patch({ accountChain: chain })} />
           <CommitterEditor repo={repo} onSave={patch} />
         </div>
-        <RepoPromptsEditor repoId={repo.id} />
+        <div className="flex min-w-0 flex-col gap-6">
+          <RepoPromptsEditor repoId={repo.id} />
+          <RepoScriptsPanel repoId={repo.id} active={expanded && !unreachable} />
+        </div>
         </fieldset>
       </CardContent>
       <GitGraphDialog repoId={repo.id} repoName={repo.name} open={graphOpen} onOpenChange={setGraphOpen} />

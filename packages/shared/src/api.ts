@@ -282,3 +282,34 @@ export interface HistoryItem {
   queuedAt: string;
   endedAt: string;
 }
+
+/** The package manager a repo's scripts are run with (from package.json's `packageManager`, else its lockfile). */
+export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+/** GET /api/repos/:id/scripts → the `scripts` of the repo's package.json, in file order. */
+export interface RepoScripts {
+  /** False when the repo has no package.json at its root. */
+  found: boolean;
+  packageManager: PackageManager;
+  scripts: { name: string; command: string }[];
+}
+
+export type ScriptRunStatus = "running" | "done" | "failed" | "stopped";
+
+/** One run of a repo script started from the app (the latest per script is kept in memory). */
+export interface ScriptRunInfo {
+  id: string;
+  repoId: string;
+  script: string;
+  /** What was run, e.g. "npm run dev". */
+  commandLine: string;
+  status: ScriptRunStatus;
+  exitCode: number | null;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export interface ScriptRun extends ScriptRunInfo {
+  /** stdout + stderr as it came (the last 256 KB). */
+  output: string;
+}

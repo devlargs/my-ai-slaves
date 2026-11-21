@@ -26,7 +26,7 @@ const kept: RawLine[] = [{ src: "stdout", line: '{"type":"assistant"}' }];
 
 function hubWith(...clients: ReturnType<typeof fakeSocket>[]) {
   const hub = new WsHub();
-  hub.setSources({ listQueue: async () => [], listAccounts: async () => [], replay: () => ({ events, raw: kept }) });
+  hub.setSources({ listQueue: async () => [], listAccounts: async () => [], replay: () => ({ events, raw: kept }), scriptRuns: () => [] });
   for (const client of clients) hub.handle(client.socket);
   return hub;
 }
