@@ -16,7 +16,7 @@ export function PageHeader({
   return (
     <header className={cn("flex flex-wrap items-end justify-between gap-x-6 gap-y-3 border-b border-rule pb-5", className)}>
       <div className="min-w-0 max-w-2xl">
-        <h1 className="title-display text-[length:var(--text-title)] leading-tight">{title}</h1>
+        <h1 className="title-display text-(length:--text-title) leading-tight">{title}</h1>
         {description && <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

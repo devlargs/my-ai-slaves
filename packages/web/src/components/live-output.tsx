@@ -105,7 +105,7 @@ export function LiveOutput({ taskId }: { taskId: string }) {
             {streaming && (
               <div>
                 <StreamingMarkdown text={streaming} />
-                <span className="mt-1 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-signal align-middle motion-reduce:animate-none" />
+                <span className="mt-1 inline-block h-3.5 w-0.75 animate-pulse rounded-full bg-signal align-middle motion-reduce:animate-none" />
               </div>
             )}
           </div>

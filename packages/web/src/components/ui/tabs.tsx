@@ -22,7 +22,7 @@ export function TabsTrigger({ className, ...props }: React.ComponentProps<typeof
         "transition-colors duration-150 hover:text-ink",
         "data-[state=active]:border-signal data-[state=active]:text-ink",
         "disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-muted-foreground",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)] [&_svg]:size-3.5",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--color-focus) [&_svg]:size-3.5",
         className,
       )}
       {...props}

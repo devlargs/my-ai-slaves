@@ -27,9 +27,9 @@ const components: Components = {
   code: ({ node: _, className, ...p }) => (
     <code
       className={cn(
-        "rounded bg-paper-2 px-1 py-px font-mono text-[11.5px] text-ink-2 break-words",
+        "rounded bg-paper-2 px-1 py-px font-mono text-[11.5px] text-ink-2 wrap-break-word",
         // Inside a fenced block the <pre> carries the background.
-        "[pre_&]:bg-transparent [pre_&]:p-0",
+        "in-[pre]:bg-transparent in-[pre]:p-0",
         className,
       )}
       {...p}
@@ -54,7 +54,7 @@ const components: Components = {
 // Memoized: parsing is the expensive part, and the same text is often rendered again unchanged.
 export const Markdown = memo(function Markdown({ children, className }: { children: string; className?: string }) {
   return (
-    <div className={cn("min-w-0 text-[13px] leading-relaxed text-ink break-words", className)}>
+    <div className={cn("min-w-0 text-[13px] leading-relaxed text-ink wrap-break-word", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {children}
       </ReactMarkdown>

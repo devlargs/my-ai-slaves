@@ -225,7 +225,7 @@ export function AttachmentTray({ attachments }: { attachments: AttachmentsState 
                   aria-label={`View ${f.name}`}
                   title={`View ${f.name}`}
                   onClick={() => setViewing(f.key)}
-                  className="size-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+                  className="size-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-(--color-focus)"
                 >
                   <img src={f.previewUrl} alt="" className="size-full object-cover" />
                 </button>
@@ -256,7 +256,7 @@ export function AttachmentTray({ attachments }: { attachments: AttachmentsState 
               type="button"
               aria-label={`Remove ${f.name}`}
               onClick={() => attachments.remove(f.key)}
-              className="ml-0.5 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-paper-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+              className="ml-0.5 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-paper-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-(--color-focus)"
             >
               <XIcon className="size-3.5" />
             </button>
@@ -289,7 +289,7 @@ export function AttachmentList({ files, className }: { files: Attachment[]; clas
                   onClick={() => setViewing(a.id)}
                   aria-label={`View ${a.name}`}
                   title={`${a.name} · ${formatBytes(a.size)}`}
-                  className="block size-14 cursor-zoom-in overflow-hidden rounded-md border border-rule bg-paper-2 transition-colors hover:border-rule-strong focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+                  className="block size-14 cursor-zoom-in overflow-hidden rounded-md border border-rule bg-paper-2 transition-colors hover:border-rule-strong focus-visible:outline-2 focus-visible:outline-(--color-focus)"
                 >
                   <img src={`/api/attachments/${a.id}`} alt={a.name} className="size-full object-cover" />
                 </button>
@@ -373,7 +373,7 @@ export function ImageViewer({
                     type="button"
                     aria-label="Previous image"
                     onClick={() => step(-1)}
-                    className="absolute top-1/2 left-4 flex size-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+                    className="absolute top-1/2 left-4 flex size-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-(--color-focus)"
                   >
                     <ChevronLeftIcon className="size-5" />
                   </button>
@@ -381,13 +381,13 @@ export function ImageViewer({
                     type="button"
                     aria-label="Next image"
                     onClick={() => step(1)}
-                    className="absolute top-1/2 right-4 flex size-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+                    className="absolute top-1/2 right-4 flex size-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-(--color-focus)"
                   >
                     <ChevronRightIcon className="size-5" />
                   </button>
                 </>
               )}
-              <DialogPrimitive.Close className="absolute top-4 right-4 flex size-9 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]">
+              <DialogPrimitive.Close className="absolute top-4 right-4 flex size-9 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-(--color-focus)">
                 <XIcon className="size-4" />
                 <span className="sr-only">Close</span>
               </DialogPrimitive.Close>

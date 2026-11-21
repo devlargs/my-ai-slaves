@@ -196,7 +196,7 @@ function PromptCard({
             type="button"
             onClick={onToggle}
             aria-expanded={expanded}
-            className="-my-1 flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+            className="-my-1 flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left focus-visible:outline-2 focus-visible:outline-(--color-focus)"
           >
             <ChevronRightIcon
               className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-150", expanded && "rotate-90")}

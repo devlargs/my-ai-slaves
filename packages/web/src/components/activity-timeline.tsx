@@ -79,7 +79,7 @@ const TimelineRow = memo(function TimelineRow({ entry }: { entry: ActivityEntry 
         <Badge variant={eventVariant[entry.event] ?? "outline"} className="mt-px shrink-0">
           {entry.event}
         </Badge>
-        <span className="min-w-0 flex-1 break-words text-[13px] text-ink">
+        <span className="min-w-0 flex-1 wrap-break-word text-[13px] text-ink">
           {entry.detail}
           {entry.account && <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">@{entry.account}</span>}
         </span>
@@ -94,7 +94,7 @@ const TimelineRow = memo(function TimelineRow({ entry }: { entry: ActivityEntry 
         </div>
       )}
       {open && agentText !== null && (
-        <div className="scroll-quiet mt-2 max-h-[32rem] overflow-auto rounded-md border border-rule bg-paper px-3 py-2.5">
+        <div className="scroll-quiet mt-2 max-h-128 overflow-auto rounded-md border border-rule bg-paper px-3 py-2.5">
           <Markdown>{agentText}</Markdown>
         </div>
       )}

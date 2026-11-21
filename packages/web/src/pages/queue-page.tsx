@@ -105,7 +105,7 @@ export function QueuePage() {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="flex w-[420px] shrink-0 flex-col border-r border-rule">
+      <div className="flex w-105 shrink-0 flex-col border-r border-rule">
         <PanelHeader>
           <h2 className="title-display text-[15px]">Queue</h2>
           <span className="num rounded-full bg-paper-2 px-1.5 text-[11px] font-medium text-muted-foreground">
@@ -182,7 +182,7 @@ function QueueList({
           aria-current={selectedId === task.id ? "true" : undefined}
           className={cn(
             "group flex cursor-pointer items-start gap-2 rounded-lg border bg-surface px-2.5 py-2.5 transition-[border-color,box-shadow] duration-150",
-            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]",
+            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--color-focus)",
             selectedId === task.id
               ? "border-signal/55 ring-3 ring-signal/10"
               : "border-rule hover:border-rule-strong",
@@ -250,7 +250,7 @@ function QueueList({
                   void attempt(api.cancelTask(task.id));
                 }}
               >
-                <span aria-hidden className="block size-2.5 rounded-[2px] bg-white" />
+                <span aria-hidden className="block size-2.5 rounded-xs bg-white" />
               </Button>
             )}
             {task.status === "pending" && task.pendingReply !== null && (

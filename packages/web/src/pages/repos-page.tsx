@@ -340,7 +340,7 @@ function FilterChip({
       aria-checked={active}
       onClick={onClick}
       className={cn(
-        "flex h-6 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]",
+        "flex h-6 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-(--color-focus)",
         active ? "border-ink bg-ink text-paper" : "border-rule bg-surface text-ink-2 hover:border-rule-strong hover:text-ink",
       )}
     >
@@ -530,7 +530,7 @@ function RepoCard({
                 tabIndex={0}
                 role="img"
                 aria-label="Unable to load the repo at this time"
-                className="flex size-7 shrink-0 cursor-help items-center justify-center rounded-full text-warning-ink focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+                className="flex size-7 shrink-0 cursor-help items-center justify-center rounded-full text-warning-ink focus-visible:outline-2 focus-visible:outline-(--color-focus)"
               >
                 <AlertTriangleIcon className="size-4" />
               </span>

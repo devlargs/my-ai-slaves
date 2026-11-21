@@ -94,7 +94,7 @@ export function RepoPicker({
                         ? "A task needs at least one repo"
                         : repo.path
                   }
-                  className="flex w-full cursor-pointer items-center gap-2.5 rounded-md py-1.5 pr-2 pl-2 text-left transition-colors hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+                  className="flex w-full cursor-pointer items-center gap-2.5 rounded-md py-1.5 pr-2 pl-2 text-left transition-colors hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-(--color-focus)"
                 >
                   <span
                     className={cn(
@@ -123,7 +123,7 @@ export function RepoPicker({
                   <button
                     type="button"
                     onClick={() => makeMain(repo)}
-                    className="absolute top-1/2 right-1.5 -translate-y-1/2 cursor-pointer rounded px-1.5 py-0.5 text-[11px] text-signal-ink opacity-0 transition-opacity group-hover/row:opacity-100 hover:underline focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+                    className="absolute top-1/2 right-1.5 -translate-y-1/2 cursor-pointer rounded px-1.5 py-0.5 text-[11px] text-signal-ink opacity-0 transition-opacity group-hover/row:opacity-100 hover:underline focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-(--color-focus)"
                   >
                     Make main
                   </button>

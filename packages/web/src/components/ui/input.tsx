@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 
 const field = [
   "w-full rounded-md border border-rule-strong bg-surface text-[13px] text-ink placeholder:text-muted-foreground/80",
-  "transition-[border-color,box-shadow] duration-150 ease-[var(--ease-out)]",
+  "transition-[border-color,box-shadow] duration-150 ease-out",
   "hover:border-muted-foreground/40",
   "focus-visible:border-signal/70 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-signal/15",
   "disabled:cursor-not-allowed disabled:opacity-50",

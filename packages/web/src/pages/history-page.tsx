@@ -67,7 +67,7 @@ export function HistoryPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="flex w-[440px] shrink-0 flex-col border-r border-rule">
+      <div className="flex w-110 shrink-0 flex-col border-r border-rule">
         <PanelHeader>
           <h2 className="title-display text-[15px]">History</h2>
           <span className="num rounded-full bg-paper-2 px-1.5 text-[11px] font-medium text-muted-foreground">
@@ -89,7 +89,7 @@ export function HistoryPage() {
                 onClick={() => setSelected(h.taskId)}
                 className={cn(
                   "flex cursor-pointer flex-col gap-1 rounded-lg border bg-surface px-3 py-2.5 text-left transition-[border-color,box-shadow] duration-150",
-                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]",
+                  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--color-focus)",
                   selected === h.taskId ? "border-signal/55 ring-3 ring-signal/10" : "border-rule hover:border-rule-strong",
                 )}
               >

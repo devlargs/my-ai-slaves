@@ -253,7 +253,7 @@ function PickerSection({ section, first, onNavigate }: { section: PromptSection;
                   role="option"
                   aria-selected={on}
                   onClick={() => toggle(p.id)}
-                  className="flex w-full cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+                  className="flex w-full cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-(--color-focus)"
                 >
                   <span
                     className={cn(

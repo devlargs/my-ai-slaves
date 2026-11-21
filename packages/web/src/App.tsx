@@ -116,7 +116,7 @@ function Sidebar({ route }: { route: Route }) {
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex h-8 items-center gap-2.5 rounded-md border px-2.5 text-[13px] transition-colors duration-150",
-                "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-focus)]",
+                "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-(--color-focus)",
                 active
                   ? "border-rule bg-surface font-medium text-ink"
                   : "border-transparent text-ink-2 hover:bg-paper-3 hover:text-ink",
@@ -129,7 +129,7 @@ function Sidebar({ route }: { route: Route }) {
                   {running > 0 && (
                     <span
                       title={`${running} running`}
-                      className="num inline-flex h-[18px] items-center gap-1 rounded-full bg-signal-soft px-1.5 text-[11px] font-medium text-signal-ink"
+                      className="num inline-flex h-4.5 items-center gap-1 rounded-full bg-signal-soft px-1.5 text-[11px] font-medium text-signal-ink"
                     >
                       <LiveDot /> {running}
                     </span>
@@ -137,7 +137,7 @@ function Sidebar({ route }: { route: Route }) {
                   {review > 0 && (
                     <span
                       title={`${review} waiting for review`}
-                      className="num inline-flex h-[18px] items-center rounded-full bg-warning-soft px-1.5 text-[11px] font-medium text-warning-ink"
+                      className="num inline-flex h-4.5 items-center rounded-full bg-warning-soft px-1.5 text-[11px] font-medium text-warning-ink"
                     >
                       {review}
                     </span>

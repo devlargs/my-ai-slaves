@@ -235,7 +235,7 @@ function RepoPromptRow({
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md py-1 text-left focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md py-1 text-left focus-visible:outline-2 focus-visible:outline-(--color-focus)"
         >
           <ChevronRightIcon
             className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-150", expanded && "rotate-90")}
