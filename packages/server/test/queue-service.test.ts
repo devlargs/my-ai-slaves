@@ -510,6 +510,11 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect(head(repo.path)).toBe("main");
     const outcomes = Object.fromEntries((await queue.history()).map((h) => [h.taskId, h.outcome]));
     expect(outcomes).toEqual({ [running.id]: "discarded", [pending.id]: "discarded" });
+    const all = await queue.history();
+    const first = await queue.historyPage(0, 1);
+    expect(first).toEqual({ items: [all[0]], total: 2, nextOffset: 1 });
+    expect(await queue.historyPage(1, 1)).toEqual({ items: [all[1]], total: 2, nextOffset: null });
+    expect(await queue.historyPage(5, 10)).toEqual({ items: [], total: 2, nextOffset: null });
     expect((await stores.activity.forTask(running.id)).at(-1)?.detail).toContain("Stopped and discarded");
   });
 

@@ -5,6 +5,7 @@ import {
   type DiffResponse,
   formatLocalIso,
   type HistoryItem,
+  type HistoryPage,
   type RawLine,
   type Repo,
   type SettingsFile,
@@ -467,6 +468,14 @@ export class QueueService {
       });
     }
     return items.sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
+  }
+
+  /** One page of history (newest first), for the History page's lazy loading. */
+  async historyPage(offset: number, limit: number): Promise<HistoryPage> {
+    const all = await this.history();
+    const items = all.slice(offset, offset + limit);
+    const next = offset + items.length;
+    return { items, total: all.length, nextOffset: items.length > 0 && next < all.length ? next : null };
   }
 
   // ── scheduler ────────────────────────────────────────────────────────────

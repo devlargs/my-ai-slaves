@@ -1,6 +1,6 @@
-import type { HistoryItem } from "@my-ai-slaves/shared";
+import type { HistoryPage as HistoryPageData } from "@my-ai-slaves/shared";
 import { GitBranchIcon, RefreshCwIcon, RotateCcwIcon } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PanelHeader } from "@/components/page-header";
 import { TaskStatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -9,11 +9,61 @@ import { useApi, useRepoName } from "@/lib/hooks";
 import { cn, formatTime } from "@/lib/utils";
 import { TaskHistory } from "./queue-page";
 
+/** How many history items each lazy-loaded page fetches. */
+const PAGE_SIZE = 50;
+
 export function HistoryPage() {
-  const { data, loading, reload } = useApi<HistoryItem[]>(() => api.history(), [], "history");
+  // A refresh (or coming back to the page) re-fetches as many items as are already shown, so the
+  // list doesn't shrink back to the first page under the user.
+  const shownRef = useRef(0);
+  const { data, setData, loading, reload } = useApi<HistoryPageData>(
+    () => api.history(0, Math.max(PAGE_SIZE, Math.ceil(shownRef.current / PAGE_SIZE) * PAGE_SIZE)),
+    [],
+    "history",
+  );
+  shownRef.current = data?.items.length ?? 0;
+  const items = data?.items;
   const repoName = useRepoName();
   const [selected, setSelected] = useState<string | null>(null);
-  const item = data?.find((h) => h.taskId === selected) ?? null;
+  const item = items?.find((h) => h.taskId === selected) ?? null;
+
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const nextOffset = data?.nextOffset ?? null;
+  const loadMore = useCallback(async () => {
+    if (nextOffset === null || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const page = await attempt(api.history(nextOffset, PAGE_SIZE));
+      if (!page) return;
+      setData((prev) => {
+        const have = new Set(prev?.items.map((h) => h.taskId));
+        return {
+          items: [...(prev?.items ?? []), ...page.items.filter((h) => !have.has(h.taskId))],
+          total: page.total,
+          nextOffset: page.nextOffset,
+        };
+      });
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [nextOffset, setData]);
+
+  // Load the next page when the end of the list scrolls into view.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || nextOffset === null) return;
+    const observer = new IntersectionObserver((entries) => entries[0]?.isIntersecting && void loadMore(), {
+      root: scrollRef.current,
+      rootMargin: "0px 0px 300px 0px",
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [nextOffset, loadMore]);
 
   return (
     <div className="flex h-full min-h-0">
@@ -21,18 +71,18 @@ export function HistoryPage() {
         <PanelHeader>
           <h2 className="title-display text-[15px]">History</h2>
           <span className="num rounded-full bg-paper-2 px-1.5 text-[11px] font-medium text-muted-foreground">
-            {data?.length ?? 0}
+            {data?.total ?? 0}
           </span>
           <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void reload()} disabled={loading}>
             <RefreshCwIcon className={cn(loading && "animate-spin")} /> Refresh
           </Button>
         </PanelHeader>
-        <div className="scroll-quiet min-h-0 flex-1 overflow-auto px-3 py-3">
-          {data?.length === 0 && (
+        <div ref={scrollRef} className="scroll-quiet min-h-0 flex-1 overflow-auto px-3 py-3">
+          {items?.length === 0 && (
             <p className="px-1 text-[13px] text-muted-foreground">Finished, failed and discarded tasks show up here.</p>
           )}
           <div className="flex flex-col gap-1.5">
-            {data?.map((h) => (
+            {items?.map((h) => (
               <button
                 type="button"
                 key={h.taskId}
@@ -63,6 +113,13 @@ export function HistoryPage() {
               </button>
             ))}
           </div>
+          {nextOffset !== null && (
+            <div ref={sentinelRef} className="flex justify-center py-3">
+              <Button size="sm" variant="ghost" onClick={() => void loadMore()} disabled={loadingMore}>
+                {loadingMore ? "Loading…" : `Load more (${(data?.total ?? 0) - (items?.length ?? 0)} left)`}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
       <div className="min-w-0 flex-1 overflow-auto">

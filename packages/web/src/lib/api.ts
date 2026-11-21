@@ -9,7 +9,7 @@ import type {
   CreateTaskRequest,
   DiffResponse,
   FsBrowseResponse,
-  HistoryItem,
+  HistoryPage,
   CreateRepoPromptRequest,
   RepoPrompt,
   UpdateRepoPromptRequest,
@@ -138,7 +138,7 @@ export const api = {
   finishTask: (id: string) => request<Ok>("POST", `/tasks/${enc(id)}/finish`),
   discardTask: (id: string) => request<Ok>("POST", `/tasks/${enc(id)}/discard`, { confirm: true }),
 
-  history: () => request<HistoryItem[]>("GET", "/history"),
+  history: (offset = 0, limit = 50) => request<HistoryPage>("GET", `/history?offset=${offset}&limit=${limit}`),
 };
 
 /** Await an API call; on failure show a toast and resolve to undefined. */

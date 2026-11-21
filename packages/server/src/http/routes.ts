@@ -253,7 +253,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
 
-  app.get("/api/history", () => queue.history());
+  app.get("/api/history", async (req) => {
+    const q = req.query as { offset?: string; limit?: string };
+    const offset = Math.max(0, Math.floor(Number(q.offset) || 0));
+    const limit = Math.min(500, Math.max(1, Math.floor(Number(q.limit) || 50)));
+    return queue.historyPage(offset, limit);
+  });
 
   // ── prompt library ────────────────────────────────────────────────────────
   const PromptBody = z.object({ name: z.string().max(120), body: z.string().max(200_000) });

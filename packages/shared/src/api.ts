@@ -236,7 +236,14 @@ export interface DiffResponse {
 /** POST /api/tasks/:id/discard (body { confirm: true }) → { ok: true } — stops it if running, off the queue; nothing in the repo is touched */
 
 // ── History ─────────────────────────────────────────────────────────────────
-/** GET /api/history → HistoryItem[] (newest first; tasks no longer in the queue) */
+/** GET /api/history?offset=0&limit=50 → HistoryPage (newest first; tasks no longer in the queue) */
+export interface HistoryPage {
+  items: HistoryItem[];
+  /** How many history items there are in all. */
+  total: number;
+  /** The offset to ask for next, or null when this page reached the end. */
+  nextOffset: number | null;
+}
 export interface HistoryItem {
   taskId: string;
   title: string;
