@@ -6,7 +6,7 @@ import type {
   StreamEvent,
   TaskView,
 } from "@my-ai-slaves/shared";
-import { useSyncExternalStore } from "react";
+import { startTransition, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
 // ── Live task output model ──────────────────────────────────────────────────
@@ -30,19 +30,22 @@ export interface LiveState {
 const RAW_CAP = 5000;
 const emptyLive = (): LiveState => ({ items: [], streaming: "", raw: [], lastStatus: null });
 
-function applyEvent(live: LiveState, event: StreamEvent): LiveState {
-  const items = live.items.slice();
-  let streaming = live.streaming;
+/**
+ * Applies one event to a task's live state in place. Callers pass a draft whose `items` array is
+ * already their own copy (one copy per flush, not one per event: a replay can hold thousands of events).
+ */
+function applyEvent(live: LiveState, event: StreamEvent): void {
+  const items = live.items;
   const flushStreaming = () => {
-    if (streaming.trim()) items.push({ type: "message", text: streaming });
-    streaming = "";
+    if (live.streaming.trim()) items.push({ type: "message", text: live.streaming });
+    live.streaming = "";
   };
   switch (event.kind) {
     case "text-delta":
-      streaming += event.text;
+      live.streaming += event.text;
       break;
     case "message":
-      streaming = "";
+      live.streaming = "";
       items.push({ type: "message", text: event.text });
       break;
     case "tool-start":
@@ -69,7 +72,6 @@ function applyEvent(live: LiveState, event: StreamEvent): LiveState {
       items.push({ type: "init", model: event.model, permissionMode: event.permissionMode, sessionId: event.sessionId });
       break;
   }
-  return { ...live, items, streaming };
 }
 
 // ── Global store ────────────────────────────────────────────────────────────
@@ -109,6 +111,27 @@ export function useStore<T>(selector: (s: AppState) => T): T {
   return useSyncExternalStore(subscribe, () => selector(state));
 }
 
+/**
+ * Like useStore, but changes are rendered as a transition: React can pause that render to handle a
+ * keystroke or click first. For views that change many times a second (live task output), so typing
+ * and navigating never wait behind them. useSyncExternalStore renders are always blocking.
+ */
+export function useStoreTransition<T>(selector: (s: AppState) => T, deps: unknown[]): T {
+  const [value, setValue] = useState(() => selector(state));
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deps are caller-supplied
+  useEffect(() => {
+    const check = () => {
+      const next = selectorRef.current(state);
+      startTransition(() => setValue(() => next));
+    };
+    check(); // pick up what changed in the selector's inputs (deps) or the store since the last render
+    return subscribe(check);
+  }, deps);
+  return value;
+}
+
 export function getState(): AppState {
   return state;
 }
@@ -127,9 +150,10 @@ export function setTasks(tasks: TaskView[]) {
 
 // A running task sends a message for every token and every raw CLI line, often 100+ a second.
 // Re-rendering the live output for each one kept the main thread busy enough that clicks lagged,
-// so live messages are queued and applied together, at most once every LIVE_FLUSH_MS.
+// so live messages are queued and applied together, at most once every LIVE_FLUSH_MS, and the live
+// view renders them as a transition (useStoreTransition) that yields to typing and clicks.
 type LiveMessage = Extract<ServerMessage, { type: "task.replay" | "task.event" | "task.raw" | "task.status" }>;
-const LIVE_FLUSH_MS = 50;
+const LIVE_FLUSH_MS = 100;
 let pendingLive: LiveMessage[] = [];
 let liveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -145,28 +169,42 @@ function flushLive() {
   pendingLive = [];
   if (batch.length === 0) return;
   const live = { ...state.live };
+  // Each task touched by this batch gets one draft (with its own copy of items), mutated by every
+  // message for it, so a burst of tokens doesn't copy the whole item list once per token.
+  const drafts = new Map<string, LiveState>();
+  const draft = (taskId: string): LiveState => {
+    let d = drafts.get(taskId);
+    if (!d) {
+      const current = live[taskId] ?? emptyLive();
+      d = { ...current, items: current.items.slice() };
+      drafts.set(taskId, d);
+      live[taskId] = d;
+    }
+    return d;
+  };
   // Raw lines are collected per task and appended with one copy, after the other changes.
   const rawAdds = new Map<string, RawLine[]>();
   const appendRaw = (taskId: string) => {
     const adds = rawAdds.get(taskId);
     if (!adds) return;
     rawAdds.delete(taskId);
-    const current = live[taskId] ?? emptyLive();
-    live[taskId] = { ...current, raw: [...current.raw, ...adds].slice(-RAW_CAP) };
+    const d = draft(taskId);
+    d.raw = [...d.raw, ...adds].slice(-RAW_CAP);
   };
   for (const msg of batch) {
     const id = msg.taskId;
     switch (msg.type) {
       case "task.replay": {
         rawAdds.delete(id);
-        let next: LiveState = { ...emptyLive(), raw: msg.raw.slice(-RAW_CAP) };
-        for (const e of msg.events) next = applyEvent(next, e);
+        const next: LiveState = { ...emptyLive(), raw: msg.raw.slice(-RAW_CAP) };
+        for (const e of msg.events) applyEvent(next, e);
+        drafts.set(id, next);
         live[id] = next;
         break;
       }
       case "task.event":
         appendRaw(id); // keep raw lines and events in arrival order
-        live[id] = applyEvent(live[id] ?? emptyLive(), msg.event);
+        applyEvent(draft(id), msg.event);
         break;
       case "task.raw": {
         const adds = rawAdds.get(id);
@@ -175,11 +213,18 @@ function flushLive() {
         break;
       }
       case "task.status":
-        live[id] = { ...(live[id] ?? emptyLive()), lastStatus: { status: msg.status, detail: msg.detail } };
+        draft(id).lastStatus = { status: msg.status, detail: msg.detail };
         break;
     }
   }
   for (const id of [...rawAdds.keys()]) appendRaw(id);
+  // Unchanged items keep their array, so views selecting them don't re-render for a status or raw line.
+  for (const [id, d] of drafts) {
+    const before = state.live[id];
+    if (before && d.items.length === before.items.length && d.items.every((item, i) => item === before.items[i])) {
+      d.items = before.items;
+    }
+  }
   setState({ live });
 }
 

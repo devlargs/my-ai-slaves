@@ -750,7 +750,14 @@ export class QueueService {
   }
 
   private onEvent(run: LiveRun, event: StreamEvent, buffer: OutputBuffer): void {
-    pushCapped(buffer.events, event);
+    // Tokens of one reply are kept as a single text-delta, so a task's replay (sent when its view
+    // opens) is a few hundred events rather than one per token, and the cap keeps far more history.
+    const last = buffer.events.at(-1);
+    if (event.kind === "text-delta" && last?.kind === "text-delta") {
+      buffer.events[buffer.events.length - 1] = { ...last, text: last.text + event.text };
+    } else {
+      pushCapped(buffer.events, event);
+    }
     this.deps.broadcaster.taskEvent(run.taskId, event);
     const base = { taskId: run.taskId, repo: run.repo, account: run.account.id };
     switch (event.kind) {

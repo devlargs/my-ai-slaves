@@ -7,7 +7,7 @@ import {
   type LucideIcon,
   SettingsIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { Toaster } from "sonner";
 import { UpdateControl } from "@/components/desktop-update";
 import { LiveDot } from "@/components/status";
@@ -49,6 +49,9 @@ function useRoute(): Route {
 
 export function App() {
   const route = useRoute();
+  // The sidebar shows the new route at once; the page itself switches in a background render that
+  // yields to typing and clicks, so a heavy page (a long live output) never freezes the window.
+  const page = useDeferredValue(route);
   const unauthorized = useStore((s) => s.unauthorized);
 
   useEffect(() => {
@@ -66,11 +69,11 @@ export function App() {
     <div className="flex h-full">
       <Sidebar route={route} />
       <main className="scroll-quiet min-w-0 flex-1 overflow-auto">
-        {route === "queue" && <QueuePage />}
-        {route === "repos" && <ReposPage />}
-        {route === "prompts" && <PromptsPage />}
-        {route === "settings" && <SettingsPage />}
-        {route === "history" && <HistoryPage />}
+        {page === "queue" && <QueuePage />}
+        {page === "repos" && <ReposPage />}
+        {page === "prompts" && <PromptsPage />}
+        {page === "settings" && <SettingsPage />}
+        {page === "history" && <HistoryPage />}
       </main>
       <Toaster
         position="bottom-right"

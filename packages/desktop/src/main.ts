@@ -124,6 +124,9 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // Not throttled while another app is in front: otherwise coming back to the window first has to
+      // catch up on everything a running task streamed meanwhile, and typing lags until it has.
+      backgroundThrottling: false,
     },
   });
   const win = mainWindow;

@@ -12,32 +12,55 @@ import {
 import { memo, useEffect, useRef, useState } from "react";
 import { Markdown } from "@/components/markdown";
 import { Switch } from "@/components/ui/switch";
-import { type LiveItem, type LiveState, useStore } from "@/lib/store";
+import { type LiveItem, type LiveState, useStoreTransition } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const NO_ITEMS: LiveItem[] = [];
 const NO_RAW: LiveState["raw"] = [];
+/** Rows rendered at first; a long run's earlier rows load on demand, so the page stays light. */
+const ITEM_WINDOW = 150;
+const RAW_WINDOW = 1000;
 
 export function LiveOutput({ taskId }: { taskId: string }) {
   const [raw, setRaw] = useState(false);
+  const [itemLimit, setItemLimit] = useState(ITEM_WINDOW);
+  const [rawLimit, setRawLimit] = useState(RAW_WINDOW);
   // Separate selections, so a raw CLI line (most of what a run sends) only re-renders this view
-  // while the raw output is shown.
-  const items = useStore((s) => s.live[taskId]?.items ?? NO_ITEMS);
-  const streaming = useStore((s) => s.live[taskId]?.streaming ?? "");
-  const hasRaw = useStore((s) => (s.live[taskId]?.raw.length ?? 0) > 0);
-  const rawLines = useStore((s) => (raw ? (s.live[taskId]?.raw ?? NO_RAW) : NO_RAW));
+  // while the raw output is shown. Rendered as transitions: typing and clicks go first.
+  const items = useStoreTransition((s) => s.live[taskId]?.items ?? NO_ITEMS, [taskId]);
+  const streaming = useStoreTransition((s) => s.live[taskId]?.streaming ?? "", [taskId]);
+  const hasRaw = useStoreTransition((s) => (s.live[taskId]?.raw.length ?? 0) > 0, [taskId]);
+  const rawLines = useStoreTransition((s) => (raw ? (s.live[taskId]?.raw ?? NO_RAW) : NO_RAW), [taskId, raw]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
 
   const itemCount = items.length;
   const rawCount = rawLines.length;
   const streamingLength = streaming.length;
+  const hiddenItems = Math.max(0, items.length - itemLimit);
+  const hiddenRaw = Math.max(0, rawLines.length - rawLimit);
+  const shownItems = hiddenItems > 0 ? items.slice(hiddenItems) : items;
+  const shownRaw = hiddenRaw > 0 ? rawLines.slice(hiddenRaw) : rawLines;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when content grows
   useEffect(() => {
     const el = scrollRef.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [itemCount, rawCount, streamingLength, raw]);
+
+  const showEarlier = (hidden: number, step: number, more: (step: number) => void) =>
+    hidden > 0 && (
+      <button
+        type="button"
+        onClick={() => {
+          stick.current = false;
+          more(step);
+        }}
+        className="mb-1 cursor-pointer self-start text-[11px] text-muted-foreground underline-offset-2 hover:text-ink hover:underline"
+      >
+        Show {Math.min(hidden, step)} earlier of {hidden}
+      </button>
+    );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -58,29 +81,63 @@ export function LiveOutput({ taskId }: { taskId: string }) {
         {items.length === 0 && !streaming && !hasRaw ? (
           <p className="p-4 text-[13px] text-muted-foreground">No output yet. It streams here while the task runs.</p>
         ) : raw ? (
-          <pre className="min-h-full bg-paper-2 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-ink-2">
-            {rawLines.map((r, i) => (
+          <pre className="flex min-h-full flex-col bg-paper-2 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-ink-2">
+            {showEarlier(hiddenRaw, RAW_WINDOW * 2, (step) => setRawLimit((n) => n + step))}
+            {shownRaw.map((r, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only
-              <div key={i} className={cn(r.src === "stderr" && "text-danger-ink")}>
+              <div key={hiddenRaw + i} className={cn(r.src === "stderr" && "text-danger-ink")}>
                 {r.line}
               </div>
             ))}
           </pre>
         ) : (
           <div className="flex max-w-3xl flex-col gap-2 px-4 py-3.5">
-            {items.map((item, i) => (
+            {showEarlier(hiddenItems, ITEM_WINDOW * 2, (step) => setItemLimit((n) => n + step))}
+            {shownItems.map((item, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only
-              <LiveRow key={i} item={item} />
+              <LiveRow key={hiddenItems + i} item={item} />
             ))}
             {streaming && (
               <div>
-                <Markdown>{streaming}</Markdown>
+                <StreamingMarkdown text={streaming} />
                 <span className="mt-1 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-signal align-middle motion-reduce:animate-none" />
               </div>
             )}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The reply being generated, split into blocks at blank lines (outside code fences). Finished blocks
+ * are memoized, so each token re-parses only the last block, not the whole message so far.
+ */
+function StreamingMarkdown({ text }: { text: string }) {
+  const blocks: string[] = [];
+  let start = 0;
+  let fenced = false;
+  let lineStart = 0;
+  while (lineStart <= text.length) {
+    const end = text.indexOf("\n", lineStart);
+    const lineEnd = end === -1 ? text.length : end;
+    const line = text.slice(lineStart, lineEnd);
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    else if (!fenced && line.trim() === "" && lineStart > start) {
+      blocks.push(text.slice(start, lineStart));
+      start = lineEnd + 1;
+    }
+    if (end === -1) break;
+    lineStart = end + 1;
+  }
+  if (start < text.length) blocks.push(text.slice(start));
+  return (
+    <div className="flex flex-col gap-1.5">
+      {blocks.map((block, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: append-only
+        <Markdown key={i}>{block}</Markdown>
+      ))}
     </div>
   );
 }

@@ -316,7 +316,9 @@ function Composer() {
     storageSet(EXTRA_REPOS_KEY, JSON.stringify(next));
   };
   const [account, setAccount] = useState<string>(CHAIN);
-  const [message, setMessage] = useState("");
+  const input = useRef<HTMLTextAreaElement>(null);
+  const [hasText, setHasText] = useState(false);
+  const [previewText, setPreviewText] = useState("");
   const [preview, setPreview] = useState(false);
   const [busy, setBusy] = useState(false);
   const files = useAttachments();
@@ -348,10 +350,11 @@ function Composer() {
   const currentRepo = repos?.find((r) => r.id === repo);
   const downRepo = repos?.find((r) => (r.id === repo || extras.includes(r.id)) && r.availability.state === "unreachable");
   const chainEmpty = currentRepo && currentRepo.accountChain.length === 0 && account === CHAIN;
-  const canSend = Boolean(repo && message.trim()) && !busy && !files.uploading && !files.failed;
+  const canSend = Boolean(repo && hasText) && !busy && !files.uploading && !files.failed;
 
   const submit = async () => {
-    if (!repo || !canSend) return;
+    const message = input.current?.value ?? "";
+    if (!repo || !canSend || !message.trim()) return;
     setBusy(true);
     const task = await attempt(
       api.createTask({
@@ -368,7 +371,9 @@ function Composer() {
     );
     setBusy(false);
     if (task) {
-      setMessage("");
+      if (input.current) input.current.value = "";
+      setHasText(false);
+      setPreviewText("");
       files.clear();
       bound.setIds([]);
       repoSets.resetToDefaults();
@@ -409,19 +414,15 @@ function Composer() {
               <BoundPromptChips sections={sections} />
             </div>
           )}
-          <textarea
+          <MessageInput
+            inputRef={input}
             aria-label="Task message"
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onHasText={setHasText}
+            onText={preview ? setPreviewText : undefined}
             onPaste={files.onPaste}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                void submit();
-              }
-            }}
+            onSubmit={() => void submit()}
             placeholder="Describe the task. Paste or drop screenshots and files."
-            className="block max-h-72 min-h-24 w-full resize-y bg-transparent px-3 py-2.5 text-[13px] leading-relaxed text-ink placeholder:text-muted-foreground/80 focus:outline-none"
+            className="max-h-72 min-h-24"
           />
           {files.files.length > 0 && (
             <div className="px-2.5 pb-2">
@@ -435,7 +436,13 @@ function Composer() {
               footer="Sent in order: global base prompt, the ticked repo prompts, the ticked saved prompts, then your message."
             />
             <label className="ml-1 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground select-none">
-              <Switch checked={preview} onCheckedChange={setPreview} />
+              <Switch
+                checked={preview}
+                onCheckedChange={(on) => {
+                  setPreview(on);
+                  if (on) setPreviewText(input.current?.value ?? "");
+                }}
+              />
               Preview prompt
             </label>
             <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">
@@ -472,7 +479,7 @@ function Composer() {
       {preview && repo && (
         <PromptPreview
           repo={repo}
-          message={message}
+          message={previewText}
           attachmentIds={files.ids}
           promptIds={bound.ids}
           repoPromptIds={repoSets.tickedFor(repo)}
@@ -657,19 +664,22 @@ export function TaskHistory({ taskId, version }: { taskId: string; version?: str
 }
 
 function ReplyBox({ taskId }: { taskId: string }) {
-  const [message, setMessage] = useState("");
+  const input = useRef<HTMLTextAreaElement>(null);
+  const [hasText, setHasText] = useState(false);
   const [busy, setBusy] = useState(false);
   const files = useAttachments();
   const library = usePromptLibrary();
   const bound = useBoundPrompts();
-  const canSend = Boolean(message.trim()) && !busy && !files.uploading && !files.failed;
+  const canSend = hasText && !busy && !files.uploading && !files.failed;
   const send = async () => {
-    if (!canSend) return;
+    const message = input.current?.value ?? "";
+    if (!canSend || !message.trim()) return;
     setBusy(true);
     const ok = await attempt(api.replyTask(taskId, message, files.ids, bound.ids), "Reply queued");
     setBusy(false);
     if (ok !== undefined) {
-      setMessage("");
+      if (input.current) input.current.value = "";
+      setHasText(false);
       files.clear();
       bound.setIds([]);
     }
@@ -683,19 +693,14 @@ function ReplyBox({ taskId }: { taskId: string }) {
               <BoundPromptChips sections={[librarySection(library, bound)]} />
             </div>
           )}
-          <textarea
+          <MessageInput
+            inputRef={input}
             aria-label="Reply"
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onHasText={setHasText}
             onPaste={files.onPaste}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                void send();
-              }
-            }}
+            onSubmit={() => void send()}
             placeholder="Reply to continue this session, e.g. answer its plan or ask for changes."
-            className="block max-h-56 min-h-16 w-full resize-y bg-transparent px-3 py-2.5 text-[13px] leading-relaxed text-ink placeholder:text-muted-foreground/80 focus:outline-none"
+            className="max-h-56 min-h-16"
           />
           {files.files.length > 0 && (
             <div className="px-2.5 pb-2">
@@ -718,6 +723,54 @@ function ReplyBox({ taskId }: { taskId: string }) {
         </div>
       </DropZone>
     </div>
+  );
+}
+
+/**
+ * The message box. Uncontrolled on purpose: a keystroke re-renders nothing (the composer around it,
+ * with its pickers and prompt lists, re-renders only when the box goes empty ↔ non-empty), so typing
+ * stays instant even while a task streams. Read the text from `inputRef` when sending.
+ */
+function MessageInput({
+  inputRef,
+  onHasText,
+  onText,
+  onSubmit,
+  onPaste,
+  className,
+  ...props
+}: {
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  onHasText: (hasText: boolean) => void;
+  /** Called with the full text on every change (only pass it when something shows the text live). */
+  onText?: (text: string) => void;
+  onSubmit: () => void;
+  onPaste: React.ClipboardEventHandler<HTMLTextAreaElement>;
+  className?: string;
+  "aria-label": string;
+  placeholder: string;
+}) {
+  return (
+    <textarea
+      ref={inputRef}
+      {...props}
+      onInput={(e) => {
+        const text = e.currentTarget.value;
+        onHasText(text.trim().length > 0);
+        onText?.(text);
+      }}
+      onPaste={onPaste}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          onSubmit();
+        }
+      }}
+      className={cn(
+        "block w-full resize-y bg-transparent px-3 py-2.5 text-[13px] leading-relaxed text-ink placeholder:text-muted-foreground/80 focus:outline-none",
+        className,
+      )}
+    />
   );
 }
 
