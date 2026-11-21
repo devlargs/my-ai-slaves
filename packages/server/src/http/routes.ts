@@ -9,6 +9,7 @@ import { EmptyMessageError, type PromptAssembler } from "../services/prompt-asse
 import { listRemoteHosts } from "../remote/hosts";
 import type { PromptLibrary } from "../services/prompt-library";
 import type { QueueService } from "../services/queue-service";
+import type { RepoGit } from "../services/repo-git";
 import type { RepoService } from "../services/repo-service";
 import { AttachmentError, type AttachmentStore } from "../storage/attachment-store";
 import type { DataStores } from "../storage/data-stores";
@@ -25,6 +26,7 @@ export interface RouteDeps {
   logins: LoginService;
   attachments: AttachmentStore;
   prompts: PromptLibrary;
+  git: RepoGit;
 }
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -40,7 +42,7 @@ const Ids = z.object({ ids: z.array(z.string()) });
 const params = (req: { params: unknown }) => req.params as { id: string };
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
-  const { stores, accounts, repos, queue, assembler, logins, attachments, prompts } = deps;
+  const { stores, accounts, repos, queue, assembler, logins, attachments, prompts, git } = deps;
 
   app.setErrorHandler((error, _req, reply) => {
     if (error instanceof HttpError) return reply.code(error.status).send({ error: error.message });
@@ -117,6 +119,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     await repos.checkAvailability(repo);
     void queue.tick();
     return repos.toView(repo);
+  });
+  // Read-only commit graph (git log --all) for the repo's graph view.
+  app.get("/api/repos/:id/graph", async (req) => {
+    const q = req.query as { limit?: string };
+    const limit = Math.min(Math.max(Number.parseInt(q.limit ?? "", 10) || 300, 1), 5000);
+    return git.graph(await repos.get(params(req).id), limit);
   });
   app.get("/api/remote/hosts", () => listRemoteHosts());
   // One colour per label, shared by every repo that has it. App only; never sent to a CLI.

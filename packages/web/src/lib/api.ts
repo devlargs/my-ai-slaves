@@ -1,4 +1,5 @@
 import type {
+  RepoGraph,
   AccountView,
   Attachment,
   CreatePromptRequest,
@@ -89,6 +90,7 @@ export const api = {
   getRepos: () => request<RepoView[]>("GET", "/repos"),
   registerRepo: (body: RegisterRepoRequest) => request<RepoView>("POST", "/repos", body),
   checkRepo: (id: string) => request<RepoView>("POST", `/repos/${enc(id)}/check`),
+  getRepoGraph: (id: string, limit: number) => request<RepoGraph>("GET", `/repos/${enc(id)}/graph?limit=${limit}`),
   getLabelColors: () => request<LabelColors>("GET", "/label-colors"),
   setLabelColor: (label: string, color: LabelColor | null) =>
     request<LabelColors>("PUT", "/label-colors", { label, color }),

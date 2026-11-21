@@ -4,6 +4,7 @@ import {
   ChevronRightIcon,
   FolderGit2Icon,
   FolderOpenIcon,
+  GitGraphIcon,
   LaptopIcon,
   Loader2Icon,
   PlusIcon,
@@ -16,6 +17,7 @@ import {
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FolderBrowserDialog } from "@/components/folder-browser";
+import { GitGraphDialog } from "@/components/git-graph";
 import { LabelBadge, LabelColorPicker, labelColorAttr } from "@/components/label-badge";
 import { PageHeader } from "@/components/page-header";
 import { RepoPromptsEditor } from "@/components/repo-prompts";
@@ -468,6 +470,7 @@ function RepoCard({
   const unreachable = repo.availability.state === "unreachable";
   const colorOf = useLabelColor();
   const [checking, setChecking] = useState(false);
+  const [graphOpen, setGraphOpen] = useState(false);
   const checkAgain = async () => {
     setChecking(true);
     const fresh = await attempt(api.checkRepo(repo.id));
@@ -504,6 +507,29 @@ function RepoCard({
           />
           <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
           <CardTitle className="shrink-0">{repo.name}</CardTitle>
+          {!unreachable && (
+            <Tooltip content="Commit graph (all branches, read-only)">
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={`Open the commit graph of ${repo.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setGraphOpen(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setGraphOpen(true);
+                  }
+                }}
+                className="-my-1 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-paper-2 hover:text-signal-ink focus-visible:outline-2 focus-visible:outline-(--color-focus)"
+              >
+                <GitGraphIcon className="size-3.5" />
+              </span>
+            </Tooltip>
+          )}
           {repo.labels.map((label) => (
             <LabelBadge key={label} label={label} color={colorOf(label)} className="shrink-0" />
           ))}
@@ -633,6 +659,7 @@ function RepoCard({
         <RepoPromptsEditor repoId={repo.id} />
         </fieldset>
       </CardContent>
+      <GitGraphDialog repoId={repo.id} repoName={repo.name} open={graphOpen} onOpenChange={setGraphOpen} />
     </Card>
   );
 }

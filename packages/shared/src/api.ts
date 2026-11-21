@@ -129,6 +129,26 @@ export interface SetLabelColorRequest {
 }
 /** DELETE /api/repos/:id → { ok: true } (refused with 409 while it has tasks in the queue) */
 
+/** GET /api/repos/:id/graph?limit=<n> → RepoGraph (read-only `git log --all`, newest first) */
+export interface GraphCommit {
+  hash: string;
+  parents: string[];
+  author: string;
+  email: string;
+  /** Author date, ISO 8601. */
+  date: string;
+  subject: string;
+  /** Refs pointing at this commit, as git prints them: "HEAD -> main", "origin/main", "tag: v1.0". */
+  refs: string[];
+}
+export interface RepoGraph {
+  commits: GraphCommit[];
+  /** The checked-out branch (or commit, when detached). */
+  head: string | null;
+  /** True when there are older commits past the limit. */
+  more: boolean;
+}
+
 /** GET /api/fs/browse?path=<abs>&host=<ssh host> (defaults to home; host omitted = this Mac) */
 export interface FsBrowseResponse {
   path: string;

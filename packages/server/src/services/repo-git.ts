@@ -1,5 +1,5 @@
 import { rm } from "node:fs/promises";
-import type { Repo, Task } from "@my-ai-slaves/shared";
+import type { GraphCommit, Repo, RepoGraph, Task } from "@my-ai-slaves/shared";
 import { type GitIdentity, gitIdentityEnv } from "../providers/types";
 import { runOn } from "../remote/machine";
 import { git, gitOk, run } from "./git";
@@ -66,6 +66,45 @@ export class RepoGit {
       added.push(await this.git(repo, ["diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file], [1]));
     }
     return { patch: [tracked, ...added].filter((p) => p.trim()).join(""), ref, from };
+  }
+
+  /**
+   * The commit graph of every branch, tag and remote branch (newest first), for the repo's graph view.
+   * Read-only: `git log --all`.
+   */
+  async graph(repo: Repo, limit: number): Promise<RepoGraph> {
+    const head = await this.currentRef(repo).catch(() => null);
+    // Unit separator between fields, record separator between commits: neither appears in git output.
+    const format = ["%H", "%P", "%an", "%ae", "%aI", "%s", "%D"].join("%x1f") + "%x1e";
+    const out = await this.git(repo, [
+      "log",
+      "--all",
+      "--date-order",
+      "--no-color",
+      `--max-count=${limit + 1}`,
+      `--format=${format}`,
+    ]).catch((error: unknown) => {
+      // A repo without commits has nothing to draw.
+      if (head === null) return "";
+      throw error;
+    });
+    const commits: GraphCommit[] = [];
+    for (const record of out.split("\x1e")) {
+      const fields = record.replace(/^\s+/, "").split("\x1f");
+      if (fields.length < 7 || !fields[0]) continue;
+      const [hash, parents, author, email, date, subject, refs] = fields as [string, string, string, string, string, string, string];
+      commits.push({
+        hash,
+        parents: parents.split(" ").filter(Boolean),
+        author,
+        email,
+        date,
+        subject,
+        refs: refs.split(", ").map((r) => r.trim()).filter(Boolean),
+      });
+    }
+    const more = commits.length > limit;
+    return { commits: commits.slice(0, limit), head, more };
   }
 
   /** Read-only diff of a branch made by an older version of the app (`ai/<task-id>`), for tasks still queued. */

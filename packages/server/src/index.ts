@@ -62,7 +62,7 @@ await app.register(fastifyWebsocket);
 app.register(async (scope) => {
   scope.get("/ws", { websocket: true }, (socket) => hub.handle(socket));
 });
-registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments, prompts });
+registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments, prompts, git });
 
 let closeVite: (() => Promise<void>) | null = null;
 if (isProduction) {
