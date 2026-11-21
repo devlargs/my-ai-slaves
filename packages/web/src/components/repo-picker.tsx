@@ -47,24 +47,25 @@ export function RepoPicker({
 
   // Filter the list by label (remembered across visits). Ticked repos always stay visible so they can be unticked.
   const [filter, setFilter] = useState<string | null>(() => storageGet(FILTER_KEY) || null);
-  const pickFilter = (next: string | null) => {
-    setFilter(next);
-    storageSet(FILTER_KEY, next ?? "");
-  };
   const labels = useMemo(() => collectLabels(repos), [repos]);
   const hasUnlabelled = repos.some((r) => r.labels.length === 0);
   const activeFilter =
     filter === NO_LABEL && hasUnlabelled
       ? NO_LABEL
       : (labels.find((l) => l.toLowerCase() === filter?.toLowerCase()) ?? null);
-  const shown = repos.filter(
-    (r) =>
-      activeFilter === null ||
-      selected.has(r.id) ||
-      (activeFilter === NO_LABEL
-        ? r.labels.length === 0
-        : r.labels.some((l) => l.toLowerCase() === activeFilter.toLowerCase())),
-  );
+  const matches = (r: RepoView, f: string | null) =>
+    f === null ||
+    (f === NO_LABEL ? r.labels.length === 0 : r.labels.some((l) => l.toLowerCase() === f.toLowerCase()));
+  const shown = repos.filter((r) => selected.has(r.id) || matches(r, activeFilter));
+
+  // Changing the label resets the selection: just one repo with that label (the main one if it has it).
+  const pickFilter = (next: string | null) => {
+    setFilter(next);
+    storageSet(FILTER_KEY, next ?? "");
+    if (next === activeFilter) return;
+    const first = main && matches(main, next) ? main : repos.find((r) => matches(r, next));
+    if (first) onChange({ main: first.id, extras: [] });
+  };
 
   const toggle = (repo: RepoView) => {
     if (!main || machine(repo) !== machine(main)) return onChange({ main: repo.id, extras: [] });
