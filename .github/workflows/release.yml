@@ -17,8 +17,8 @@ permissions:
   contents: write
 
 # One release at a time, and a run that has started is never cancelled:
-# stopping one between the version-bump push and the GitHub Release would leave
-# a bumped package.json with no release, so the next run would skip a number. A
+# stopping one between the GitHub Release and the version-bump push would leave
+# a release with no bump commit. A
 # newer push waits for the running release instead. GitHub keeps only the newest
 # waiting run, which is fine: every run releases the tip of main (see the
 # version job), so the newest one covers the pushes it replaced.
@@ -32,30 +32,55 @@ jobs:
   # succeeded.
   #
   # It reads the branch tip, not the commit that triggered the run: a run that
-  # waited behind another release has to see that release's version bump, or it
-  # would compute the same version again. Every later job uses the commit
-  # resolved here, so the checks, both builds and the tag all cover one commit.
+  # waited behind another release has to see what that release already shipped.
+  # Every later job uses the commit resolved here, so the checks, both builds and
+  # the tag all cover one commit.
+  #
+  # Every version needs a change behind it: if nothing but version bumps landed
+  # since the last release tag (the previous run already shipped this run's
+  # commit), the run stops here and no version is minted.
   version:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       sha: ${{ steps.version.outputs.sha }}
+      release: ${{ steps.version.outputs.release }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
+          # Full history and tags, to find the last release and what came after it.
+          fetch-depth: 0
 
       - name: Compute next patch version
         id: version
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          CURRENT=$(node -p "require('./package.json').version")
+
+          LAST_TAG=$(git tag --list 'v*.*.*' --merged HEAD --sort=-v:refname | head -n1)
+          if [ -n "$LAST_TAG" ]; then
+            CHANGES=$(git log --format='%h %s' "$LAST_TAG..HEAD" | grep -v ' chore: bump version to v' || true)
+            if [ -z "$CHANGES" ]; then
+              echo "::notice::Nothing new since $LAST_TAG, skipping the release."
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Changes since $LAST_TAG:"
+            echo "$CHANGES"
+          fi
+
+          # The higher of package.json and the last tag: a release whose bump
+          # commit couldn't land (main moved, see the release job) still counts.
+          PKG=$(node -p "require('./package.json').version")
+          CURRENT=$(printf '%s\n%s\n' "$PKG" "${LAST_TAG#v}" | sort -V | tail -n1)
           IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
           echo "version=$MAJOR.$MINOR.$((PATCH + 1))" >> "$GITHUB_OUTPUT"
+          echo "release=true" >> "$GITHUB_OUTPUT"
 
   # The in-app updater offers every release, so a commit that fails these must not ship.
   checks:
     needs: version
+    if: needs.version.outputs.release == 'true'
     uses: ./.github/workflows/checks.yml
     with:
       ref: ${{ needs.version.outputs.sha }}
@@ -120,11 +145,13 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      SHA: ${{ needs.version.outputs.sha }}
 
     steps:
+      # The exact commit that was built, so the bump commit sits right on top of it.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ needs.version.outputs.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v7
@@ -137,7 +164,27 @@ jobs:
           path: release
           merge-multiple: true
 
+      # The tag goes on the commit that was built, not on whatever main is now,
+      # so a release never claims commits that aren't in its installers.
+      # GitHub records a sha256 digest for every uploaded asset; the in-app
+      # updater verifies each download against it before installing.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ env.SHA }}
+          name: v${{ env.VERSION }}
+          generate_release_notes: true
+          files: |
+            release/My-AI-Slaves-arm64.dmg
+            release/My-AI-Slaves-x64.dmg
+            release/My-AI-Slaves-Setup.exe
+
       # Pushed with GITHUB_TOKEN, so this commit doesn't start another release.
+      # It only lands when main is still the built commit: if commits arrived
+      # during the build, rebasing the bump on top of them would put
+      # "bump version" after changes this release doesn't contain, and the run
+      # those commits queued bumps past this version instead.
       - name: Commit version bump
         run: |
           npm version "$VERSION" --no-git-tag-version
@@ -145,21 +192,6 @@ jobs:
           git config user.email "devlargs@gmail.com"
           git add package.json package-lock.json
           git commit -m "chore: bump version to v$VERSION"
-          # Main may have moved while the builds ran. Only this job changes the
-          # version field, so the bump rebases cleanly on top of those commits,
-          # and the run they queued releases them next.
-          git pull --rebase
-          git push
-
-      # GitHub records a sha256 digest for every uploaded asset; the in-app
-      # updater verifies each download against it before installing.
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: v${{ env.VERSION }}
-          name: v${{ env.VERSION }}
-          generate_release_notes: true
-          files: |
-            release/My-AI-Slaves-arm64.dmg
-            release/My-AI-Slaves-x64.dmg
-            release/My-AI-Slaves-Setup.exe
+          if ! git push origin "HEAD:refs/heads/${GITHUB_REF_NAME}"; then
+            echo "::notice::main moved during the build; v$VERSION is tagged on $SHA and the next release bumps package.json."
+          fi
