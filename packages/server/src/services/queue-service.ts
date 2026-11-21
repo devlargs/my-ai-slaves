@@ -723,7 +723,7 @@ export class QueueService {
         kind: "user",
         text: isReply ? (task.pendingReply ?? "") : task.message,
         reply: isReply,
-        attachments: runFiles.map((a) => a.name),
+        attachments: runFiles.map(({ id, name, mime, size }) => ({ id, name, mime, size })),
         prompts: isReply ? bound.prompts.map((p) => p.name) : [...repoSent.map((p) => p.name), ...bound.prompts.map((p) => p.name)],
       };
       pushCapped(buffer.events, sent);

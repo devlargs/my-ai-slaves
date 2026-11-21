@@ -1,5 +1,6 @@
 import type {
   AccountView,
+  Attachment,
   ClientMessage,
   RawLine,
   ServerMessage,
@@ -16,7 +17,7 @@ export type LiveItem =
   | { type: "tool"; callId: string; tool: string; summary: string; ok: boolean | null; result: string | null }
   | { type: "file-edit"; path: string }
   | { type: "warning"; text: string }
-  | { type: "user"; text: string; reply: boolean; attachments: string[]; prompts: string[] };
+  | { type: "user"; text: string; reply: boolean; attachments: Attachment[]; prompts: string[] };
 
 export interface LiveState {
   items: LiveItem[];

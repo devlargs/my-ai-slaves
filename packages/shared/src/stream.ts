@@ -1,3 +1,5 @@
+import type { Attachment } from "./schemas/attachment";
+
 /** Normalized live events from either CLI, as streamed to the browser. */
 export type StreamEvent =
   | { kind: "init"; sessionId: string; model: string; permissionMode: string }
@@ -13,7 +15,7 @@ export type StreamEvent =
    * What you sent at the start of a run (the task message, or a reply), so the live output reads as a
    * conversation. Added by the app, never sent to the CLI.
    */
-  | { kind: "user"; text: string; reply: boolean; attachments: string[]; prompts: string[] };
+  | { kind: "user"; text: string; reply: boolean; attachments: Attachment[]; prompts: string[] };
 
 export interface RawLine {
   src: "stdout" | "stderr";

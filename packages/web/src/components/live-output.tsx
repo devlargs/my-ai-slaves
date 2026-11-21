@@ -9,7 +9,9 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
+import { PREVIEWABLE_IMAGE_TYPES } from "@my-ai-slaves/shared";
 import { memo, useEffect, useRef, useState } from "react";
+import { AttachmentList } from "@/components/attachments";
 import { Markdown } from "@/components/markdown";
 import { Switch } from "@/components/ui/switch";
 import { type LiveItem, type LiveState, useStoreTransition } from "@/lib/store";
@@ -168,11 +170,12 @@ const LiveRow = memo(function LiveRow({ item }: { item: LiveItem }) {
               {item.attachments.length > 0 && (
                 <span className="flex min-w-0 items-center gap-1" title="Attached files">
                   <PaperclipIcon className="size-3 shrink-0" />
-                  <span className="truncate">{item.attachments.join(", ")}</span>
+                  <span className="truncate">{item.attachments.map((a) => a.name).join(", ")}</span>
                 </span>
               )}
             </div>
           )}
+          <AttachmentList files={item.attachments.filter((a) => PREVIEWABLE_IMAGE_TYPES.includes(a.mime))} />
         </div>
       );
     case "message":
