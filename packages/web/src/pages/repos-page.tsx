@@ -29,11 +29,15 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { api, attempt } from "@/lib/api";
 import { setRepoNames, useApi } from "@/lib/hooks";
 import { useStore } from "@/lib/store";
-import { cn, storageGet, storageSet } from "@/lib/utils";
+import { cn, storageGet, storageRemove, storageSet } from "@/lib/utils";
+
+// Expanded repos used to be remembered; drop the stale key.
+storageRemove("slaves.expandedRepos");
 
 export function ReposPage() {
   const { data: repos, setData, reload } = useApi<RepoView[]>(() => api.getRepos(), [], "repos");
-  const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded());
+  // Every repo starts collapsed each time the page opens.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   const sorted = useMemo(
     () => [...(repos ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })),
@@ -44,7 +48,6 @@ export function ReposPage() {
     setExpanded((prev) => {
       const next = new Set(prev);
       change(next);
-      storageSet(EXPANDED_KEY, JSON.stringify([...next]));
       return next;
     });
   const toggle = (id: string) => updateExpanded((set) => (set.has(id) ? set.delete(id) : set.add(id)));
@@ -299,7 +302,6 @@ function RegisterRepoCard({ onRegistered }: { onRegistered: (repo: RepoView) => 
   );
 }
 
-const EXPANDED_KEY = "slaves.expandedRepos";
 const FILTER_KEY = "slaves.repoLabelFilter";
 /** Filter value for repos without any label (labels can't contain control characters, so no clash). */
 const NO_LABEL = "\u0000none";
@@ -427,15 +429,6 @@ function LabelsEditor({
       </span>
     </div>
   );
-}
-
-function loadExpanded(): Set<string> {
-  try {
-    const ids = JSON.parse(storageGet(EXPANDED_KEY) ?? "[]");
-    return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : []);
-  } catch {
-    return new Set();
-  }
 }
 
 function RepoCard({
