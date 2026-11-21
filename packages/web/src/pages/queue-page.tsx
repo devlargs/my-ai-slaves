@@ -17,7 +17,7 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityTimeline } from "@/components/activity-timeline";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import {
@@ -73,11 +73,25 @@ export function QueuePage() {
   const tasksLoaded = useStore((s) => s.tasksLoaded);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = tasks.find((t) => t.id === selectedId) ?? null;
-  const [lastSelected, setLastSelected] = useState<TaskView | null>(null);
+  const previousTasks = useRef<TaskView[]>(tasks);
 
+  // When the open task leaves the queue (marked finished, discarded, deleted), open the task that was next in
+  // line (or the one before it if it was last). With nothing left, fall back to the empty placeholder.
   useEffect(() => {
-    if (selected) setLastSelected(selected);
-  }, [selected]);
+    const before = previousTasks.current;
+    previousTasks.current = tasks;
+    if (!selectedId || tasks.some((t) => t.id === selectedId)) return;
+    const index = before.findIndex((t) => t.id === selectedId);
+    if (index === -1) return;
+    const remaining = new Set(tasks.map((t) => t.id));
+    const next =
+      before.slice(index + 1).find((t) => remaining.has(t.id)) ??
+      before
+        .slice(0, index)
+        .reverse()
+        .find((t) => remaining.has(t.id));
+    setSelectedId(next?.id ?? null);
+  }, [tasks, selectedId]);
 
   // Auto-select the running task if nothing is selected.
   useEffect(() => {
@@ -115,20 +129,6 @@ export function QueuePage() {
       <div className="min-w-0 flex-1">
         {selected ? (
           <TaskDetail key={selected.id} task={selected} />
-        ) : lastSelected && selectedId === lastSelected.id ? (
-          <div className="p-8 text-[13px] text-muted-foreground">
-            <p>
-              <span className="font-medium text-ink">{lastSelected.title}</span> has left the queue. Its full record is
-              on the{" "}
-              <a href="#/history" className="text-signal-ink underline-offset-4 hover:underline">
-                History
-              </a>{" "}
-              page.
-            </p>
-            <Button className="mt-4" size="sm" variant="outline" onClick={() => setSelectedId(null)}>
-              Close
-            </Button>
-          </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
             <MousePointerClickIcon className="size-5 text-muted-foreground" />
