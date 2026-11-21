@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * The desktop app's update control. Always there in the app (nothing in a browser tab): the version
- * and a check button, which becomes "Update to vX" as soon as a newer release is found (checked on
+ * and a check button, which becomes a "Check for updates" install button as soon as a newer release is found (checked on
  * launch and every 6 hours), then the download's progress.
  */
 export function UpdateControl({ className }: { className?: string }) {
@@ -18,8 +18,8 @@ export function UpdateControl({ className }: { className?: string }) {
   if (status === "available") {
     return (
       <div className={cn("flex flex-col gap-1.5", className)}>
-        <InstallButton newVersion={newVersion} className="w-full" />
-        <span className="num text-center text-[11px] text-muted-foreground">You have v{currentVersion}</span>
+        <InstallButton newVersion={newVersion} label="Check for updates" className="w-full" />
+        <span className="num text-center text-[11px] text-muted-foreground">v{currentVersion}</span>
       </div>
     );
   }
@@ -73,7 +73,16 @@ export function UpdateControl({ className }: { className?: string }) {
 }
 
 /** Asks first: updating quits the app, which stops running tasks. */
-export function InstallButton({ newVersion, className }: { newVersion: string | null; className?: string }) {
+export function InstallButton({
+  newVersion,
+  label,
+  className,
+}: {
+  newVersion: string | null;
+  /** Button text; defaults to "Update to vX". */
+  label?: string;
+  className?: string;
+}) {
   const running = useStore((s) => s.tasks.filter((t) => t.status === "running").length);
   return (
     <ConfirmButton
@@ -99,7 +108,7 @@ export function InstallButton({ newVersion, className }: { newVersion: string | 
       confirmLabel="Update and restart"
       onConfirm={() => void desktopAction(() => desktop!.installUpdate())}
     >
-      <DownloadIcon /> Update to v{newVersion}
+      <DownloadIcon /> {label ?? `Update to v${newVersion}`}
     </ConfirmButton>
   );
 }
