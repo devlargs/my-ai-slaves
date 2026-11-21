@@ -154,8 +154,8 @@ const LiveRow = memo(function LiveRow({ item }: { item: LiveItem }) {
   switch (item.type) {
     case "user":
       return (
-        <div className="my-1.5 ml-auto flex w-fit max-w-[85%] min-w-0 flex-col gap-1.5 rounded-lg border border-signal/25 bg-signal-soft/50 px-3 py-2">
-          <span className="label-mono text-[10px] text-signal-ink">{item.reply ? "Your reply" : "Your task"}</span>
+        <div className="my-1.5 ml-auto flex w-fit max-w-[85%] min-w-0 flex-col gap-1.5 rounded-lg border border-rule-strong bg-paper-3 px-3 py-2">
+          <span className="label-mono text-[10px] text-muted-foreground">{item.reply ? "Your reply" : "Your task"}</span>
           <Markdown>{item.text}</Markdown>
           {(item.prompts.length > 0 || item.attachments.length > 0) && (
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
