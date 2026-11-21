@@ -85,9 +85,7 @@ export function LiveOutput({ taskId }: { taskId: string }) {
             {showEarlier(hiddenRaw, RAW_WINDOW * 2, (step) => setRawLimit((n) => n + step))}
             {shownRaw.map((r, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only
-              <div key={hiddenRaw + i} className={cn(r.src === "stderr" && "text-danger-ink")}>
-                {r.line}
-              </div>
+              <RawRow key={hiddenRaw + i} line={r} />
             ))}
           </pre>
         ) : (
@@ -95,7 +93,9 @@ export function LiveOutput({ taskId }: { taskId: string }) {
             {showEarlier(hiddenItems, ITEM_WINDOW * 2, (step) => setItemLimit((n) => n + step))}
             {shownItems.map((item, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only
-              <LiveRow key={hiddenItems + i} item={item} />
+              <div key={hiddenItems + i} className="offscreen-skip">
+                <LiveRow item={item} />
+              </div>
             ))}
             {streaming && (
               <div>
@@ -141,6 +141,12 @@ function StreamingMarkdown({ text }: { text: string }) {
     </div>
   );
 }
+
+// Raw lines are appended, never changed: each row renders once instead of on every flush (up to
+// 1000 rows, ten times a second while a task runs).
+const RawRow = memo(function RawRow({ line }: { line: LiveState["raw"][number] }) {
+  return <div className={cn("offscreen-skip", line.src === "stderr" && "text-danger-ink")}>{line.line}</div>;
+});
 
 // Items never change once added (a finished tool call is replaced by a new object), so a row
 // re-renders only when its own item does, and old messages aren't re-parsed on every token.

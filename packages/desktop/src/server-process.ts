@@ -26,9 +26,9 @@ export interface ServerHandle {
   onExit(callback: (code: number | null, signal: NodeJS.Signals | null) => void): void;
 }
 
-export function startServer(opts: ServerOptions): ServerHandle {
-  fs.writeFileSync(opts.logFile, `--- ${new Date().toISOString()} starting on port ${opts.port}, data: ${opts.dataDir}\n`);
-  const log = fs.openSync(opts.logFile, "a");
+export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
+  await fs.promises.writeFile(opts.logFile, `--- ${new Date().toISOString()} starting on port ${opts.port}, data: ${opts.dataDir}\n`);
+  const log = await fs.promises.open(opts.logFile, "a");
   let child: ChildProcess;
   try {
     child = fork(opts.entry, [], {
@@ -40,11 +40,12 @@ export function startServer(opts: ServerOptions): ServerHandle {
         SLAVES_PORT: String(opts.port),
         SLAVES_WEB_DIR: opts.webDir,
       },
-      stdio: ["ignore", log, log, "ipc"],
+      stdio: ["ignore", log.fd, log.fd, "ipc"],
       windowsHide: true,
     });
   } finally {
-    fs.closeSync(log);
+    // The child has its own copy of the descriptor by now.
+    await log.close();
   }
 
   let exited = false;

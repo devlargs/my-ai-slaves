@@ -43,7 +43,11 @@ export function UpdateControl({ className }: { className?: string }) {
           <span className="num">{percent}%</span>
         </div>
         <div className="h-1 overflow-hidden rounded-full bg-paper-3">
-          <div className="h-full rounded-full bg-signal transition-[width] duration-300" style={{ width: `${percent}%` }} />
+          {/* Slid in with transform (composited), not by animating width (a layout per frame). */}
+          <div
+            className="h-full w-full rounded-full bg-signal transition-transform duration-300"
+            style={{ transform: `translateX(${percent - 100}%)` }}
+          />
         </div>
       </div>
     );

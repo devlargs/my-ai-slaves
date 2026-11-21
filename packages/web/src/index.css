@@ -159,6 +159,12 @@
     scrollbar-width: thin;
     scrollbar-color: var(--color-rule-strong) transparent;
   }
+  /* Rows of a long, growing list (live output): Chromium skips layout and paint for the ones
+     scrolled out of view, and remembers each row's real height once it has been shown. */
+  .offscreen-skip {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 1.5rem;
+  }
 }
 
 /* react-diff-view theming */

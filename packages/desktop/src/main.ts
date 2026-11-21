@@ -37,6 +37,9 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function main() {
+  // Reading the login shell's PATH can take a second or more (nvm & co. in .zshrc): start it now, so
+  // it runs while Electron gets ready and the data folder is resolved instead of after them.
+  const envReady = serverBaseEnv();
   await app.whenReady();
   setMenu();
 
@@ -46,8 +49,8 @@ async function main() {
     return;
   }
   dataDir = chosen;
-  serverEnv = await serverBaseEnv();
-  fs.mkdirSync(app.getPath("logs"), { recursive: true });
+  serverEnv = await envReady;
+  await fs.promises.mkdir(app.getPath("logs"), { recursive: true });
 
   const getToken = createTokenSource(() => serverEnv);
   updater = createUpdater({ getToken, onChange: broadcastUpdateState });
@@ -58,7 +61,7 @@ async function main() {
 
 /** Starts the server and waits for it. False when it couldn't start (the app is quitting then). */
 async function bootServer(): Promise<boolean> {
-  server = startServer({ entry: SERVER_ENTRY, webDir: WEB_DIR, dataDir, port: PORT, env: serverEnv, logFile: logFile() });
+  server = await startServer({ entry: SERVER_ENTRY, webDir: WEB_DIR, dataDir, port: PORT, env: serverEnv, logFile: logFile() });
   const result = await server.started;
   if (result.ok) {
     server.onExit((code, signal) => void onServerDied(code, signal));
@@ -131,6 +134,16 @@ function createWindow() {
   });
   const win = mainWindow;
   win.once("ready-to-show", () => win.show());
+  // backgroundThrottling stays off while the window is merely behind another app (see above), but
+  // that also keeps the page "visible" when minimized or hidden: animations kept painting and the
+  // UI's document.hidden checks never fired. Throttle while nobody can see the window at all.
+  const throttle = (on: boolean) => {
+    if (!win.isDestroyed()) win.webContents.setBackgroundThrottling(on);
+  };
+  win.on("minimize", () => throttle(true));
+  win.on("hide", () => throttle(true));
+  win.on("restore", () => throttle(false));
+  win.on("show", () => throttle(win.isMinimized()));
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });

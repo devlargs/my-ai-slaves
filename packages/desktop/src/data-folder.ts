@@ -18,20 +18,29 @@ function configFile(): string {
   return path.join(app.getPath("userData"), "desktop.json");
 }
 
-function readConfig(): DesktopConfig {
+async function readConfig(): Promise<DesktopConfig> {
   try {
-    const parsed = JSON.parse(fs.readFileSync(configFile(), "utf8")) as unknown;
+    const parsed = JSON.parse(await fs.promises.readFile(configFile(), "utf8")) as unknown;
     return parsed && typeof parsed === "object" ? (parsed as DesktopConfig) : {};
   } catch {
     return {};
   }
 }
 
-function writeConfig(config: DesktopConfig): void {
-  fs.mkdirSync(path.dirname(configFile()), { recursive: true });
+async function writeConfig(config: DesktopConfig): Promise<void> {
+  await fs.promises.mkdir(path.dirname(configFile()), { recursive: true });
   const tmp = `${configFile()}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`);
-  fs.renameSync(tmp, configFile());
+  await fs.promises.writeFile(tmp, `${JSON.stringify(config, null, 2)}\n`);
+  await fs.promises.rename(tmp, configFile());
+}
+
+async function exists(dir: string): Promise<boolean> {
+  try {
+    await fs.promises.access(dir);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** True when `dir` already holds this app's data. */
@@ -44,17 +53,17 @@ export function meaningfulEntries(entries: readonly string[]): string[] {
   return entries.filter((name) => name !== ".DS_Store" && name !== "Thumbs.db" && name !== "desktop.ini");
 }
 
-function listDir(dir: string): string[] {
+async function listDir(dir: string): Promise<string[]> {
   try {
-    return fs.readdirSync(dir);
+    return await fs.promises.readdir(dir);
   } catch {
     return [];
   }
 }
 
 /** The saved data folder, or null when none is saved yet (or it was set by SLAVES_DATA_DIR). */
-export function savedDataFolder(): string | null {
-  return readConfig().dataDir ?? null;
+export async function savedDataFolder(): Promise<string | null> {
+  return (await readConfig()).dataDir ?? null;
 }
 
 /**
@@ -77,11 +86,11 @@ async function pickFolder(parent: BrowserWindow | null, current: string | null):
     const chosen = result.canceled ? undefined : result.filePaths[0];
     if (!chosen) return null;
 
-    const entries = meaningfulEntries(listDir(chosen));
+    const entries = meaningfulEntries(await listDir(chosen));
     if (entries.length === 0 || looksLikeDataFolder(entries)) return chosen;
     // Picked the checkout instead of its hidden .data folder: use the .data inside it.
     const dotData = path.join(chosen, ".data");
-    if (entries.includes(".data") && looksLikeDataFolder(listDir(dotData))) return dotData;
+    if (entries.includes(".data") && looksLikeDataFolder(await listDir(dotData))) return dotData;
 
     const inside = path.join(chosen, SUBFOLDER_NAME);
     const answer = await dialog.showMessageBox({
@@ -102,8 +111,8 @@ async function pickFolder(parent: BrowserWindow | null, current: string | null):
  * launch, or the saved folder is gone). Null means the user quit instead.
  */
 export async function ensureDataFolder(): Promise<string | null> {
-  const saved = savedDataFolder();
-  if (saved && fs.existsSync(saved)) return saved;
+  const saved = await savedDataFolder();
+  if (saved && (await exists(saved))) return saved;
 
   const first = !saved;
   const answer = await dialog.showMessageBox({
@@ -117,15 +126,15 @@ export async function ensureDataFolder(): Promise<string | null> {
     cancelId: first ? 1 : 2,
   });
   if (!first && answer.response === 1 && saved) {
-    fs.mkdirSync(saved, { recursive: true });
+    await fs.promises.mkdir(saved, { recursive: true });
     return saved;
   }
   if (answer.response !== 0) return null;
 
   const chosen = await pickFolder(null, saved);
   if (!chosen) return null;
-  fs.mkdirSync(chosen, { recursive: true });
-  writeConfig({ ...readConfig(), dataDir: chosen });
+  await fs.promises.mkdir(chosen, { recursive: true });
+  await writeConfig({ ...(await readConfig()), dataDir: chosen });
   return chosen;
 }
 
@@ -145,8 +154,8 @@ export async function changeDataFolder(parent: BrowserWindow | null, current: st
     cancelId: 1,
   });
   if (answer.response !== 0) return false;
-  fs.mkdirSync(chosen, { recursive: true });
-  writeConfig({ ...readConfig(), dataDir: chosen });
+  await fs.promises.mkdir(chosen, { recursive: true });
+  await writeConfig({ ...(await readConfig()), dataDir: chosen });
   // The relaunched app inherits this environment, and SLAVES_DATA_DIR wins over the saved folder:
   // drop it so the restart really opens the folder just chosen.
   delete process.env.SLAVES_DATA_DIR;
