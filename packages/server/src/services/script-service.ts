@@ -204,6 +204,15 @@ export class ScriptService {
         finish(null, (error as NodeJS.ErrnoException).code === "ENOENT" ? `Command not found: ${command}` : error.message),
       );
       child.on("close", (code) => finish(code));
+      // A leftover grandchild can keep the output pipes (and so "close") open after the process exits.
+      child.on("exit", (code) => {
+        setTimeout(() => {
+          if (state.info.status !== "running") return;
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          finish(code);
+        }, 2000).unref();
+      });
     });
 
     this.listener.scriptUpdated(repo.id, state.info);
@@ -219,8 +228,10 @@ export class ScriptService {
     const signal = (sig: "INT" | "TERM" | "KILL") => {
       if (host) {
         if (state.remotePid && /^\d+$/.test(state.remotePid)) {
-          // The script's children first (the dev server), then the package manager itself.
-          void scriptOn(host, `pkill -${sig} -P ${state.remotePid}; kill -${sig} ${state.remotePid}`, 15_000).catch(() => {});
+          // The package manager and everything under it (the script's shell, the dev server it started, …),
+          // collected before any of them is signalled so nothing gets reparented out of reach.
+          const tree = 't() { echo "$1"; for c in $(pgrep -P "$1"); do t "$c"; done; }';
+          void scriptOn(host, `${tree}; kill -${sig} $(t ${state.remotePid}) 2>/dev/null; true`, 15_000).catch(() => {});
         }
         if (sig === "KILL") child.kill("SIGKILL");
       } else if (process.platform === "win32") {

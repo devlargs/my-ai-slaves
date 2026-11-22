@@ -87,7 +87,7 @@ describe("repo scripts", () => {
   it.skipIf(process.platform === "win32")("runs and stops scripts on an SSH host", async () => {
     await chmod(FAKE_SSH, 0o755);
     process.env.SLAVES_SSH_BIN = FAKE_SSH;
-    const dir = await repoWith({ hello: node("console.log('remote hi')"), serve: node("setInterval(() => {}, 1000)") });
+    const dir = await repoWith({ hello: node("console.log('remote hi')"), serve: `${node("setInterval(() => {}, 1000)")} && echo bye` });
     const { scripts, chunks, ended } = service();
     expect((await scripts.list(repo(dir, "devbox"))).scripts.map((s) => s.name)).toEqual(["hello", "serve"]);
     await scripts.run(repo(dir, "devbox"), "hello");
