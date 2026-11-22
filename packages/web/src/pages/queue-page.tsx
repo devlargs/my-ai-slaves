@@ -39,6 +39,7 @@ import {
 } from "@/components/prompt-picker";
 import { PanelHeader } from "@/components/page-header";
 import { RepoPicker, type RepoSelection } from "@/components/repo-picker";
+import { ResizeHandle, useResizableWidth } from "@/components/resize-handle";
 import { SortableList } from "@/components/sortable-list";
 import { TaskStatusBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
@@ -103,9 +104,12 @@ export function QueuePage() {
     if (running) setSelectedId(running.id);
   }, [tasks, selectedId]);
 
+  const listWidth = useResizableWidth({ key: "slaves.queueWidth", initial: 420, min: 300, max: 900, reserve: 640 });
+
   return (
     <div className="flex h-full min-h-0">
-      <div className="flex w-105 shrink-0 flex-col border-r border-rule">
+      <div className="relative flex shrink-0 flex-col border-r border-rule" style={{ width: listWidth.width }}>
+        <ResizeHandle {...listWidth} label="Resize the queue panel" />
         <PanelHeader>
           <h2 className="title-display text-[15px]">Queue</h2>
           <span className="num rounded-full bg-paper-2 px-1.5 text-[11px] font-medium text-muted-foreground">

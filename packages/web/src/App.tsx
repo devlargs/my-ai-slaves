@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useDeferredValue, useEffect, useState } from "react";
 import { UpdateControl } from "@/components/desktop-update";
+import { ResizeHandle, useResizableWidth } from "@/components/resize-handle";
 import { LiveDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -85,8 +86,15 @@ function Sidebar({ route }: { route: Route }) {
   const running = tasks.filter((t) => t.status === "running").length;
   const review = tasks.filter((t) => t.status === "needs-review").length;
 
+  const navWidth = useResizableWidth({ key: "slaves.sidebarWidth", initial: 224, min: 180, max: 400, reserve: 900 });
+
   return (
-    <nav aria-label="Main" className="flex w-56 shrink-0 flex-col border-r border-rule bg-paper-2">
+    <nav
+      aria-label="Main"
+      className="relative flex shrink-0 flex-col border-r border-rule bg-paper-2"
+      style={{ width: navWidth.width }}
+    >
+      <ResizeHandle {...navWidth} label="Resize the sidebar" />
       <div className="flex flex-col gap-1 px-4 pt-4 pb-5">
         <div className="flex items-center gap-2">
           <Mark />
