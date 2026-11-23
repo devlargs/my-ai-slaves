@@ -32,6 +32,8 @@ const LIVE_BUFFER_LIMIT = 5000;
 // its buffer: capped by size as well as by count, so the server's memory stays bounded.
 const RAW_BUFFER_MAX_CHARS = 4_000_000;
 const MAX_TIMER_MS = 60 * 60 * 1000;
+/** Usage-limit / logged-out runs allowed per account in a task's chain before the task stops re-queueing. */
+const MAX_FALLBACKS_PER_ACCOUNT = 2;
 
 interface LiveRun {
   taskId: string;
@@ -406,6 +408,7 @@ export class QueueService {
         session: null,
         replies: [],
         pendingReply: null,
+        fallbacks: 0,
         resumeOnStart: false,
         createdAt: stamp,
         updatedAt: stamp,
@@ -973,6 +976,7 @@ export class QueueService {
         await this.updateTask(task.id, (t) => {
           t.status = "needs-review";
           t.pendingReply = null;
+          t.fallbacks = 0;
           t.session = result.sessionId ? { provider: account.provider, account: account.id, sessionId: result.sessionId } : t.session;
         });
         this.log({
@@ -1002,17 +1006,33 @@ export class QueueService {
           this.log({ ...base, event: "warning", detail: `${account.id} is logged out (${reason}). Log in again on the Settings page.`, data: usage });
         }
 
+        // Each account in the chain gets two goes (one more after its cooldown), then the task stops
+        // here instead of being re-run forever: the failure may only have looked like a limit.
+        const candidates = [task.accountOverride, ...(repo?.accountChain ?? [])].filter((a): a is string => !!a);
+        const maxFallbacks = MAX_FALLBACKS_PER_ACCOUNT * Math.max(1, new Set(candidates).size);
+        if (task.fallbacks + 1 >= maxFallbacks) {
+          const what = result.outcome === "limit" ? "a usage limit" : "a logged-out account";
+          await this.failRun(
+            task,
+            run,
+            `Stopped after ${maxFallbacks} runs that ended on ${what} (last: ${account.id}, ${reason}).`,
+            usage,
+          );
+          break;
+        }
+
         // Fresh runs start over on the next account (the repo is left as it is); replies keep their
         // session and wait for a same-CLI account.
         await this.updateTask(task.id, (t) => {
           t.status = "pending";
           t.currentAccount = null;
+          t.fallbacks += 1;
           if (!run.isReply) t.session = null;
         });
 
         const next = repo
           ? pickAccount({
-              candidates: [task.accountOverride, ...repo.accountChain].filter((a): a is string => !!a),
+              candidates,
               accounts: await this.deps.accounts.listRaw(),
               now: this.now(),
               provider: run.isReply ? task.session?.provider : undefined,
@@ -1035,6 +1055,7 @@ export class QueueService {
       case "cancelled": {
         await this.updateTask(task.id, (t) => {
           t.status = "interrupted";
+          t.fallbacks = 0;
           // Keep the session (a stopped first run has one once the CLI started it) so you can reply.
           if (result.sessionId) t.session = { provider: account.provider, account: account.id, sessionId: result.sessionId };
         });
@@ -1049,27 +1070,32 @@ export class QueueService {
       }
 
       case "failed": {
-        const data = { exitCode: result.exitCode, stderrTail: result.stderrTail, ...usage };
-        if (run.isReply) {
-          // Keep the earlier work: back to review.
-          await this.updateTask(task.id, (t) => {
-            t.status = "needs-review";
-            t.pendingReply = null;
-          });
-          this.log({ ...base, event: "warning", detail: `Reply run failed: ${result.message}`, data });
-          this.deps.broadcaster.taskStatus(task.id, "needs-review", `Reply failed: ${result.message}`);
-        } else {
-          await this.removeTask(task.id);
-          this.log({ ...base, event: "failed", detail: result.message.slice(0, 500), data });
-          this.deps.broadcaster.taskStatus(task.id, "failed", result.message);
-        }
-        this.deps.broadcaster.notify(task.id, "Task failed", `${task.title}: ${result.message.slice(0, 140)}`);
+        await this.failRun(task, run, result.message, { exitCode: result.exitCode, stderrTail: result.stderrTail, ...usage });
         break;
       }
     }
 
     await this.publish();
     void this.tick();
+  }
+
+  /** A failed reply goes back to review (the earlier work stays); a failed first run leaves the queue. */
+  private async failRun(task: Task, run: LiveRun, message: string, data: Record<string, unknown>): Promise<void> {
+    const base = { taskId: task.id, repo: task.repo, account: run.account.id };
+    if (run.isReply) {
+      await this.updateTask(task.id, (t) => {
+        t.status = "needs-review";
+        t.pendingReply = null;
+        t.fallbacks = 0;
+      });
+      this.log({ ...base, event: "warning", detail: `Reply run failed: ${message}`, data });
+      this.deps.broadcaster.taskStatus(task.id, "needs-review", `Reply failed: ${message}`);
+    } else {
+      await this.removeTask(task.id);
+      this.log({ ...base, event: "failed", detail: message.slice(0, 500), data });
+      this.deps.broadcaster.taskStatus(task.id, "failed", message);
+    }
+    this.deps.broadcaster.notify(task.id, "Task failed", `${task.title}: ${message.slice(0, 140)}`);
   }
 }
 

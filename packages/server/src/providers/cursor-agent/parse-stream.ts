@@ -35,6 +35,8 @@ export class CursorStreamParser implements StreamParser {
   private result: Json | null = null;
   private buffer = "";
   private sawDelta = false;
+  /** The agent wrote text or called a tool: its failure is then never read as a limit / logout. */
+  private sawOutput = false;
   /**
    * Cursor's documented result line has no token counts; newer CLIs may add a camelCase `usage`
    * object, which is picked up when it is there.
@@ -67,6 +69,7 @@ export class CursorStreamParser implements StreamParser {
         const text = ((msg.message?.content ?? []) as Json[])
           .map((c) => (typeof c.text === "string" ? c.text : ""))
           .join("");
+        if (text.trim()) this.sawOutput = true;
         const isDelta = "timestamp_ms" in msg && !("model_call_id" in msg);
         if (isDelta) {
           this.sawDelta = true;
@@ -81,6 +84,7 @@ export class CursorStreamParser implements StreamParser {
       }
 
       case "tool_call": {
+        this.sawOutput = true;
         const tool = describeTool((msg.tool_call ?? {}) as Json);
         if (msg.subtype === "started") {
           const events = this.flushText();
@@ -122,11 +126,15 @@ export class CursorStreamParser implements StreamParser {
         costUsd: null,
       };
     }
-    const text = `${stderrTail}\n${this.result?.result ?? ""}`;
-    const limit = detectCursorLimit(text, this.limitPatterns);
-    if (limit) return { outcome: "limit", limit, sessionId: this.sessionId };
-    const loggedOut = detectCursorLoggedOut(text);
-    if (loggedOut) return { outcome: "logged-out", message: loggedOut };
+    // Text that only says "limit" or "401" counts only when the agent never got going: once it has
+    // written or run anything, stderr and the result are its own work (a task about HTTP 429s…).
+    if (!this.sawOutput) {
+      const text = `${stderrTail}\n${this.result?.result ?? ""}`;
+      const limit = detectCursorLimit(text, this.limitPatterns);
+      if (limit) return { outcome: "limit", limit, sessionId: this.sessionId };
+      const loggedOut = detectCursorLoggedOut(text);
+      if (loggedOut) return { outcome: "logged-out", message: loggedOut };
+    }
     return {
       outcome: "failed",
       exitCode: exit.code,

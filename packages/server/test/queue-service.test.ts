@@ -328,6 +328,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
         session: null,
         replies: [],
         pendingReply: null,
+        fallbacks: 0,
         resumeOnStart: false,
         createdAt: "2026-11-18T10:00:00+08:00",
         updatedAt: "2026-11-18T10:00:00+08:00",
@@ -396,6 +397,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
 
     const done = await waitFor(taskWith(queue, created.id, "needs-review"));
     expect(done.currentAccount).toBe("work_2-cursor");
+    expect(done.fallbacks).toBe(0); // reset once a run finishes
     const calls = await received();
     expect(calls.map((c) => `${c.cli}:${c.label}`)).toEqual(["claude:work_1-claude", "cursor:work_2-cursor"]);
     expect(calls.every((c) => c.prompt === FULL("LIMIT:work_1-claude please"))).toBe(true);
@@ -410,6 +412,24 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect((await accounts.list()).find((a) => a.id === "work_1-claude")?.status).toBe("limited");
     const history = await stores.activity.forTask(created.id);
     expect(history.find((e) => e.event === "fallback")?.detail).toBe("work_1-claude hit usage limit, retrying on work_2-cursor");
+  });
+
+  it("counts limit fallbacks and stops re-queueing a task once every account had two goes", async () => {
+    const { queue, stores, accounts, repo } = await setup(["work_1-claude"]);
+    const created = await queue.create({ repo: repo.id, message: "LIMIT:work_1-claude go" });
+    // The only account is limited: the task waits, one fallback counted.
+    const waiting = await waitFor(async () => {
+      const t = (await queue.list()).find((x) => x.id === created.id);
+      return t?.status === "pending" && t.fallbacks === 1 ? t : undefined;
+    });
+    expect(waiting.currentAccount).toBeNull();
+
+    // Its cooldown is over and it hits the "limit" again: that's the cap, so it fails instead of waiting again.
+    await accounts.clearLimit("work_1-claude");
+    await queue.init();
+    await waitFor(async () => (await queue.list()).length === 0);
+    const entry = (await stores.activity.forTask(created.id)).find((e) => e.event === "failed");
+    expect(entry?.detail).toMatch(/^Stopped after 2 runs that ended on a usage limit \(last: work_1-claude, /);
   });
 
   it("a draft sits in the queue and never runs; queueing it replaces it with a real task", async () => {
@@ -837,6 +857,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
         session: null,
         replies: [],
         pendingReply: null,
+        fallbacks: 0,
         resumeOnStart: false,
         createdAt: "2026-11-18T10:00:00+08:00",
         updatedAt: "2026-11-18T10:00:00+08:00",

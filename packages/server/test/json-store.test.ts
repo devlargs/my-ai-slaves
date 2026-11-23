@@ -105,6 +105,7 @@ describe("JsonStore", () => {
       "session",
       "replies",
       "pendingReply",
+      "fallbacks",
       "resumeOnStart",
       "createdAt",
       "updatedAt",

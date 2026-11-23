@@ -1,6 +1,6 @@
 import { formatLocalIso } from "@my-ai-slaves/shared";
 import { describe, expect, it } from "vitest";
-import { detectClaudeLimit } from "../src/providers/claude-code/detect-limit";
+import { detectClaudeLimit, detectClaudeLoggedOut } from "../src/providers/claude-code/detect-limit";
 import { ClaudeStreamParser } from "../src/providers/claude-code/parse-stream";
 import { detectCursorLimit } from "../src/providers/cursor-agent/detect-limit";
 import { CursorStreamParser } from "../src/providers/cursor-agent/parse-stream";
@@ -29,7 +29,7 @@ describe("parseResetTime (local time, Asia/Manila in tests)", () => {
 
 describe("Claude limit detection", () => {
   const now = new Date("2026-11-18T10:00:00+08:00");
-  const facts = { rateLimitRejected: null, assistantErrors: [], result: null, stderrTail: "" };
+  const facts = { rateLimitRejected: null, assistantErrors: [], result: null, stderrTail: "", agentOutput: false };
 
   it("uses resetsAt from rate_limit_event (seconds)", () => {
     const limit = detectClaudeLimit({ ...facts, rateLimitRejected: { resetsAt: 1795500000 } }, now);
@@ -46,6 +46,20 @@ describe("Claude limit detection", () => {
   });
   it("429 without text → limit with unknown reset", () => {
     expect(detectClaudeLimit({ ...facts, result: { is_error: true, api_error_status: 429 } }, now)?.resetsAt).toBeNull();
+  });
+  it("limit / login text counts only at the start of a CLI line, and only when the agent wrote nothing", () => {
+    const text = (result: string, agentOutput = false) => ({ ...facts, agentOutput, result: { is_error: true, result } });
+    expect(detectClaudeLimit(text("Fixed the usage limit banner, but tests fail"), now)).toBeNull();
+    expect(detectClaudeLimit(text("API Error: You've hit your session limit · resets 3:45pm"), now)?.reason).toBe(
+      "API Error: You've hit your session limit · resets 3:45pm",
+    );
+    expect(detectClaudeLimit(text("You've hit your session limit · resets 3:45pm", true), now)).toBeNull();
+    expect(detectClaudeLoggedOut(text("The handler now returns 401 when the key says Invalid API key"))).toBeNull();
+    expect(detectClaudeLoggedOut(text("Invalid API key · Please run /login"))).toBe("Invalid API key");
+    expect(detectClaudeLoggedOut(text("Invalid API key · Please run /login", true))).toBeNull();
+    // Structured signals win either way.
+    expect(detectClaudeLimit({ ...text("x", true), rateLimitRejected: {} }, now)).not.toBeNull();
+    expect(detectClaudeLoggedOut({ ...text("x", true), assistantErrors: ["authentication_failed"] })).not.toBeNull();
   });
   it("529 overloaded is not a limit", () => {
     expect(detectClaudeLimit({ ...facts, assistantErrors: ["server_error"], result: { is_error: true, api_error_status: 529 } }, now)).toBeNull();
@@ -110,6 +124,15 @@ describe("ClaudeStreamParser", () => {
     expect(p.finish(exit1, "").outcome).toBe("logged-out");
   });
 
+  it("a run that did real work and then failed is a failure, whatever its text says", () => {
+    const p = new ClaudeStreamParser("auto");
+    lines(p, [
+      { type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "npm test" } }] }, parent_tool_use_id: null },
+      { type: "result", subtype: "error_during_execution", is_error: true, result: "Not logged in · Please run /login\nYou've hit your session limit" },
+    ]);
+    expect(p.finish(exit1, "usage limit exceeded (429)").outcome).toBe("failed");
+  });
+
   it("reports a limit", () => {
     const p = new ClaudeStreamParser("auto");
     lines(p, [
@@ -149,6 +172,16 @@ describe("CursorStreamParser", () => {
   it("limit from stderr", () => {
     const p = new CursorStreamParser([]);
     expect(p.finish(exit1, "Error: You've reached your usage limit\n").outcome).toBe("limit");
+  });
+
+  it("after the agent wrote or ran something, limit / login words are its own output, not a limit", () => {
+    const p = new CursorStreamParser([]);
+    lines(p, [{ type: "tool_call", subtype: "started", call_id: "k", tool_call: { shellToolCall: { args: { command: "npm test" } } } }]);
+    expect(p.finish(exit1, "expected 429 got 401 Unauthorized\nquota test failed\n")).toMatchObject({ outcome: "failed" });
+    const q = new CursorStreamParser([]);
+    lines(q, [{ type: "assistant", message: { content: [{ type: "text", text: "Looking" }] }, timestamp_ms: 1 }]);
+    expect(q.finish(exit1, "Error: You've reached your usage limit\n").outcome).toBe("failed");
+    expect(new CursorStreamParser([]).finish(exit1, "Error: not logged in\n").outcome).toBe("logged-out");
   });
 
   it("custom patterns replace the defaults", () => {

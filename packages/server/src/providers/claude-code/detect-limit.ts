@@ -15,11 +15,23 @@ export interface ClaudeRunFacts {
     errors?: string[];
   } | null;
   stderrTail: string;
+  /**
+   * The agent produced real output (text or a tool call, not an error message). Then the result
+   * text and stderr are the agent's own words, so they are never searched for limit / login text.
+   */
+  agentOutput: boolean;
 }
 
-const LIMIT_TEXT = /You've hit your [\w\s]*limit[^\n]*|usage limit[^\n]*|Claude AI usage limit reached[^\n]*/i;
-const LOGGED_OUT_TEXT =
-  /Not logged in|Please run \/login|Login expired|OAuth token (?:revoked|has expired)|Invalid API key|Authentication required|OAuth session expired/i;
+/** The CLI's own error lines: matched only at the start of a line (after an optional "Error:" / "API Error:"). */
+const LINE_START = String.raw`^[ \t]*(?:(?:API )?Error:[ \t]*)?`;
+const LIMIT_TEXT = new RegExp(
+  `${LINE_START}(?:You've hit your [\\w ]*limit|You've reached your usage limit|Claude AI usage limit reached)[^\\n]*`,
+  "im",
+);
+const LOGGED_OUT_TEXT = new RegExp(
+  `${LINE_START}(?:Not logged in|Please run /login|Login expired|OAuth token (?:revoked|has expired)|Invalid API key|Authentication required|OAuth session expired)`,
+  "im",
+);
 
 const resultText = (facts: ClaudeRunFacts) =>
   [facts.result?.result ?? "", ...(facts.result?.errors ?? []), facts.stderrTail].join("\n");
@@ -28,12 +40,13 @@ const resultText = (facts: ClaudeRunFacts) =>
  * A run counts as limited when any of these show up:
  *  - rate_limit_event with status "rejected" (uses its resetsAt)
  *  - an assistant message with error "rate_limit"
- *  - result.api_error_status 429, or "You've hit your … limit · resets …" text
+ *  - result.api_error_status 429
+ *  - only when the agent produced no output: a line starting "You've hit your … limit · resets …"
  * 529/overloaded is NOT a usage limit.
  */
 export function detectClaudeLimit(facts: ClaudeRunFacts, now: Date): LimitInfo | null {
   const text = resultText(facts);
-  const textMatch = LIMIT_TEXT.exec(text);
+  const textMatch = facts.agentOutput ? null : LIMIT_TEXT.exec(text);
   const limited =
     facts.rateLimitRejected !== null ||
     facts.assistantErrors.includes("rate_limit") ||
@@ -54,7 +67,10 @@ export function detectClaudeLimit(facts: ClaudeRunFacts, now: Date): LimitInfo |
 }
 
 export function detectClaudeLoggedOut(facts: ClaudeRunFacts): string | null {
-  if (facts.assistantErrors.includes("authentication_failed")) return "Authentication failed: log in again.";
+  if (facts.assistantErrors.includes("authentication_failed") || facts.result?.api_error_status === 401) {
+    return "Authentication failed: log in again.";
+  }
+  if (facts.agentOutput) return null;
   const match = LOGGED_OUT_TEXT.exec(resultText(facts));
-  return match ? match[0] : null;
+  return match ? match[0].trim() : null;
 }

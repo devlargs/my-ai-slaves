@@ -34,6 +34,7 @@ export class ClaudeStreamParser implements StreamParser {
     assistantErrors: [],
     result: null,
     stderrTail: "",
+    agentOutput: false,
   };
   /** Assistant message id → its usage (every message of one turn repeats the same usage). */
   private readonly stepUsage = new Map<string, TokenUsage>();
@@ -95,9 +96,14 @@ export class ClaudeStreamParser implements StreamParser {
         if (typeof msg.error === "string") this.facts.assistantErrors.push(msg.error);
         const id = msg.message?.id;
         if (typeof id === "string" && msg.message?.usage) this.stepUsage.set(id, fromAnthropicUsage(msg.message.usage));
+        const content = (msg.message?.content ?? []) as Json[];
+        // The CLI reports a limit / login error as an assistant message with `error` set: not agent output.
+        if (typeof msg.error !== "string" && content.some((b) => (b.type === "text" && b.text) || b.type === "tool_use")) {
+          this.facts.agentOutput = true;
+        }
         if (!topLevel) return [];
         const events: StreamEvent[] = [];
-        for (const block of (msg.message?.content ?? []) as Json[]) {
+        for (const block of content) {
           if (block.type === "text" && block.text) events.push({ kind: "message", text: block.text });
           if (block.type === "tool_use") {
             events.push({

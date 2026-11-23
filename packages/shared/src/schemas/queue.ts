@@ -93,6 +93,11 @@ export const Task = z.object({
   replies: z.array(TaskReply).default([]),
   /** A reply waiting to be sent to the existing CLI session (status is pending while set). */
   pendingReply: z.string().nullable().default(null),
+  /**
+   * Usage-limit / logged-out fallbacks since the task last finished a run. Capped (see QueueService)
+   * so a run whose failure only looks like a limit can't be re-run on every account forever.
+   */
+  fallbacks: z.int().min(0).default(0),
   /** Set when the app quit for an update mid-run: the run starts again when the app is back. */
   resumeOnStart: z.boolean().default(false),
   createdAt: timestampNow(),
