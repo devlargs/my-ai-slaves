@@ -65,13 +65,12 @@ export function RepoPicker({
     (f === NO_LABEL ? r.labels.length === 0 : r.labels.some((l) => l.toLowerCase() === f.toLowerCase()));
   const shown = repos.filter((r) => selected.has(r.id) || matches(r, activeFilter));
 
-  // Changing the label resets the selection: just one repo with that label (the main one if it has it).
+  // Changing the label clears the selection, so only repos with that label show.
   const pickFilter = (next: string | null) => {
     setFilter(next);
     storageSet(FILTER_KEY, next ?? "");
     if (next === activeFilter) return;
-    const first = main && matches(main, next) ? main : repos.find((r) => matches(r, next));
-    if (first) onChange({ main: first.id, extras: [] });
+    if (main || value.extras.length > 0) onChange({ main: undefined, extras: [] });
   };
 
   const toggle = (repo: RepoView) => {
