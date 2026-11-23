@@ -3,6 +3,8 @@ import { app } from "electron";
 import type { DesktopUpdateState } from "@my-ai-slaves/shared";
 import { fetchGitHubJson, downloadVerified } from "./download";
 import { createUpdateDir, installUpdate, installerPathIn, removeStaleUpdates } from "./install";
+
+export { isQuittingForUpdate } from "./install";
 import {
   isIntelBuildOnAppleSilicon,
   LATEST_RELEASE_PAGE_URL,

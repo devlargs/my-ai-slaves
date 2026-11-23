@@ -122,12 +122,12 @@ console.log(`
 `);
 
 let shuttingDown = false;
-async function shutdown(signal: string) {
+async function shutdown(signal: string, opts: { resume?: boolean } = {}) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`\n${signal}: stopping. Running tasks will show as interrupted next time.`);
   logins.closeAll();
-  await queue.shutdown().catch(() => {});
+  await queue.shutdown(opts).catch(() => {});
   await scripts.stopAll().catch(() => {});
   await closeVite?.().catch(() => {});
   await app.close().catch(() => {});
@@ -141,7 +141,9 @@ process.on("SIGTERM", () => void shutdown("SIGTERM"));
 if (process.send) {
   process.send({ type: "ready", port: PORT, dataDir: stores.paths.root });
   process.on("message", (message) => {
-    if ((message as { type?: string } | null)?.type === "shutdown") void shutdown("quit");
+    const m = message as { type?: string; resumeRunning?: boolean } | null;
+    // `resumeRunning`: quitting for "Update and restart", so running tasks run again on the next start.
+    if (m?.type === "shutdown") void shutdown(m.resumeRunning ? "update" : "quit", { resume: m.resumeRunning === true });
   });
   process.on("disconnect", () => void shutdown("desktop app closed"));
 }

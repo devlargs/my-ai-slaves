@@ -93,6 +93,8 @@ export const Task = z.object({
   replies: z.array(TaskReply).default([]),
   /** A reply waiting to be sent to the existing CLI session (status is pending while set). */
   pendingReply: z.string().nullable().default(null),
+  /** Set when the app quit for an update mid-run: the run starts again when the app is back. */
+  resumeOnStart: z.boolean().default(false),
   createdAt: timestampNow(),
   updatedAt: timestampNow(),
 });

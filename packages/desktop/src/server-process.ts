@@ -21,8 +21,11 @@ export type ServerStart =
 
 export interface ServerHandle {
   started: Promise<ServerStart>;
-  /** Asks the server to stop cleanly (it marks running tasks interrupted), then kills it if it hangs. */
-  stop(timeoutMs?: number): Promise<void>;
+  /**
+   * Asks the server to stop cleanly (it marks running tasks interrupted, or, with `resumeRunning`,
+   * to run again on the next start), then kills it if it hangs.
+   */
+  stop(opts?: { timeoutMs?: number; resumeRunning?: boolean }): Promise<void>;
   onExit(callback: (code: number | null, signal: NodeJS.Signals | null) => void): void;
 }
 
@@ -73,9 +76,9 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
   return {
     started,
     onExit: (cb) => exitCallbacks.push(cb),
-    async stop(timeoutMs = 8000) {
+    async stop({ timeoutMs = 8000, resumeRunning = false } = {}) {
       if (exited) return;
-      if (child.connected) child.send({ type: "shutdown" });
+      if (child.connected) child.send({ type: "shutdown", resumeRunning });
       else child.kill();
       const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
       await exitPromise;

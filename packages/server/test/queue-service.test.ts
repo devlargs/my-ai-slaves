@@ -286,6 +286,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
         session: null,
         replies: [],
         pendingReply: null,
+        resumeOnStart: false,
         createdAt: "2026-11-18T10:00:00+08:00",
         updatedAt: "2026-11-18T10:00:00+08:00",
       });
@@ -563,6 +564,22 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect((await fresh.list())[0]?.status).toBe("interrupted");
     expect(head(repo.path)).toBe("main");
     expect(sh(repo.path, "status", "--porcelain").trim()).toBe("?? half-done.txt");
+  });
+
+  it("tasks stopped by Update and restart run again on the next start", async () => {
+    const { queue, repo } = await setup();
+    const created = await queue.create({ repo: repo.id, message: "SLOW resume me" });
+    await waitFor(async () => queue.replay(created.id).events.length > 0);
+    await queue.shutdown({ resume: true });
+    await waitFor(taskWith(queue, created.id, "interrupted"));
+    expect((await queue.list())[0]?.resumeOnStart).toBe(true);
+    const fresh = new QueueService({ ...(queue as any).deps });
+    await fresh.init();
+    await waitFor(async () => (await fresh.list()).find((t) => t.id === created.id && t.status !== "pending" && t.status !== "interrupted"));
+    const task = (await fresh.list()).find((t) => t.id === created.id);
+    expect(["running", "needs-review"]).toContain(task?.status);
+    expect(task?.resumeOnStart).toBe(false);
+    await fresh.shutdown();
   });
 
   it("discards tasks in any state, stopping a running one first", async () => {

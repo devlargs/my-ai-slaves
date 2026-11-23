@@ -6,7 +6,7 @@ import { changeDataFolder, ensureDataFolder } from "./data-folder";
 import { createTokenSource } from "./github-token";
 import { type ServerHandle, startServer } from "./server-process";
 import { serverBaseEnv } from "./shell-env";
-import { createUpdater, type Updater } from "./updater";
+import { createUpdater, isQuittingForUpdate, type Updater } from "./updater";
 
 // My AI Slaves as a desktop app: starts the bundled server on the chosen data folder and shows the
 // same web UI `npm run dev` serves, in its own window. Everything the app does still happens in the
@@ -256,7 +256,7 @@ async function offerAppleSiliconBuild(state: DesktopUpdateState) {
     message: "This is the Intel build of My AI Slaves",
     detail:
       "This Mac has an Apple Silicon chip, so macOS runs the Intel build through Rosetta. That makes the whole app slow: opening pages, typing, and the tasks themselves.\n\n" +
-      `Switching installs the Apple Silicon build (v${state.newVersion}) and reopens the app. Running tasks stop and show as interrupted.`,
+      `Switching installs the Apple Silicon build (v${state.newVersion}) and reopens the app. Running tasks stop and start again once it's back.`,
     buttons: ["Switch and Restart", "Later"],
     defaultId: 0,
     cancelId: 1,
@@ -275,7 +275,7 @@ async function checkForUpdatesFromMenu() {
     const answer = await show({
       type: "info",
       message: `My AI Slaves ${state.newVersion} is available`,
-      detail: `You have ${state.currentVersion}. Updating stops running tasks, installs the new version and reopens the app.`,
+      detail: `You have ${state.currentVersion}. Updating stops running tasks, installs the new version and reopens the app; the stopped tasks then run again.`,
       buttons: ["Update Now", "Later"],
       defaultId: 0,
       cancelId: 1,
@@ -363,12 +363,13 @@ app.on("window-all-closed", () => {
 });
 app.on("activate", () => focusWindow());
 
-// Stop the server cleanly first so it records running tasks as interrupted.
+// Stop the server cleanly first so it records running tasks as interrupted (or, when quitting for
+// "Update and restart", as tasks to run again once the updated app starts).
 app.on("before-quit", (event) => {
   quitting = true;
   if (!server) return;
   const stopping = server;
   server = null;
   event.preventDefault();
-  void stopping.stop().finally(() => app.quit());
+  void stopping.stop({ resumeRunning: isQuittingForUpdate() }).finally(() => app.quit());
 });

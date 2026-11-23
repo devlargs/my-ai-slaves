@@ -129,22 +129,46 @@ export class QueueService {
 
   // ── lifecycle ────────────────────────────────────────────────────────────
 
-  /** Tasks that were running when the server stopped come back as interrupted. */
+  /**
+   * Tasks that were running when the server stopped come back as interrupted, except those stopped
+   * by "Update and restart": they go back in the queue and run again.
+   */
   async init(): Promise<void> {
     // A repo that becomes reachable (or unreachable) again changes what can run.
     this.deps.repos.onChange(() => void this.tick());
     await this.deps.repos.migrateCommitters();
     await this.migrateLegacyWorktrees();
     const interrupted: Task[] = [];
+    const resumed: Task[] = [];
     await this.stores.queue.update((q) => {
       for (const task of q.tasks) {
-        if (task.status === "running") {
+        if (task.resumeOnStart && (task.status === "running" || task.status === "interrupted")) {
+          task.resumeOnStart = false;
+          task.status = "pending";
+          task.currentAccount = null;
+          // A reply resumes its session with the same reply; a first run starts over in a new one.
+          if (task.pendingReply === null || !task.session) task.session = null;
+          task.updatedAt = this.stamp();
+          resumed.push(task);
+        } else if (task.status === "running") {
           task.status = "interrupted";
+          task.resumeOnStart = false;
           task.updatedAt = this.stamp();
           interrupted.push(task);
+        } else if (task.resumeOnStart) {
+          task.resumeOnStart = false;
         }
       }
     });
+    for (const task of resumed) {
+      this.log({
+        taskId: task.id,
+        repo: task.repo,
+        account: null,
+        event: "queued",
+        detail: "The app restarted for an update while this task was running: running it again.",
+      });
+    }
     for (const task of interrupted) {
       this.log({
         taskId: task.id,
@@ -192,8 +216,17 @@ export class QueueService {
     }
   }
 
-  async shutdown(): Promise<void> {
+  /** Stops every run. `resume`: they run again on the next start (the app is restarting for an update). */
+  async shutdown(opts: { resume?: boolean } = {}): Promise<void> {
     if (this.timer) clearTimeout(this.timer);
+    if (opts.resume && this.live.size > 0) {
+      const ids = new Set(this.live.keys());
+      await this.stores.queue
+        .update((q) => {
+          for (const t of q.tasks) if (ids.has(t.id)) t.resumeOnStart = true;
+        })
+        .catch(() => {});
+    }
     await Promise.all([...this.live.values()].map((run) => run.handle.cancel().catch(() => {})));
     await this.stores.activity.close().catch(() => {});
   }
@@ -297,6 +330,7 @@ export class QueueService {
         session: null,
         replies: [],
         pendingReply: null,
+        resumeOnStart: false,
         createdAt: stamp,
         updatedAt: stamp,
       };
@@ -917,7 +951,11 @@ export class QueueService {
         await this.updateTask(task.id, (t) => {
           t.status = "interrupted";
         });
-        this.log({ ...base, event: "cancelled", detail: "Stopped by you. Retry or discard it." });
+        this.log({
+          ...base,
+          event: "cancelled",
+          detail: task.resumeOnStart ? "Stopped to restart for an update; it runs again when the app is back." : "Stopped by you. Retry or discard it.",
+        });
         this.deps.broadcaster.taskStatus(task.id, "interrupted", "Stopped");
         break;
       }

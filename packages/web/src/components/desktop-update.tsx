@@ -176,7 +176,7 @@ export function InstallButton({
               <strong className="text-ink">
                 {running} running {running === 1 ? "task stops" : "tasks stop"}
               </strong>{" "}
-              and will show as interrupted.
+              and {running === 1 ? "runs" : "run"} again once the app is back.
             </>
           )}
         </>

@@ -41,10 +41,18 @@ export async function removeStaleUpdates(tempDir: string, currentDir: string | n
   }
 }
 
+let quittingForUpdate = false;
+
+/** True once an update is installing and the app is quitting for it (running tasks resume after). */
+export function isQuittingForUpdate(): boolean {
+  return quittingForUpdate;
+}
+
 // Quit so the installer (or the swap script) can replace this copy. Force-exit
 // after a moment so nothing can keep the old instance alive and block it. The
 // bundled server notices its parent is gone and stops on its own.
 function quitForUpdate() {
+  quittingForUpdate = true;
   app.quit();
   setTimeout(() => app.exit(0), 5000);
 }
