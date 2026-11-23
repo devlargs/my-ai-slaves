@@ -1,5 +1,6 @@
-import type { CommitDetail, CommitFile, GraphCommit, LocalBranch, RemoteBranch, RepoGraph } from "@my-ai-slaves/shared";
+import type { CommitDetail, CommitFile, GitHistory, GraphCommit, LocalBranch, PullMode, RemoteBranch, RepoGraph } from "@my-ai-slaves/shared";
 import {
+  ArrowDownToLineIcon,
   ArrowLeftIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -13,12 +14,15 @@ import {
   FolderIcon,
   FolderTreeIcon,
   GitBranchIcon,
+  GitBranchPlusIcon,
   LaptopIcon,
   ListIcon,
   Loader2Icon,
+  Redo2Icon,
   RefreshCwIcon,
   SearchIcon,
   TagIcon,
+  Undo2Icon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseDiff } from "react-diff-view";
@@ -27,8 +31,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { api } from "@/lib/api";
-import { cn, formatTime } from "@/lib/utils";
+import { cn, formatTime, storageGet, storageSet } from "@/lib/utils";
 
 const PAGE = 300;
 const ROW = 28;
@@ -37,6 +42,8 @@ const PAD = 14;
 /** Radius of the author's avatar that marks each commit on its lane. */
 const DOT = 12;
 const OVERSCAN = 12;
+/** Width of the branch / tag column. */
+const REF_COL = 208;
 /** Branch lines cycle through these hues (same lightness/chroma as the label dots). */
 const HUES = [36, 250, 152, 300, 72, 200, 0, 110, 330, 180];
 const laneColor = (n: number) => `oklch(62% 0.15 ${HUES[n % HUES.length]})`;
@@ -223,21 +230,34 @@ function groupRefs(refs: string[], remoteRefs: Map<string, RemoteBranch>): RefGr
   return [...groups.values()].sort((a, b) => rank(a) - rank(b));
 }
 
-function RefPill({ group }: { group: RefGroup }) {
+function RefPill({ group, color }: { group: RefGroup; color: string }) {
   const title =
     group.kind === "tag"
       ? `Tag ${group.name}`
       : group.kind === "detached"
         ? "Detached HEAD"
         : [group.head && "checked out", group.local && "local", ...group.remotes.map((r) => `on ${r}`)].filter(Boolean).join(" · ");
+  if (group.kind === "tag") {
+    // Tags: the name, then the tag icon, edged in the commit's lane colour.
+    return (
+      <Badge
+        variant="default"
+        className="min-w-0 max-w-full shrink gap-1 rounded-md border font-mono text-ink"
+        style={{ borderColor: color, background: `color-mix(in oklch, ${color} 14%, transparent)` }}
+        title={`Tag ${group.name}`}
+      >
+        <span className="truncate">{group.name}</span>
+        <TagIcon className="size-3 shrink-0 opacity-80" />
+      </Badge>
+    );
+  }
   return (
     <Badge
-      variant={group.head ? "signal" : group.kind === "tag" ? "outline" : "default"}
+      variant={group.head ? "signal" : "default"}
       className="min-w-0 max-w-full shrink gap-1 rounded-md font-mono"
       title={`${group.name}${title ? ` (${title})` : ""}`}
     >
       {group.head && <CheckIcon className="size-3 shrink-0" />}
-      {group.kind === "tag" && <TagIcon className="size-3 shrink-0" />}
       <span className="truncate">{group.name}</span>
       {group.kind === "branch" && group.local && <LaptopIcon className="size-3 shrink-0 opacity-70" />}
       {group.remotes.length > 0 && <CloudIcon className="size-3 shrink-0 opacity-70" />}
@@ -245,18 +265,201 @@ function RefPill({ group }: { group: RefGroup }) {
   );
 }
 
-function RefCell({ groups }: { groups: RefGroup[] }) {
-  const [first, ...rest] = groups;
+/** The commit's branch and tag labels, joined to its avatar by a line in the lane's colour. */
+function RefCell({ groups, color }: { groups: RefGroup[]; color: string }) {
+  const [first] = groups;
   if (!first) return null;
+  // A tag gets its own pill next to the branch, rather than hiding behind "+n".
+  const tag = first.kind === "tag" ? undefined : groups.find((g) => g.kind === "tag");
+  const shown = tag ? [first, tag] : [first];
+  const rest = groups.filter((g) => !shown.includes(g));
   return (
-    <span className="flex min-w-0 items-center gap-1">
-      <RefPill group={first} />
+    <span className="flex min-w-0 flex-1 items-center gap-1">
+      {shown.map((g) => (
+        <RefPill key={`${g.kind}:${g.name}`} group={g} color={color} />
+      ))}
       {rest.length > 0 && (
         <Badge variant="outline" className="shrink-0 rounded-md px-1.5" title={rest.map((g) => g.name).join("\n")}>
           +{rest.length}
         </Badge>
       )}
+      <span className="h-px min-w-2 flex-1 opacity-70" style={{ background: color }} />
     </span>
+  );
+}
+
+// ── Toolbar ──────────────────────────────────────────────────────────────────
+
+const PULL_KEY = "git-graph.pull-mode";
+const PULL_LABELS: Record<PullMode, string> = {
+  fetch: "Fetch All",
+  "pull-ff": "Pull (fast-forward if possible)",
+  "pull-ff-only": "Pull (fast-forward only)",
+  "pull-rebase": "Pull (rebase)",
+};
+const storedPullMode = (): PullMode => {
+  const v = storageGet(PULL_KEY);
+  return v && v in PULL_LABELS ? (v as PullMode) : "pull-ff";
+};
+
+type GitAction = "undo" | "redo" | "pull" | "branch";
+
+function ToolButton({
+  icon,
+  label,
+  title,
+  busy,
+  disabled,
+  onClick,
+  className,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  title: string;
+  busy?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex min-w-14 cursor-pointer flex-col items-center gap-0.5 rounded-md px-2 py-1 text-[11px] text-ink-2 hover:bg-paper-2 hover:text-ink",
+        "disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-2 [&_svg]:size-4",
+        className,
+      )}
+    >
+      {busy ? <Loader2Icon className="animate-spin" /> : icon}
+      {label}
+    </button>
+  );
+}
+
+/** Undo, Redo, Pull (with its default mode) and Branch, like GitKraken's toolbar. */
+function GitToolbar({
+  history,
+  acting,
+  pullMode,
+  onPullMode,
+  onAction,
+}: {
+  history: GitHistory | null;
+  acting: GitAction | null;
+  pullMode: PullMode;
+  onPullMode: (mode: PullMode) => void;
+  onAction: (action: GitAction) => void;
+}) {
+  const [menu, setMenu] = useState(false);
+  const off = acting !== null || history === null;
+  return (
+    <div className="flex items-center gap-0.5">
+      <ToolButton
+        icon={<Undo2Icon />}
+        label="Undo"
+        title={history?.undo ? `Undo ${history.undo}` : "Nothing to undo"}
+        busy={acting === "undo"}
+        disabled={off || !history?.undo}
+        onClick={() => onAction("undo")}
+      />
+      <ToolButton
+        icon={<Redo2Icon />}
+        label="Redo"
+        title={history?.redo ? `Redo ${history.redo}` : "Nothing to redo"}
+        busy={acting === "redo"}
+        disabled={off || !history?.redo}
+        onClick={() => onAction("redo")}
+      />
+      <div className="flex items-stretch">
+        <ToolButton
+          icon={<ArrowDownToLineIcon />}
+          label={pullMode === "fetch" ? "Fetch" : "Pull"}
+          title={PULL_LABELS[pullMode]}
+          busy={acting === "pull"}
+          disabled={off}
+          onClick={() => onAction("pull")}
+          className="rounded-r-none pr-1"
+        />
+        <Popover open={menu} onOpenChange={setMenu}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              title="Choose what Pull does"
+              disabled={off}
+              className="flex cursor-pointer items-start rounded-r-md px-0.5 pt-1.5 text-ink-2 hover:bg-paper-2 hover:text-ink disabled:cursor-default disabled:opacity-40"
+            >
+              <ChevronDownIcon className="size-3.5" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-72 p-1.5">
+            <p className="px-2 pt-1 pb-2 text-xs text-muted-foreground">
+              Select a default pull/fetch operation to execute when clicking this button
+            </p>
+            <div role="radiogroup" aria-label="Pull operation" className="flex flex-col">
+              {(Object.keys(PULL_LABELS) as PullMode[]).map((mode) => {
+                const on = mode === pullMode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    onClick={() => {
+                      onPullMode(mode);
+                      setMenu(false);
+                    }}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink-2 hover:bg-paper-2 hover:text-ink",
+                      on && "bg-signal-soft text-ink hover:bg-signal-soft",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex size-3.5 shrink-0 items-center justify-center rounded-full border",
+                        on ? "border-signal" : "border-rule-strong",
+                      )}
+                    >
+                      {on && <span className="size-1.5 rounded-full bg-signal" />}
+                    </span>
+                    {PULL_LABELS[mode]}
+                  </button>
+                );
+              })}
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+      <ToolButton
+        icon={<GitBranchPlusIcon />}
+        label="Branch"
+        title="Create a branch here and check it out"
+        busy={acting === "branch"}
+        disabled={off}
+        onClick={() => onAction("branch")}
+      />
+    </div>
+  );
+}
+
+/** Inline "enter branch name" field on the checked-out commit's row. */
+function BranchNameInput({ onSubmit, onCancel, busy }: { onSubmit: (name: string) => void; onCancel: () => void; busy: boolean }) {
+  const [name, setName] = useState("");
+  return (
+    <Input
+      autoFocus
+      value={name}
+      disabled={busy}
+      placeholder="enter branch name"
+      onChange={(e) => setName(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && name.trim()) onSubmit(name.trim());
+      }}
+      onBlur={() => !name.trim() && !busy && onCancel()}
+      className="h-6 rounded-md px-2 font-mono text-xs"
+    />
   );
 }
 
@@ -824,7 +1027,10 @@ function CommitFileView({
 
 // ── Dialog ───────────────────────────────────────────────────────────────────
 
-/** Read-only GitKraken-style view of a repo: branches, the commit graph, and each commit's files and diffs. */
+/**
+ * GitKraken-style view of a repo: branches, the commit graph, and each commit's files and diffs. The
+ * toolbar (Undo / Redo / Pull / Branch) is the only thing here that changes the repo, on a click.
+ */
 export function GitGraphDialog({
   repoId,
   repoName,
@@ -848,6 +1054,9 @@ export function GitGraphDialog({
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(600);
+  const [acting, setActing] = useState<GitAction | null>(null);
+  const [pullMode, setPullMode] = useState<PullMode>(storedPullMode);
+  const [naming, setNaming] = useState(false);
 
   const load = async (n: number) => {
     setLoading(true);
@@ -873,6 +1082,7 @@ export function GitGraphDialog({
       setSelected(null);
       setLimit(PAGE);
       setScrollTop(0);
+      setNaming(false);
       details.current.clear();
     }
   }, [open]);
@@ -916,6 +1126,35 @@ export function GitGraphDialog({
   const first = Math.max(0, Math.floor(scrollTop / ROW) - OVERSCAN);
   const last = Math.min(rows.length, Math.ceil((scrollTop + viewport) / ROW) + OVERSCAN);
 
+  // The checked-out commit's row: where a new branch starts.
+  const headRow = Math.max(0, rows.findIndex((r) => r.commit.refs.some((ref) => ref === "HEAD" || ref.startsWith("HEAD -> "))));
+
+  const act = async (action: GitAction, name?: string) => {
+    if (action === "branch" && name === undefined) {
+      setOpenFile(null);
+      setNaming(true);
+      requestAnimationFrame(() => {
+        const el = scroller.current;
+        if (el && (headRow * ROW < el.scrollTop || (headRow + 1) * ROW > el.scrollTop + el.clientHeight)) el.scrollTop = headRow * ROW;
+      });
+      return;
+    }
+    setActing(action);
+    setError(null);
+    try {
+      if (action === "undo") await api.gitUndo(repoId);
+      else if (action === "redo") await api.gitRedo(repoId);
+      else if (action === "pull") await api.gitPull(repoId, pullMode);
+      else await api.gitBranch(repoId, name!);
+      setNaming(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActing(null);
+      await load(limit);
+    }
+  };
+
   const jump = (hash: string) => {
     const i = index.get(hash);
     if (i === undefined) return;
@@ -932,7 +1171,16 @@ export function GitGraphDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[calc(100vh-2rem)] max-h-none w-[calc(100vw-2rem)] max-w-none gap-3 p-4">
+      <DialogContent
+        className="h-[calc(100vh-2rem)] max-h-none w-[calc(100vw-2rem)] max-w-none gap-3 p-4"
+        onEscapeKeyDown={(e) => {
+          // Escape in the branch name field cancels it, not the whole view.
+          if (naming) {
+            e.preventDefault();
+            setNaming(false);
+          }
+        }}
+      >
         <div className="flex items-center gap-2 pr-8">
           <DialogTitle>{repoName}</DialogTitle>
           {graph?.head && (
@@ -942,12 +1190,23 @@ export function GitGraphDialog({
             </Badge>
           )}
           <DialogDescription className="text-xs">
-            {graph ? `${graph.commits.length}${graph.more ? "+" : ""} commits · all branches · read-only` : "Commit graph · read-only"}
+            {graph ? `${graph.commits.length}${graph.more ? "+" : ""} commits · all branches` : "Commit graph"}
           </DialogDescription>
+          <div className="mx-auto">
+            <GitToolbar
+              history={graph?.history ?? null}
+              acting={acting}
+              pullMode={pullMode}
+              onPullMode={(mode) => {
+                setPullMode(mode);
+                storageSet(PULL_KEY, mode);
+              }}
+              onAction={(a) => void act(a)}
+            />
+          </div>
           <Button
             size="sm"
             variant="ghost"
-            className="ml-auto"
             disabled={loading}
             onClick={() => {
               details.current.clear();
@@ -977,7 +1236,9 @@ export function GitGraphDialog({
                   className="flex shrink-0 items-center border-b border-rule bg-paper-2 text-[11px] text-muted-foreground label-mono"
                   style={{ height: 26 }}
                 >
-                  <span className="w-44 shrink-0 px-2">Branch / tag</span>
+                  <span className="shrink-0 px-2" style={{ width: REF_COL }}>
+                    Branch / tag
+                  </span>
                   <span className="shrink-0 px-2.5" style={{ width: graphWidth }}>
                     Graph
                   </span>
@@ -1008,8 +1269,8 @@ export function GitGraphDialog({
                           )}
                           style={{ top: i * ROW, height: ROW }}
                         >
-                          <span className="flex w-44 shrink-0 items-center px-2">
-                            <RefCell groups={groups} />
+                          <span className="flex shrink-0 items-center pl-2" style={{ width: REF_COL }}>
+                            <RefCell groups={groups} color={row.color} />
                           </span>
                           <svg
                             width={graphWidth}
@@ -1018,6 +1279,9 @@ export function GitGraphDialog({
                             viewBox={`0 0 ${graphWidth} ${ROW}`}
                             aria-hidden
                           >
+                            {groups.length > 0 && (
+                              <path d={`M0 ${ROW / 2}H${x(row.lane) - DOT}`} stroke={row.color} strokeOpacity={0.7} strokeWidth={1} />
+                            )}
                             {row.edges.map((e, k) => (
                               <path key={k} d={edgePath(e)} stroke={e.color} strokeWidth={2} fill="none" />
                             ))}
@@ -1036,6 +1300,14 @@ export function GitGraphDialog({
                         </button>
                       );
                     })}
+                    {naming && (
+                      <div
+                        className="absolute left-0 z-10 flex items-center bg-surface px-2"
+                        style={{ top: headRow * ROW, height: ROW, width: REF_COL }}
+                      >
+                        <BranchNameInput busy={acting === "branch"} onSubmit={(n) => void act("branch", n)} onCancel={() => setNaming(false)} />
+                      </div>
+                    )}
                     {graph.more && (
                       <div className="absolute inset-x-0 flex justify-center" style={{ top: rows.length * ROW + 8 }}>
                         <Button size="sm" variant="outline" disabled={loading} onClick={() => setLimit((n) => n + PAGE)}>

@@ -39,7 +39,8 @@ packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with t
                   AttachmentStore. The only code that touches .data/.
   src/providers   ProviderAdapter per CLI: claude-code/, cursor-agent/ (args, stream parser, limit detection)
   src/services    PromptAssembler, AccountRouter (pure) + AccountService, RepoService, BranchService,
-                  QueueService (scheduler, runs, fallback, replies, review actions), ScriptService
+                  QueueService (scheduler, runs, fallback, replies, review actions), RepoActions (graph
+                  toolbar: undo/redo/pull/branch), ScriptService
                   (runs a repo's package.json scripts from the Repos page, locally or over ssh; stopped on quit)
   src/login       LoginService: drives `claude auth login` / `agent login` in a hidden pty
   src/remote        machine.ts (run git/CLIs locally or over ssh), hosts.ts (~/.ssh/config aliases)
@@ -95,6 +96,9 @@ desktop app also uses 3005 and refuses to start if it's taken).
   decide how changes are handled. The only git the app runs on a task is read-only (where the checkout
   is, and the diff since the task started), plus the one-time legacy worktree migration. Claude runs with
   `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and Cursor never gets `-w`.
+  The one exception is the Repos commit graph's toolbar (`src/services/repo-actions.ts`): Undo, Redo,
+  Pull and Branch change the repo **only when you click them**, and are refused while a task runs there.
+  Undo/Redo read HEAD's reflog (their own commands are tagged `my-ai-slaves` via GIT_REFLOG_ACTION).
 - **Cross-repo tasks:** a task can tick several repos (`extraRepos`, same machine as the main `repo`).
   The CLI runs in the main repo and gets the others via `--add-dir` + the "Other repositories:" list.
   Their ticked repo prompts (sent after the main repo's) say how to handle changes in them. A repo is in

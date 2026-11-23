@@ -9,7 +9,9 @@ import { EmptyMessageError, type PromptAssembler } from "../services/prompt-asse
 import { listRemoteHosts } from "../remote/hosts";
 import type { PromptLibrary } from "../services/prompt-library";
 import type { QueueService } from "../services/queue-service";
+import type { RepoActions } from "../services/repo-actions";
 import type { RepoGit } from "../services/repo-git";
+import { identityOf } from "../services/queue-service";
 import type { RepoService } from "../services/repo-service";
 import type { ScriptService } from "../services/script-service";
 import { AttachmentError, type AttachmentStore } from "../storage/attachment-store";
@@ -28,6 +30,7 @@ export interface RouteDeps {
   attachments: AttachmentStore;
   prompts: PromptLibrary;
   git: RepoGit;
+  actions: RepoActions;
   scripts: ScriptService;
 }
 
@@ -44,7 +47,7 @@ const Ids = z.object({ ids: z.array(z.string()) });
 const params = (req: { params: unknown }) => req.params as { id: string };
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
-  const { stores, accounts, repos, queue, assembler, logins, attachments, prompts, git, scripts } = deps;
+  const { stores, accounts, repos, queue, assembler, logins, attachments, prompts, git, actions, scripts } = deps;
 
   app.setErrorHandler((error, _req, reply) => {
     if (error instanceof HttpError) return reply.code(error.status).send({ error: error.message });
@@ -126,7 +129,21 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.get("/api/repos/:id/graph", async (req) => {
     const q = req.query as { limit?: string };
     const limit = Math.min(Math.max(Number.parseInt(q.limit ?? "", 10) || 300, 1), 5000);
-    return git.graph(await repos.get(params(req).id), limit);
+    const repo = await repos.get(params(req).id);
+    const [graph, history] = await Promise.all([git.graph(repo, limit), actions.history(repo)]);
+    return { ...graph, history };
+  });
+  // The graph toolbar (Undo / Redo / Pull / Branch): the only repo changes the app makes, and only on a click.
+  app.post("/api/repos/:id/git/undo", async (req) => ({ history: await actions.undo(await repos.get(params(req).id)) }));
+  app.post("/api/repos/:id/git/redo", async (req) => ({ history: await actions.redo(await repos.get(params(req).id)) }));
+  app.post("/api/repos/:id/git/pull", async (req) => {
+    const { mode } = parseBody(z.object({ mode: z.enum(["fetch", "pull-ff", "pull-ff-only", "pull-rebase"]) }), req.body);
+    const repo = await repos.get(params(req).id);
+    return { history: await actions.pull(repo, mode, identityOf(repo, await stores.settings.read())) };
+  });
+  app.post("/api/repos/:id/git/branch", async (req) => {
+    const { name } = parseBody(z.object({ name: z.string().min(1).max(250) }), req.body);
+    return { history: await actions.createBranch(await repos.get(params(req).id), name) };
   });
   // One commit's message, files and diff (read-only), for the graph view's details pane.
   app.get("/api/repos/:id/commits/:hash", async (req) => {

@@ -68,7 +68,7 @@ export interface QueueDeps {
 }
 
 /** The repo's committer, else the default committer, else null (your git config). */
-const identityOf = (repo: Repo, settings: SettingsFile) => {
+export const identityOf = (repo: Repo, settings: SettingsFile) => {
   const committer =
     settings.committers.find((c) => c.id === repo.committerId) ??
     settings.committers.find((c) => c.id === settings.defaultCommitterId);
@@ -232,6 +232,11 @@ export class QueueService {
   }
 
   // ── reads ────────────────────────────────────────────────────────────────
+
+  /** Repos (main and extra) in a running task right now. */
+  busyRepoIds(): Set<string> {
+    return new Set([...this.live.values()].flatMap((r) => r.repos));
+  }
 
   async list(): Promise<TaskView[]> {
     const { tasks } = await this.stores.queue.read();

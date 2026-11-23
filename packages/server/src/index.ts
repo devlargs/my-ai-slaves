@@ -12,6 +12,7 @@ import { PromptAssembler } from "./services/prompt-assembler";
 import { PromptLibrary } from "./services/prompt-library";
 import { QueueService } from "./services/queue-service";
 import { RepoService } from "./services/repo-service";
+import { RepoActions } from "./services/repo-actions";
 import { RepoGit } from "./services/repo-git";
 import { ScriptService } from "./services/script-service";
 import { AttachmentStore } from "./storage/attachment-store";
@@ -47,6 +48,7 @@ const assembler = new PromptAssembler({
   globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
 });
 const queue = new QueueService({ stores, accounts, repos, git, assembler, adapters, broadcaster: hub, attachments, prompts });
+const actions = new RepoActions((repoId) => queue.busyRepoIds().has(repoId));
 const logins = new LoginService(stores, accounts, adapters, {
   loginUpdated: (state) => hub.loginUpdated(state),
   onLoggedIn: () => void queue.tick(),
@@ -65,7 +67,7 @@ await app.register(fastifyWebsocket);
 app.register(async (scope) => {
   scope.get("/ws", { websocket: true }, (socket) => hub.handle(socket));
 });
-registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments, prompts, git, scripts });
+registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments, prompts, git, actions, scripts });
 
 let closeVite: (() => Promise<void>) | null = null;
 if (isProduction) {

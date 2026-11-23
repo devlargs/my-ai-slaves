@@ -1,5 +1,7 @@
 import type {
   RepoGraph,
+  GitActionResult,
+  PullMode,
   CommitDetail,
   RepoScripts,
   ScriptRunInfo,
@@ -95,6 +97,10 @@ export const api = {
   registerRepo: (body: RegisterRepoRequest) => request<RepoView>("POST", "/repos", body),
   checkRepo: (id: string) => request<RepoView>("POST", `/repos/${enc(id)}/check`),
   getRepoGraph: (id: string, limit: number) => request<RepoGraph>("GET", `/repos/${enc(id)}/graph?limit=${limit}`),
+  gitUndo: (id: string) => request<GitActionResult>("POST", `/repos/${enc(id)}/git/undo`),
+  gitRedo: (id: string) => request<GitActionResult>("POST", `/repos/${enc(id)}/git/redo`),
+  gitPull: (id: string, mode: PullMode) => request<GitActionResult>("POST", `/repos/${enc(id)}/git/pull`, { mode }),
+  gitBranch: (id: string, name: string) => request<GitActionResult>("POST", `/repos/${enc(id)}/git/branch`, { name }),
   getCommit: (id: string, hash: string) => request<CommitDetail>("GET", `/repos/${enc(id)}/commits/${enc(hash)}`),
   getRunningScriptRepos: () => request<{ repoIds: string[] }>("GET", "/scripts/running"),
   getRepoScripts: (id: string) => request<RepoScripts>("GET", `/repos/${enc(id)}/scripts`),

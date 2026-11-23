@@ -75,7 +75,7 @@ export class RepoGit {
    * The commit graph of every branch, tag and remote branch (newest first), for the repo's graph view.
    * Read-only: `git log --all`.
    */
-  async graph(repo: Repo, limit: number): Promise<RepoGraph> {
+  async graph(repo: Repo, limit: number): Promise<Omit<RepoGraph, "history">> {
     const head = await this.currentRef(repo).catch(() => null);
     // Unit separator between fields, record separator between commits: neither appears in git output.
     const format = ["%H", "%P", "%an", "%ae", "%aI", "%s", "%D"].join("%x1f") + "%x1e";

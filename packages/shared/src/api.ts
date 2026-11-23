@@ -153,6 +153,30 @@ export interface RepoGraph {
   local: LocalBranch[];
   /** Remote-tracking branches (`refs/remotes`, without `<remote>/HEAD`), sorted by remote then name. */
   remote: RemoteBranch[];
+  /** What the toolbar's Undo / Redo would do right now. */
+  history: GitHistory;
+}
+
+/**
+ * The graph toolbar's actions. Only run when you click them (tasks never touch branches).
+ * POST /api/repos/:id/git/undo | /git/redo → GitActionResult
+ * POST /api/repos/:id/git/pull { mode: PullMode } → GitActionResult
+ * POST /api/repos/:id/git/branch { name } → GitActionResult (creates it at HEAD and checks it out)
+ * All refused with 409 while a task is running in the repo.
+ */
+export interface GitHistory {
+  /** "commit \"fix login\"", "pull", "checkout main", "create branch feat/x"; null = nothing to undo. */
+  undo: string | null;
+  redo: string | null;
+}
+/** fetch = `git fetch --all --prune`; pull-ff = merge, fast-forward if possible; pull-ff-only; pull-rebase. */
+export type PullMode = "fetch" | "pull-ff" | "pull-ff-only" | "pull-rebase";
+export interface GitActionRequest {
+  mode?: PullMode;
+  name?: string;
+}
+export interface GitActionResult {
+  history: GitHistory;
 }
 export interface LocalBranch {
   /** "main", "fix/announce-notice-banner". */
