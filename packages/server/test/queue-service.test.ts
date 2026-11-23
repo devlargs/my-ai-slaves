@@ -188,6 +188,43 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     ).rejects.toThrow("missing");
   });
 
+  it("deletes a task's files when it leaves the queue, unless a saved prompt still uses them", async () => {
+    const { queue, repo, attachments, prompts } = await setup();
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    const own = await attachments.save(png, "own.png", "image/png");
+    const shared = await attachments.save(png, "shared.png", "image/png");
+    await prompts.create("Design", "MATCH IT", { attachments: [shared] });
+    const done = await queue.create({ repo: repo.id, message: "look", attachmentIds: [own.id, shared.id] });
+    await waitFor(taskWith(queue, done.id, "needs-review"));
+    const reply = await attachments.save(png, "reply.png", "image/png");
+    await queue.reply(done.id, "and this", [reply.id]);
+    await waitFor(taskWith(queue, done.id, "needs-review"));
+    await queue.markFinished(done.id);
+    await queue.settleAttachments();
+    expect(await attachments.find(own.id)).toBeNull();
+    expect(await attachments.find(reply.id)).toBeNull();
+    expect(await attachments.find(shared.id)).not.toBeNull();
+
+    const draftFile = await attachments.save(png, "draft.png", "image/png");
+    const draft = await queue.create({ repo: repo.id, message: "later", attachmentIds: [draftFile.id], draft: true });
+    await queue.discard(draft.id);
+    await queue.settleAttachments();
+    expect(await attachments.find(draftFile.id)).toBeNull();
+  });
+
+  it("sweeps old attachment folders nothing refers to", async () => {
+    const { queue, repo, attachments } = await setup();
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    const orphan = await attachments.save(png, "orphan.png", "image/png");
+    const used = await attachments.save(png, "used.png", "image/png");
+    await queue.create({ repo: repo.id, message: "keep", attachmentIds: [used.id], draft: true });
+    await queue.sweepAttachments(); // a day old at least: both are new
+    expect(await attachments.find(orphan.id)).not.toBeNull();
+    await queue.sweepAttachments(0);
+    expect(await attachments.find(orphan.id)).toBeNull();
+    expect(await attachments.find(used.id)).not.toBeNull();
+  });
+
   it("sends bound saved prompts between the repo base prompt and the message, in library order", async () => {
     const { queue, repo, prompts, received, stores } = await setup();
     const jira = await prompts.create("Analyze Jira ticket", "JIRA STEPS");

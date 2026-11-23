@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -205,6 +205,27 @@ describe("repos on an SSH host", () => {
     const second = (await attachments.locate("testhost", [file])).get(file.id)!;
     expect(second).toEqual(first);
     await expect(readFile(second.path)).rejects.toThrow();
+  });
+
+  it("deletes an attachment's copy on the host, and sweeps old ones nothing uses", async () => {
+    const { attachments } = await setup();
+    const file = await attachments.save(Buffer.from("hello"), "notes.txt", "text/plain");
+    const copy = (await attachments.locate("testhost", [file])).get(file.id)!;
+    await attachments.remove([file.id]);
+    await expect(stat(copy.dir)).rejects.toThrow();
+    expect(await attachments.find(file.id)).toBeNull();
+
+    const kept = await attachments.save(Buffer.from("a"), "a.txt", "text/plain");
+    const stale = await attachments.save(Buffer.from("b"), "b.txt", "text/plain");
+    const located = await attachments.locate("testhost", [kept, stale]);
+    const old = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    for (const a of [kept, stale]) {
+      await utimes(located.get(a.id)!.dir, old, old);
+      await utimes(attachments.dirOf(a.id), old, old);
+    }
+    expect(await attachments.sweep(new Set([kept.id]), ["testhost"])).toEqual([stale.id]);
+    await expect(stat(located.get(stale.id)!.dir)).rejects.toThrow();
+    expect((await stat(located.get(kept.id)!.dir)).isDirectory()).toBe(true);
   });
 
   it("stops a running task on the server itself", async () => {

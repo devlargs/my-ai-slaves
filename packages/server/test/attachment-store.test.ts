@@ -31,6 +31,7 @@ describe("AttachmentStore", () => {
     const store = new AttachmentStore(join(await tempDir(), "attachments"));
     expect((await store.save(Buffer.from("x"), "../../etc/passwd", "text/plain")).name).toBe("passwd");
     expect((await store.save(Buffer.from("x"), "meta.json", "text/plain")).name).toBe("file");
+    expect((await store.save(Buffer.from("x"), "META.Json", "text/plain")).name).toBe("file");
     await expect(store.save(Buffer.alloc(0), "e.txt", "text/plain")).rejects.toThrow("empty");
     expect(await store.find("../../etc")).toBeNull();
     await expect(store.resolve(["11111111-1111-4111-8111-111111111111"])).rejects.toThrow("missing");

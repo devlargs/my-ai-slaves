@@ -182,6 +182,65 @@ export class QueueService {
       });
     }
     await this.tick();
+    void this.sweepAttachments();
+  }
+
+  // ── attachments ──────────────────────────────────────────────────────────
+
+  /** Every attachment id a queued task, reply, saved prompt or repo prompt still refers to. */
+  private async attachmentsInUse(): Promise<Set<string>> {
+    const ids = new Set<string>();
+    for (const t of (await this.stores.queue.read()).tasks) {
+      for (const a of t.attachments) ids.add(a.id);
+      for (const r of t.replies) for (const a of r.attachments) ids.add(a.id);
+    }
+    for (const p of await this.deps.prompts.list()) for (const a of p.attachments) ids.add(a.id);
+    for (const repo of await this.deps.repos.list()) {
+      const list = await this.deps.repos.prompts(repo.id).catch(() => null);
+      for (const p of (await list?.list()) ?? []) for (const a of p.attachments) ids.add(a.id);
+    }
+    return ids;
+  }
+
+  /**
+   * A task left the queue: delete its files (here and on its repo's host) unless something else
+   * still uses them. Never fails the action that removed the task.
+   */
+  private releaseAttachments(task: Task): Promise<void> {
+    const ids = [...task.attachments, ...task.replies.flatMap((r) => r.attachments)].map((a) => a.id);
+    if (ids.length === 0) return Promise.resolve();
+    const release = (async () => {
+      const inUse = await this.attachmentsInUse();
+      const unused = ids.filter((id) => !inUse.has(id));
+      if (unused.length === 0) return;
+      const repos = await this.deps.repos.list();
+      const hosts = [task.repo, ...task.extraRepos.map((e) => e.repo)]
+        .map((id) => repos.find((r) => r.id === id)?.host)
+        .filter((h): h is string => !!h);
+      await this.deps.attachments.remove(unused, hosts);
+    })().catch((error: unknown) => console.error(`[attachments] ${(error as Error).message}`));
+    this.attachmentWork.add(release);
+    return release.finally(() => this.attachmentWork.delete(release));
+  }
+
+  /** Cleanup still in progress (tests wait for it). */
+  private readonly attachmentWork = new Set<Promise<void>>();
+  async settleAttachments(): Promise<void> {
+    await Promise.all([...this.attachmentWork]);
+  }
+
+  /**
+   * On startup: delete attachment folders older than a day that nothing refers to (a draft never
+   * queued, a file removed in the composer, a prompt's replaced screenshot), here and on every repo host.
+   */
+  sweepAttachments(minAgeMs?: number): Promise<void> {
+    const sweep = (async () => {
+      const keep = await this.attachmentsInUse();
+      const hosts = (await this.deps.repos.list()).map((r) => r.host).filter((h): h is string => !!h);
+      await this.deps.attachments.sweep(keep, hosts, minAgeMs);
+    })().catch((error: unknown) => console.error(`[attachments] ${(error as Error).message}`));
+    this.attachmentWork.add(sweep);
+    return sweep.finally(() => this.attachmentWork.delete(sweep));
   }
 
   /**
@@ -277,11 +336,14 @@ export class QueueService {
   }
 
   private async removeTask(id: string): Promise<void> {
+    let removed: Task | undefined;
     await this.stores.queue.update((q) => {
+      removed = q.tasks.find((t) => t.id === id);
       q.tasks = q.tasks.filter((t) => t.id !== id);
     });
     this.buffers.delete(id);
     this.waitingNotes.delete(id);
+    if (removed) void this.releaseAttachments(removed);
   }
 
   // ── commands ─────────────────────────────────────────────────────────────
@@ -318,6 +380,7 @@ export class QueueService {
     const slug = slugify(firstLine.split(/\s+/).slice(0, 6).join(" ")) || "task";
 
     let task: Task | undefined;
+    let replacedDraft: Task | undefined;
     await this.stores.queue.update((q) => {
       const replaced = req.replacesDraft;
       if (replaced !== undefined && !q.tasks.some((t) => t.id === replaced && t.status === "draft")) {
@@ -348,6 +411,7 @@ export class QueueService {
         updatedAt: stamp,
       };
       const at = replaced === undefined ? -1 : q.tasks.findIndex((t) => t.id === replaced);
+      replacedDraft = at === -1 ? undefined : q.tasks[at];
       // A saved-again draft keeps its place; a queued one goes to the back like any new task.
       if (at !== -1 && draft) q.tasks.splice(at, 1, task);
       else {
@@ -357,6 +421,8 @@ export class QueueService {
     });
     const created = task as Task;
     if (req.replacesDraft !== undefined) this.waitingNotes.delete(req.replacesDraft);
+    // Files the edited draft no longer has (the ones it kept are in use by the new task).
+    if (replacedDraft) void this.releaseAttachments(replacedDraft);
     if (draft) {
       // Nothing started, so nothing to log; it shows up in activity once it's queued.
       await this.publish();
@@ -486,6 +552,7 @@ export class QueueService {
     this.waitingNotes.delete(id);
     if (!task) return;
     this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "marked-finished", detail: "Marked finished." });
+    void this.releaseAttachments(task);
     this.deps.broadcaster.taskStatus(id, "done", "Marked finished");
     await this.publish();
   }

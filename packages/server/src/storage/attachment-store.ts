@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Attachment, ATTACHMENT_LIMITS } from "@my-ai-slaves/shared";
-import { scriptOn, sendFile } from "../remote/machine";
+import { scriptOn, sendFile, shq } from "../remote/machine";
 import { toPrettyJson } from "./fs-utils";
 
 const META = "meta.json";
+/** Where attachments are copied on an SSH host, relative to its $HOME. */
+const REMOTE_DIR = ".my-ai-slaves/attachments";
+
+const isId = (id: string) => Attachment.shape.id.safeParse(id).success;
 
 export class AttachmentError extends Error {
   constructor(
@@ -57,7 +61,7 @@ export class AttachmentStore {
   }
 
   async find(id: string): Promise<Attachment | null> {
-    if (!Attachment.shape.id.safeParse(id).success) return null;
+    if (!isId(id)) return null;
     try {
       const parsed = Attachment.safeParse(JSON.parse(await readFile(join(this.dirOf(id), META), "utf8")));
       return parsed.success ? parsed.data : null;
@@ -93,7 +97,7 @@ export class AttachmentStore {
     }
     const home = await homeP;
     for (const a of files) {
-      const dir = `${home}/.my-ai-slaves/attachments/${a.id}`;
+      const dir = `${home}/${REMOTE_DIR}/${a.id}`;
       const key = `${host}\0${a.id}`;
       let copy = this.sent.get(key);
       if (!copy) {
@@ -106,6 +110,67 @@ export class AttachmentStore {
       result.set(a.id, { path: `${dir}/${a.name}`, dir });
     }
     return result;
+  }
+
+  /**
+   * Delete these attachments here and their copies on `hosts` (plus any host this run sent them to).
+   * A host that can't be reached keeps its copies; the next sweep there removes them.
+   */
+  async remove(ids: Iterable<string>, hosts: Iterable<string> = []): Promise<void> {
+    const valid = [...new Set(ids)].filter(isId);
+    if (valid.length === 0) return;
+    const remote = new Map<string, string[]>();
+    for (const host of hosts) remote.set(host, [...valid]);
+    for (const key of this.sent.keys()) {
+      const [host, id] = key.split("\0") as [string, string];
+      if (!valid.includes(id)) continue;
+      const list = remote.get(host) ?? [];
+      if (!list.includes(id)) list.push(id);
+      remote.set(host, list);
+    }
+    await Promise.all(valid.map((id) => rm(this.dirOf(id), { recursive: true, force: true }).catch(() => {})));
+    await Promise.all(
+      [...remote].map(async ([host, list]) => {
+        for (const id of list) this.sent.delete(`${host}\0${id}`);
+        const dirs = list.map((id) => `"$HOME"/${REMOTE_DIR}/${shq(id)}`).join(" ");
+        await scriptOn(host, `rm -rf ${dirs}`).catch(() => {});
+      }),
+    );
+  }
+
+  /**
+   * Delete attachment folders older than `minAgeMs` that `keep` doesn't list, here and on `hosts`.
+   * The age keeps files you attached in a composer that isn't saved yet. Returns the ids removed here.
+   */
+  async sweep(keep: ReadonlySet<string>, hosts: Iterable<string> = [], minAgeMs = 24 * 60 * 60 * 1000): Promise<string[]> {
+    const cutoff = Date.now() - minAgeMs;
+    const removed: string[] = [];
+    const entries = await readdir(this.dir).catch(() => [] as string[]);
+    for (const id of entries) {
+      if (!isId(id) || keep.has(id)) continue;
+      const info = await stat(this.dirOf(id)).catch(() => null);
+      if (!info?.isDirectory() || info.mtimeMs > cutoff) continue;
+      await rm(this.dirOf(id), { recursive: true, force: true }).catch(() => {});
+      removed.push(id);
+    }
+    const minutes = Math.max(0, Math.floor(minAgeMs / 60_000));
+    await Promise.all(
+      [...new Set(hosts)].map(async (host) => {
+        const listed = await scriptOn(
+          host,
+          `cd "$HOME"/${REMOTE_DIR} 2>/dev/null || exit 0; find . -mindepth 1 -maxdepth 1 -type d -mmin +${minutes} -print`,
+        ).catch(() => null);
+        if (!listed) return;
+        const stale = listed.stdout
+          .split("\n")
+          .map((l) => l.trim().replace(/^\.\//, ""))
+          .filter((id) => isId(id) && !keep.has(id));
+        if (stale.length === 0) return;
+        for (const id of stale) this.sent.delete(`${host}\0${id}`);
+        await scriptOn(host, `rm -rf ${stale.map((id) => `"$HOME"/${REMOTE_DIR}/${shq(id)}`).join(" ")}`).catch(() => {});
+      }),
+    );
+    return removed;
   }
 
   /** The attachments a request refers to; throws if any is missing. */
@@ -135,7 +200,8 @@ export function safeName(name: string): string {
     .slice(-120)
     .replace(/[. ]+$/, "") // Windows drops trailing dots and spaces
     .trim();
-  if (!cleaned || cleaned === META) return "file";
+  // Case-insensitive file systems (macOS, Windows) would let `Meta.json` be overwritten by the metadata.
+  if (!cleaned || cleaned.toLowerCase() === META) return "file";
   return WINDOWS_RESERVED.test(cleaned) ? `_${cleaned}` : cleaned;
 }
 
