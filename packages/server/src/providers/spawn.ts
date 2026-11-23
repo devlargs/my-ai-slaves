@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { RawLine, StreamEvent } from "@my-ai-slaves/shared";
+import type { RawLine, StreamEvent, TokenUsage } from "@my-ai-slaves/shared";
 import { localInvocation, REMOTE_PID_MARKER, runOn } from "../remote/machine";
 import type { RunHandle, RunResult, SpawnSpec } from "./types";
 
@@ -29,6 +29,8 @@ export interface ExitInfo {
 export interface StreamParser {
   /** The CLI session seen so far (from its init line), so a stopped run can still be continued. */
   readonly sessionId: string | null;
+  /** Tokens used so far, if the CLI reports them; added to the run's result whatever the outcome. */
+  readonly usage?: TokenUsage | null;
   onLine(line: string): StreamEvent[];
   finish(exit: ExitInfo, stderrTail: string): RunResult;
 }
@@ -113,11 +115,12 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
   });
 
   const done = exited.then((exit): RunResult => {
-    if (cancelled) return { outcome: "cancelled", sessionId: parser.sessionId };
+    if (cancelled) return { outcome: "cancelled", sessionId: parser.sessionId, usage: parser.usage ?? null };
     if (exit.spawnError) {
       return { outcome: "failed", exitCode: null, message: exit.spawnError, stderrTail };
     }
-    return parser.finish(exit, stderrTail);
+    const result = parser.finish(exit, stderrTail);
+    return { ...result, usage: result.usage ?? parser.usage ?? null };
   });
 
   return {

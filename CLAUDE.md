@@ -46,7 +46,7 @@ packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with t
   src/http, src/ws, src/security (Host / Origin / Sec-Fetch-Site guard; no token)
   src/scripts       data-init, demo-activity, prompt-preview, run-task
 packages/web      React 19 + Vite 8 + Tailwind 4, hand-written shadcn-style components (radix-ui)
-                  pages: queue, history, repos, prompts, settings
+                  pages: queue, history, repos, prompts, settings, stats (token usage per account + overall)
 packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder (remembered in
                   <userData>/desktop.json), forks the bundled server on Electron's Node
                   (ELECTRON_RUN_AS_NODE, SLAVES_DATA_DIR/SLAVES_PORT/SLAVES_WEB_DIR), loads the same UI,

@@ -14,6 +14,7 @@ import type {
   DiffResponse,
   FsBrowseResponse,
   HistoryPage,
+  UsageStatsResponse,
   CreateRepoPromptRequest,
   RepoPrompt,
   UpdateRepoPromptRequest,
@@ -153,6 +154,7 @@ export const api = {
   discardTask: (id: string) => request<Ok>("POST", `/tasks/${enc(id)}/discard`, { confirm: true }),
 
   history: (offset = 0, limit = 50) => request<HistoryPage>("GET", `/history?offset=${offset}&limit=${limit}`),
+  usageStats: () => request<UsageStatsResponse>("GET", "/stats/usage"),
 };
 
 /** Await an API call; on failure log it and resolve to undefined. */

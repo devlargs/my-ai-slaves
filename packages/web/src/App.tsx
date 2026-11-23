@@ -1,4 +1,5 @@
 import {
+  BarChart3Icon,
   BellIcon,
   FolderGit2Icon,
   HistoryIcon,
@@ -22,8 +23,9 @@ import { PromptsPage } from "@/pages/prompts-page";
 import { QueuePage } from "@/pages/queue-page";
 import { ReposPage } from "@/pages/repos-page";
 import { SettingsPage } from "@/pages/settings-page";
+import { StatsPage } from "@/pages/stats-page";
 
-type Route = "queue" | "repos" | "prompts" | "settings" | "history";
+type Route = "queue" | "repos" | "prompts" | "settings" | "history" | "stats";
 
 const NAV: { route: Route; label: string; icon: LucideIcon }[] = [
   { route: "queue", label: "Queue", icon: ListOrderedIcon },
@@ -31,6 +33,7 @@ const NAV: { route: Route; label: string; icon: LucideIcon }[] = [
   { route: "prompts", label: "Prompts", icon: LibraryBigIcon },
   { route: "settings", label: "Settings", icon: SettingsIcon },
   { route: "history", label: "History", icon: HistoryIcon },
+  { route: "stats", label: "Statistics", icon: BarChart3Icon },
 ];
 
 function readRoute(): Route {
@@ -75,6 +78,7 @@ export function App() {
         {page === "prompts" && <PromptsPage />}
         {page === "settings" && <SettingsPage />}
         {page === "history" && <HistoryPage />}
+        {page === "stats" && <StatsPage />}
       </main>
     </div>
     </TooltipProvider>

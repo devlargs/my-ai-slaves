@@ -1,6 +1,7 @@
-import type { StreamEvent } from "@my-ai-slaves/shared";
+import type { StreamEvent, TokenUsage } from "@my-ai-slaves/shared";
 import { type ExitInfo, preview, type StreamParser } from "../spawn";
 import type { RunResult } from "../types";
+import { fromCamelUsage } from "../usage";
 import { detectCursorLimit, detectCursorLoggedOut } from "./detect-limit";
 
 type Json = Record<string, any>;
@@ -34,6 +35,11 @@ export class CursorStreamParser implements StreamParser {
   private result: Json | null = null;
   private buffer = "";
   private sawDelta = false;
+  /**
+   * Cursor's documented result line has no token counts; newer CLIs may add a camelCase `usage`
+   * object, which is picked up when it is there.
+   */
+  usage: TokenUsage | null = null;
 
   constructor(private readonly limitPatterns: string[]) {}
 
@@ -97,6 +103,7 @@ export class CursorStreamParser implements StreamParser {
 
       case "result": {
         this.result = msg;
+        this.usage = fromCamelUsage(msg.usage) ?? this.usage;
         this.sessionId = msg.session_id ?? this.sessionId;
         return this.flushText();
       }

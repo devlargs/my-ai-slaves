@@ -230,6 +230,11 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect(call?.prompt).toBe("GLOBAL RULES\n\nREPO RULES\n\nNEW STYLE\n\ngo");
     const history = await stores.activity.forTask(task.id);
     expect(history.some((e) => e.event === "warning" && e.detail.includes("gone-soon"))).toBe(true);
+    // The run's token usage is on its finished entry and in the Statistics records.
+    expect(history.find((e) => e.event === "finished")?.data?.usage).toEqual({
+      inputTokens: 10, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 40, costUsd: 0.01,
+    });
+    expect(stores.activity.usageRecords().filter((r) => r.taskId === task.id)).toHaveLength(1);
     await expect(queue.create({ repo: repo.id, message: "x", promptIds: ["nope"] })).rejects.toThrow("Unknown saved prompt");
   });
 

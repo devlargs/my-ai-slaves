@@ -193,4 +193,18 @@ describe("ActivityLog", () => {
     const { log: reopened } = await openLog(dir, 600);
     expect(reopened.taskSummaries().find((s) => s.taskId === "task_a")).toEqual(expected);
   });
+
+  it("keeps every run's token usage, across a restart, for Statistics", async () => {
+    const dir = await tempDir();
+    const usage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4, costUsd: null };
+    const { log } = await openLog(dir);
+    await log.append(entry("t1", "done", { event: "finished", data: { usage } }));
+    await log.append(entry("t2", "no usage", { event: "finished", data: { result: "x" } }));
+    await log.append(entry("t3", "bad usage", { event: "failed", data: { usage: "nope" } }));
+    await log.close();
+    const { log: reopened } = await openLog(dir);
+    expect(reopened.usageRecords()).toEqual([
+      { at: "2026-11-18T18:02:00+08:00", taskId: "t1", repo: "supertri-web", account: "work_1-claude", usage },
+    ]);
+  });
 });

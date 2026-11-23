@@ -3,7 +3,7 @@
  * Errors: non-2xx status with body `ApiError`.
  */
 import type { Account, AccountStatus } from "./schemas/accounts";
-import type { ActivityEntry } from "./schemas/activity";
+import type { ActivityEntry, TokenUsage } from "./schemas/activity";
 import type { ProviderId } from "./schemas/common";
 import type { Task, TaskStatus } from "./schemas/queue";
 import type { SavedPrompt as SavedPromptT } from "./schemas/prompts";
@@ -367,4 +367,19 @@ export interface ScriptRunInfo {
 export interface ScriptRun extends ScriptRunInfo {
   /** stdout + stderr as it came (the last 256 KB). */
   output: string;
+}
+
+// ── Statistics ──────────────────────────────────────────────────────────────
+/** One run's token usage, from the activity log. */
+export interface UsageRecord {
+  at: string;
+  taskId: string;
+  repo: string;
+  /** Account (subscription) id the run used. */
+  account: string;
+  usage: TokenUsage;
+}
+/** GET /api/stats/usage → every recorded run's usage, oldest first. The page adds them up. */
+export interface UsageStatsResponse {
+  records: UsageRecord[];
 }

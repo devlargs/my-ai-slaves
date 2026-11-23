@@ -882,6 +882,8 @@ export class QueueService {
     const account = run.account;
     const base = { taskId: task.id, repo: task.repo, account: account.id };
     const repo = (await this.deps.repos.list()).find((r) => r.id === task.repo);
+    // The entry that ends the run carries its token usage, for the Statistics page.
+    const usage = result.usage ? { usage: result.usage } : {};
 
     switch (result.outcome) {
       case "success": {
@@ -894,7 +896,7 @@ export class QueueService {
           ...base,
           event: "finished",
           detail: `Finished on ${account.id}. Ready for review.`,
-          data: { result: result.resultText, costUsd: result.costUsd },
+          data: { result: result.resultText, costUsd: result.costUsd, ...usage },
         });
         this.deps.broadcaster.taskStatus(task.id, "needs-review", "Ready for review");
         this.deps.broadcaster.notify(task.id, "Task ready for review", task.title);
@@ -910,11 +912,11 @@ export class QueueService {
             ...base,
             event: "limit-hit",
             detail: `${account.id} hit a usage limit (${reason}). Free again at ${view.limitedUntil ? shortTime(view.limitedUntil, this.now()) : "?"}.`,
-            data: { resetsAt: result.limit.resetsAt, limitedUntil: view.limitedUntil },
+            data: { resetsAt: result.limit.resetsAt, limitedUntil: view.limitedUntil, ...usage },
           });
         } else {
           await this.deps.accounts.markLoggedOut(account.id);
-          this.log({ ...base, event: "warning", detail: `${account.id} is logged out (${reason}). Log in again on the Settings page.` });
+          this.log({ ...base, event: "warning", detail: `${account.id} is logged out (${reason}). Log in again on the Settings page.`, data: usage });
         }
 
         // Fresh runs start over on the next account (the repo is left as it is); replies keep their
@@ -957,13 +959,14 @@ export class QueueService {
           ...base,
           event: "cancelled",
           detail: task.resumeOnStart ? "Stopped to restart for an update; it runs again when the app is back." : "Stopped by you. Retry or discard it.",
+          data: usage,
         });
         this.deps.broadcaster.taskStatus(task.id, "interrupted", "Stopped");
         break;
       }
 
       case "failed": {
-        const data = { exitCode: result.exitCode, stderrTail: result.stderrTail };
+        const data = { exitCode: result.exitCode, stderrTail: result.stderrTail, ...usage };
         if (run.isReply) {
           // Keep the earlier work: back to review.
           await this.updateTask(task.id, (t) => {

@@ -1,4 +1,4 @@
-import type { Account, ProviderId, RawLine, SettingsFile, StreamEvent } from "@my-ai-slaves/shared";
+import type { Account, ProviderId, RawLine, SettingsFile, StreamEvent, TokenUsage } from "@my-ai-slaves/shared";
 
 export interface SpawnSpec {
   command: string;
@@ -16,12 +16,16 @@ export interface LimitInfo {
   reason: string;
 }
 
-export type RunResult =
+export type RunResult = (
   | { outcome: "success"; sessionId: string | null; resultText: string; costUsd: number | null }
   | { outcome: "limit"; limit: LimitInfo; sessionId: string | null }
   | { outcome: "logged-out"; message: string }
   | { outcome: "failed"; exitCode: number | null; message: string; stderrTail: string }
-  | { outcome: "cancelled"; sessionId: string | null };
+  | { outcome: "cancelled"; sessionId: string | null }
+) & {
+  /** Tokens the run used, when the CLI reported any (whatever the outcome). */
+  usage?: TokenUsage | null;
+};
 
 export interface RunHandle {
   onStream(cb: (event: StreamEvent) => void): () => void;

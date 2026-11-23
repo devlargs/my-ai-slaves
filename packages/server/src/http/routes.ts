@@ -304,6 +304,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
 
+  app.get("/api/stats/usage", () => ({ records: stores.activity.usageRecords() }));
+
   app.get("/api/history", async (req) => {
     const q = req.query as { offset?: string; limit?: string };
     const offset = Math.max(0, Math.floor(Number(q.offset) || 0));

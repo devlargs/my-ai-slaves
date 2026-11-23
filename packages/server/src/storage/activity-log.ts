@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { ActivityEntry, ActivityFile, formatLocalIso } from "@my-ai-slaves/shared";
+import { ActivityEntry, ActivityFile, formatLocalIso, TokenUsage, type UsageRecord } from "@my-ai-slaves/shared";
 import { backupCorrupt, consoleLogger, type Logger, removeStaleTmp, writeFileAtomic } from "./fs-utils";
 import { enqueueFileJob } from "./write-queue";
 
@@ -127,6 +127,8 @@ export class ActivityLog {
   /** taskId → names of the files holding its entries, oldest first. */
   private readonly index = new Map<string, string[]>();
   private readonly summaries = new Map<string, TaskSummary>();
+  /** Every run's token usage (from entries carrying `data.usage`), oldest first, for Statistics. */
+  private readonly usage: UsageRecord[] = [];
   private flushDelayMs: number;
   /** Files whose write is waiting out `flushDelayMs`, with a way to start it right away. */
   private readonly delayed = new Map<ActivityFileState, () => void>();
@@ -213,6 +215,11 @@ export class ActivityLog {
     const waiting = [...this.delayed.keys()].map((state) => state.pendingWrite);
     for (const start of [...this.delayed.values()]) start();
     await Promise.all(waiting);
+  }
+
+  /** Every recorded run's token usage, oldest first. */
+  usageRecords(): UsageRecord[] {
+    return [...this.usage];
   }
 
   /** One summary per task that has entries (any order). */
@@ -305,6 +312,12 @@ export class ActivityLog {
     if (entry.event === "started") s.started = pick(entry.data, ["ref", "branch"]);
     if (TERMINAL_EVENTS.has(entry.event)) s.terminal = { event: entry.event, repo: entry.repo, at: entry.at };
     if (entry.account) s.lastAccount = entry.account;
+    if (entry.account && entry.data?.usage) {
+      const usage = TokenUsage.safeParse(entry.data.usage);
+      if (usage.success) {
+        this.usage.push({ at: entry.at, taskId: entry.taskId, repo: entry.repo, account: entry.account, usage: usage.data });
+      }
+    }
   }
 
   private addToIndex(taskId: string, fileName: string): void {

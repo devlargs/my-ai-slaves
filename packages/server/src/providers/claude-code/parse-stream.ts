@@ -1,6 +1,7 @@
-import type { StreamEvent } from "@my-ai-slaves/shared";
+import type { StreamEvent, TokenUsage } from "@my-ai-slaves/shared";
 import { type ExitInfo, preview, type StreamParser } from "../spawn";
 import type { RunResult } from "../types";
+import { addUsage, emptyUsage, fromAnthropicUsage, fromClaudeModelUsage, hasTokens } from "../usage";
 import { type ClaudeRunFacts, detectClaudeLimit, detectClaudeLoggedOut } from "./detect-limit";
 
 const FILE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
@@ -34,6 +35,9 @@ export class ClaudeStreamParser implements StreamParser {
     result: null,
     stderrTail: "",
   };
+  /** Assistant message id → its usage (every message of one turn repeats the same usage). */
+  private readonly stepUsage = new Map<string, TokenUsage>();
+  private resultUsage: TokenUsage | null = null;
 
   constructor(
     private readonly expectedPermissionMode: string,
@@ -89,6 +93,8 @@ export class ClaudeStreamParser implements StreamParser {
 
       case "assistant": {
         if (typeof msg.error === "string") this.facts.assistantErrors.push(msg.error);
+        const id = msg.message?.id;
+        if (typeof id === "string" && msg.message?.usage) this.stepUsage.set(id, fromAnthropicUsage(msg.message.usage));
         if (!topLevel) return [];
         const events: StreamEvent[] = [];
         for (const block of (msg.message?.content ?? []) as Json[]) {
@@ -136,6 +142,10 @@ export class ClaudeStreamParser implements StreamParser {
 
       case "result": {
         this.facts.result = msg;
+        // modelUsage covers subagents too; the result's own usage is the fallback.
+        const usage = fromClaudeModelUsage(msg.modelUsage) ?? fromAnthropicUsage(msg.usage);
+        if (typeof msg.total_cost_usd === "number") usage.costUsd = msg.total_cost_usd;
+        this.resultUsage = usage;
         this.sessionId = msg.session_id ?? this.sessionId;
         return [];
       }
@@ -143,6 +153,17 @@ export class ClaudeStreamParser implements StreamParser {
       default:
         return [];
     }
+  }
+
+  /**
+   * The result line's totals; a run stopped before it gets the sum of its steps (their output
+   * counts are only what the API had reported when each message started, so they run low).
+   */
+  get usage(): TokenUsage | null {
+    if (this.resultUsage && (hasTokens(this.resultUsage) || this.resultUsage.costUsd !== null)) return this.resultUsage;
+    const total = emptyUsage();
+    for (const step of this.stepUsage.values()) addUsage(total, step);
+    return hasTokens(total) ? total : null;
   }
 
   finish(exit: ExitInfo, stderrTail: string): RunResult {

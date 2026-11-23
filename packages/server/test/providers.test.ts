@@ -67,6 +67,37 @@ describe("ClaudeStreamParser", () => {
     expect(p.finish(ok, "")).toEqual({ outcome: "success", sessionId: "s1", resultText: "Done", costUsd: 0.5 });
   });
 
+  it("takes token usage from the result's modelUsage (subagents included), else its usage", () => {
+    const p = new ClaudeStreamParser("auto");
+    lines(p, [
+      {
+        type: "result", subtype: "success", is_error: false, result: "Done", total_cost_usd: 0.5, session_id: "s1",
+        usage: { input_tokens: 1, output_tokens: 1 },
+        modelUsage: {
+          a: { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, costUSD: 0.3 },
+          b: { inputTokens: 1, outputTokens: 2, cacheReadInputTokens: 3, cacheCreationInputTokens: 4, costUSD: 0.2 },
+        },
+      },
+    ]);
+    expect(p.usage).toEqual({ inputTokens: 11, outputTokens: 22, cacheReadTokens: 33, cacheWriteTokens: 44, costUsd: 0.5 });
+
+    const q = new ClaudeStreamParser("auto");
+    lines(q, [{ type: "result", subtype: "success", is_error: false, result: "x", usage: { input_tokens: 5, output_tokens: 6, cache_read_input_tokens: 7 } }]);
+    expect(q.usage).toEqual({ inputTokens: 5, outputTokens: 6, cacheReadTokens: 7, cacheWriteTokens: 0, costUsd: null });
+  });
+
+  it("sums a stopped run's steps, counting each message id once", () => {
+    const p = new ClaudeStreamParser("auto");
+    const usage = { input_tokens: 100, output_tokens: 5, cache_read_input_tokens: 50, cache_creation_input_tokens: 10 };
+    lines(p, [
+      { type: "assistant", message: { id: "m1", usage, content: [{ type: "text", text: "a" }] }, parent_tool_use_id: null },
+      { type: "assistant", message: { id: "m1", usage, content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] }, parent_tool_use_id: null },
+      { type: "assistant", message: { id: "m2", usage, content: [] }, parent_tool_use_id: "t1" },
+    ]);
+    expect(p.usage).toEqual({ inputTokens: 200, outputTokens: 10, cacheReadTokens: 100, cacheWriteTokens: 20, costUsd: null });
+    expect(new ClaudeStreamParser("auto").usage).toBeNull();
+  });
+
   it("warns when auto mode silently fell back", () => {
     const p = new ClaudeStreamParser("auto");
     const events = lines(p, [{ type: "system", subtype: "init", session_id: "s", model: "m", permissionMode: "default" }]);

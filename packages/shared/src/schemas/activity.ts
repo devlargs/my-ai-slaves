@@ -40,3 +40,17 @@ export const ActivityFile = z.object({
   entries: z.array(ActivityEntry),
 });
 export type ActivityFile = z.infer<typeof ActivityFile>;
+
+/**
+ * Tokens one run used, as its CLI reported them. Saved in the `data.usage` of the entry that ends the
+ * run (finished, failed, cancelled, limit-hit, …); the Statistics page adds them up.
+ */
+export const TokenUsage = z.object({
+  inputTokens: z.number().nonnegative().default(0),
+  outputTokens: z.number().nonnegative().default(0),
+  cacheReadTokens: z.number().nonnegative().default(0),
+  cacheWriteTokens: z.number().nonnegative().default(0),
+  /** The CLI's own estimate in USD (Claude only), not what a subscription is billed. */
+  costUsd: z.number().nonnegative().nullable().default(null),
+});
+export type TokenUsage = z.infer<typeof TokenUsage>;
