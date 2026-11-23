@@ -36,6 +36,20 @@ interface RunState {
   exited: Promise<void>;
 }
 
+/**
+ * Variables of the app's own process that must not reach a repo's script: the desktop app runs its
+ * server with NODE_ENV=production (which breaks `next dev` and other dev servers) and
+ * ELECTRON_RUN_AS_NODE, our SLAVES_* settings, and, under `npm run dev`, npm's own npm_* / INIT_CWD.
+ */
+const APP_ONLY_ENV = /^(NODE_ENV|ELECTRON_RUN_AS_NODE|INIT_CWD|SLAVES_\w+|npm_\w+|NPM_\w+|BERRY_BIN_FOLDER|PROJECT_CWD)$/i;
+
+/** The env a script runs with: like a fresh terminal's, without the app's own settings. */
+export function scriptEnv(): Record<string, string> {
+  const env = childEnv({});
+  for (const key of Object.keys(env)) if (APP_ONLY_ENV.test(key)) delete env[key];
+  return env;
+}
+
 // Names `cmd.exe` passes through untouched (Windows runs the package manager's .cmd shim through it).
 const WINDOWS_SAFE_NAME = /^[\w.:@/+-]+$/;
 
@@ -123,7 +137,7 @@ export class ScriptService {
 
     const child = spawn(command, spawnArgs, {
       cwd: host ? undefined : repo.path,
-      env: childEnv({}),
+      env: scriptEnv(),
       shell: false,
       windowsHide: true,
       // Its own process group on macOS/Linux, so Stop reaches the dev server the script started too.

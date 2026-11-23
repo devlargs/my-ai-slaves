@@ -74,6 +74,25 @@ describe("repo scripts", () => {
     expect(await ended("fail")).toMatchObject({ status: "failed", exitCode: 3 });
   }, 30_000);
 
+  it("runs scripts without the app's own NODE_ENV, Electron and SLAVES_* settings", async () => {
+    const dir = await repoWith({
+      env: node("console.log('env=' + [process.env.NODE_ENV, process.env.ELECTRON_RUN_AS_NODE, process.env.SLAVES_PORT].join(','))"),
+    });
+    const saved = { ...process.env };
+    Object.assign(process.env, { NODE_ENV: "production", ELECTRON_RUN_AS_NODE: "1", SLAVES_PORT: "3005" });
+    try {
+      const { scripts, chunks, ended } = service();
+      await scripts.run(repo(dir), "env");
+      expect(await ended("env")).toMatchObject({ status: "done" });
+      expect(chunks.join("")).toContain("env=,,");
+    } finally {
+      for (const key of ["NODE_ENV", "ELECTRON_RUN_AS_NODE", "SLAVES_PORT"]) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
+    }
+  }, 30_000);
+
   it("refuses unknown scripts and a second copy of a running one, and stops it", async () => {
     const dir = await repoWith({ serve: node("console.log('up'); setInterval(() => {}, 1000)") });
     const { scripts, ended } = service();
