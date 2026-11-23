@@ -1,7 +1,10 @@
-import type { GitHistory, PullMode, Repo } from "@my-ai-slaves/shared";
+import { existsSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import type { GitHistory, GitRefAction, PullMode, RebaseStep, Repo } from "@my-ai-slaves/shared";
 import { type GitIdentity, gitIdentityEnv } from "../providers/types";
 import { runOn } from "../remote/machine";
 import { badRequest, conflict } from "./common";
+import { parseRebasePlan, rebasePlanArgs } from "./repo-git";
 
 /**
  * The graph toolbar (Undo, Redo, Pull, Branch) and the WIP panel (stage, unstage, commit). These are
@@ -202,15 +205,17 @@ export class RepoActions {
 
   /** Fetch all remotes, or pull the checked-out branch the chosen way. A failed merge/rebase is aborted. */
   pull(repo: Repo, mode: PullMode, identity: GitIdentity | null): Promise<GitHistory> {
-    return this.exclusive(repo, async () => {
+    return this.exclusive(repo, () => this.pullHere(repo, mode, identity));
+  }
+
+  private async pullHere(repo: Repo, mode: PullMode, identity: GitIdentity | null): Promise<GitHistory> {
+    {
       const h = await this.sync(repo);
       if (mode === "fetch") {
         await this.git(repo, ["fetch", "--all", "--prune"], { timeoutMs: 300_000 });
         return this.view(h);
       }
-      if ((await this.exists(repo, "MERGE_HEAD")) || (await this.exists(repo, "REBASE_HEAD"))) {
-        throw conflict("A merge or rebase is in progress in this repo. Finish or abort it first.");
-      }
+      await this.notMidOperation(repo);
       const before = await this.head(repo);
       try {
         await this.git(repo, PULL_ARGS[mode], { env: gitIdentityEnv(identity), timeoutMs: 300_000 });
@@ -227,7 +232,7 @@ export class RepoActions {
       }
       h.marker = await this.marker(repo);
       return this.view(h);
-    });
+    }
   }
 
   /**
@@ -289,22 +294,289 @@ export class RepoActions {
 
   /** A new branch at HEAD, checked out (like `git checkout -b`). */
   createBranch(repo: Repo, name: string): Promise<GitHistory> {
-    return this.exclusive(repo, async () => {
-      const clean = name.trim();
-      const valid =
-        safeRef(clean) && (await this.git(repo, ["check-ref-format", "--branch", clean]).then(() => true, () => false));
-      if (!valid) throw badRequest(`"${clean}" isn't a valid branch name.`);
-      if (await this.exists(repo, `refs/heads/${clean}`)) throw conflict(`A branch named ${clean} already exists.`);
-      const h = await this.sync(repo);
-      const from = await this.currentRef(repo);
-      const commit = await this.head(repo);
-      await this.git(repo, ["checkout", "-b", clean, "--"]);
-      h.undo.push({ kind: "branch", name: clean, commit, from, label: `create branch ${clean}` });
+    return this.exclusive(repo, () => this.branchHere(repo, name, null));
+  }
+
+  /** A new branch at `at` (HEAD when null), checked out. */
+  private async branchHere(repo: Repo, name: string, at: string | null): Promise<GitHistory> {
+    const clean = await this.newBranchName(repo, name);
+    const h = await this.sync(repo);
+    const from = await this.currentRef(repo);
+    const commit = at ?? (await this.head(repo));
+    await this.git(repo, at ? ["checkout", "-b", clean, at, "--"] : ["checkout", "-b", clean, "--"]);
+    h.undo.push({ kind: "branch", name: clean, commit, from, label: `create branch ${clean}` });
+    h.redo = [];
+    h.marker = await this.marker(repo);
+    return this.view(h);
+  }
+
+  private async newBranchName(repo: Repo, name: string): Promise<string> {
+    const clean = name.trim();
+    const valid = safeRef(clean) && (await this.git(repo, ["check-ref-format", "--branch", clean]).then(() => true, () => false));
+    if (!valid) throw badRequest(`"${clean}" isn't a valid branch name.`);
+    if (await this.exists(repo, `refs/heads/${clean}`)) throw conflict(`A branch named ${clean} already exists.`);
+    return clean;
+  }
+
+  /** Refuses while a merge, rebase, cherry-pick or revert is half done (left by something outside the app). */
+  private async notMidOperation(repo: Repo): Promise<void> {
+    for (const ref of ["MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]) {
+      if (await this.exists(repo, ref)) {
+        throw conflict("A merge, rebase, cherry-pick or revert is in progress in this repo. Finish or abort it first.");
+      }
+    }
+    for (const dir of ["rebase-merge", "rebase-apply"]) {
+      const path = (await this.git(repo, ["rev-parse", "--git-path", dir])).trim();
+      if (path && (await this.dirExists(repo, path))) throw conflict("A rebase is in progress in this repo. Finish or abort it first.");
+    }
+  }
+
+  /** Whether a folder exists (relative paths are from the repo root), here or on the repo's server. */
+  private async dirExists(repo: Repo, path: string): Promise<boolean> {
+    if (!repo.host) return existsSync(isAbsolute(path) ? path : join(repo.path, path));
+    const out = await runOn(repo.host, "sh", ["-c", 'test -d "$1" && echo yes', "sh", path], repo.path, { okExitCodes: [1] });
+    return out.stdout.trim() === "yes";
+  }
+
+  /** The branch's upstream: remote name and the branch's ref there, or null. */
+  private async upstreamOf(repo: Repo, branch: string): Promise<{ remote: string; ref: string } | null> {
+    const out = await this.git(repo, [
+      "for-each-ref",
+      "--format=%(upstream:remotename)%1f%(upstream:remoteref)",
+      `refs/heads/${branch}`,
+    ]);
+    const [remote, ref] = out.trim().split("\x1f");
+    return remote && ref && safeRef(remote) && safeRef(ref) ? { remote, ref } : null;
+  }
+
+  private async remotes(repo: Repo): Promise<string[]> {
+    return (await this.git(repo, ["remote"])).split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
+  }
+
+  /** "origin/feat/x" → { remote: "origin", name: "feat/x" } (the longest matching remote wins). */
+  private async splitRemoteRef(repo: Repo, ref: string): Promise<{ remote: string; name: string }> {
+    const remote = (await this.remotes(repo))
+      .filter((r) => ref.startsWith(`${r}/`) && ref.length > r.length + 1)
+      .sort((a, b) => b.length - a.length)[0];
+    if (!remote) throw badRequest(`"${ref}" isn't a branch on a remote of this repo.`);
+    return { remote, name: ref.slice(remote.length + 1) };
+  }
+
+  /** A branch or remote branch that exists, for merge / rebase / checkout. */
+  private async checkRef(repo: Repo, ref: string): Promise<"local" | "remote"> {
+    if (!safeRef(ref)) throw badRequest(`"${ref}" isn't a branch.`);
+    if (await this.exists(repo, `refs/heads/${ref}`)) return "local";
+    if (await this.exists(repo, `refs/remotes/${ref}`)) return "remote";
+    throw conflict(`There's no branch named ${ref}. Refresh and try again.`);
+  }
+
+  private async checkCommit(repo: Repo, commit: string): Promise<string> {
+    if (!SHA.test(commit) || !(await this.exists(repo, `${commit}^{commit}`))) throw badRequest(`Not a commit in this repo: ${commit}`);
+    return commit;
+  }
+
+  private async localBranch(repo: Repo, branch: string): Promise<string> {
+    if (!safeRef(branch) || !(await this.exists(repo, `refs/heads/${branch}`))) throw conflict(`There's no local branch named ${branch}.`);
+    return branch;
+  }
+
+  /**
+   * Runs a merge / rebase / cherry-pick / revert; when it stops (a conflict), it's aborted so the repo
+   * is as it was, and the error is passed on.
+   */
+  private async orAbort(repo: Repo, abort: string[], work: () => Promise<unknown>): Promise<void> {
+    try {
+      await work();
+    } catch (error) {
+      await this.git(repo, abort).catch(() => {});
+      throw error;
+    }
+  }
+
+  /** Something that moved HEAD: undoable as a `reset --keep` back to `before`. */
+  private async moved(repo: Repo, h: History, before: string, label: string): Promise<GitHistory> {
+    const after = await this.head(repo);
+    if (after !== before) {
+      h.undo.push({ kind: "reset", mode: "keep", before, after, label });
       h.redo = [];
-      h.marker = await this.marker(repo);
-      return this.view(h);
+    }
+    h.marker = await this.marker(repo);
+    return this.view(h);
+  }
+
+  /** The graph's right-click menu on a branch or a commit. */
+  refAction(repo: Repo, action: GitRefAction, identity: GitIdentity | null): Promise<GitHistory> {
+    return this.exclusive(repo, async () => {
+      const env = gitIdentityEnv(identity);
+      const slow = { timeoutMs: 300_000 };
+      switch (action.op) {
+        case "pull": {
+          const branch = await this.localBranch(repo, action.branch);
+          if ((await this.currentRef(repo)) === branch) return this.pullHere(repo, "pull-ff", identity);
+          const up = await this.upstreamOf(repo, branch);
+          if (!up) throw conflict(`${branch} has no upstream to pull from. Set one first.`);
+          // Fetch straight into the branch: git refuses anything but a fast-forward.
+          await this.git(repo, ["fetch", up.remote, `${up.ref}:refs/heads/${branch}`], slow);
+          return this.view(await this.sync(repo));
+        }
+        case "push": {
+          const branch = await this.localBranch(repo, action.branch);
+          const up = await this.upstreamOf(repo, branch);
+          if (up) {
+            await this.git(repo, ["push", up.remote, `refs/heads/${branch}:${up.ref}`], slow);
+          } else {
+            const remotes = await this.remotes(repo);
+            const remote = action.remote ?? (remotes.includes("origin") ? "origin" : remotes.length === 1 ? remotes[0] : undefined);
+            if (!remote || !remotes.includes(remote)) throw conflict("This repo has no remote to push to.");
+            await this.git(repo, ["push", "-u", remote, `refs/heads/${branch}:refs/heads/${branch}`], slow);
+          }
+          return this.view(await this.sync(repo));
+        }
+        case "set-upstream": {
+          const branch = await this.localBranch(repo, action.branch);
+          const upstream = action.upstream.trim();
+          const { remote, name } = await this.splitRemoteRef(repo, upstream);
+          if (!safeRef(name) || !(await this.git(repo, ["check-ref-format", "--branch", name]).then(() => true, () => false))) {
+            throw badRequest(`"${name}" isn't a valid branch name.`);
+          }
+          if (await this.exists(repo, `refs/remotes/${upstream}`)) {
+            await this.git(repo, ["branch", `--set-upstream-to=${upstream}`, branch]);
+          } else {
+            // Not on the remote yet: push it there, then track it.
+            await this.git(repo, ["push", "-u", remote, `refs/heads/${branch}:refs/heads/${name}`], slow);
+          }
+          return this.view(await this.sync(repo));
+        }
+        case "merge": {
+          await this.checkRef(repo, action.ref);
+          if ((await this.currentRef(repo)) === action.ref) throw badRequest("A branch can't be merged into itself.");
+          await this.notMidOperation(repo);
+          const h = await this.sync(repo);
+          const before = await this.head(repo);
+          await this.orAbort(repo, ["merge", "--abort"], () =>
+            this.git(repo, ["merge", "--no-edit", action.ref], { env: { ...env, GIT_EDITOR: "true" }, ...slow }),
+          );
+          return this.moved(repo, h, before, `merge ${action.ref}`);
+        }
+        case "rebase":
+        case "interactive-rebase": {
+          await this.checkRef(repo, action.ref);
+          await this.notMidOperation(repo);
+          const h = await this.sync(repo);
+          const before = await this.head(repo);
+          const rebaseEnv: Record<string, string> = { ...env, GIT_EDITOR: "true" };
+          const args = ["-c", "rebase.missingCommitsCheck=error", "rebase", "--no-autosquash"];
+          if (action.op === "interactive-rebase") {
+            const plan = parseRebasePlan(await this.git(repo, rebasePlanArgs(action.ref)));
+            Object.assign(rebaseEnv, rebaseTodoEnv(action.steps, plan.map((c) => c.hash)));
+            args.push("-i");
+          }
+          args.push(action.ref);
+          await this.orAbort(repo, ["rebase", "--abort"], () => this.git(repo, args, { env: rebaseEnv, ...slow }));
+          return this.moved(repo, h, before, action.op === "rebase" ? `rebase onto ${action.ref}` : `interactive rebase onto ${action.ref}`);
+        }
+        case "checkout": {
+          const kind = await this.checkRef(repo, action.ref);
+          if (kind === "local") {
+            await this.git(repo, ["checkout", action.ref, "--"]);
+          } else {
+            // A remote branch: check out its local branch, or make one that tracks it.
+            const { name } = await this.splitRemoteRef(repo, action.ref);
+            if (await this.exists(repo, `refs/heads/${name}`)) await this.git(repo, ["checkout", name, "--"]);
+            else await this.git(repo, ["checkout", "-b", await this.newBranchName(repo, name), "--track", action.ref, "--"]);
+          }
+          return this.view(await this.sync(repo));
+        }
+        case "create-branch":
+          return this.branchHere(repo, action.name, await this.checkCommit(repo, action.commit));
+        case "cherry-pick":
+        case "revert": {
+          const commit = await this.checkCommit(repo, action.commit);
+          await this.notMidOperation(repo);
+          const parents = (await this.git(repo, ["rev-list", "--parents", "-n1", commit, "--"])).trim().split(/\s+/).length - 1;
+          const h = await this.sync(repo);
+          const before = await this.head(repo);
+          const args = action.op === "cherry-pick" ? ["cherry-pick"] : ["revert", "--no-edit"];
+          // A merge commit is taken relative to its first parent (the branch it was merged into).
+          if (parents > 1) args.push("-m", "1");
+          args.push(commit);
+          await this.orAbort(repo, [action.op, "--abort"], () => this.git(repo, args, { env: { ...env, GIT_EDITOR: "true" }, ...slow }));
+          return this.moved(repo, h, before, `${action.op} ${commit.slice(0, 7)}`);
+        }
+        case "reset": {
+          const commit = await this.checkCommit(repo, action.commit);
+          await this.notMidOperation(repo);
+          const h = await this.sync(repo);
+          const before = await this.head(repo);
+          await this.git(repo, ["reset", `--${action.mode}`, commit, "--"]);
+          return this.moved(repo, h, before, `reset to ${commit.slice(0, 7)}`);
+        }
+        case "rename-branch": {
+          const branch = await this.localBranch(repo, action.branch);
+          const name = await this.newBranchName(repo, action.name);
+          await this.git(repo, ["branch", "-m", branch, name]);
+          return this.view(await this.sync(repo));
+        }
+        case "delete-branch": {
+          if (action.remote) {
+            await this.checkRef(repo, action.ref);
+            const { remote, name } = await this.splitRemoteRef(repo, action.ref);
+            await this.git(repo, ["push", "--delete", remote, `refs/heads/${name}`], slow);
+          } else {
+            const branch = await this.localBranch(repo, action.ref);
+            if ((await this.currentRef(repo)) === branch) throw conflict(`${branch} is checked out. Check out another branch first.`);
+            await this.git(repo, ["branch", "-D", branch]);
+          }
+          return this.view(await this.sync(repo));
+        }
+        case "tag": {
+          const commit = await this.checkCommit(repo, action.commit);
+          const name = action.name.trim();
+          const valid = safeRef(name) && (await this.git(repo, ["check-ref-format", `refs/tags/${name}`]).then(() => true, () => false));
+          if (!valid) throw badRequest(`"${name}" isn't a valid tag name.`);
+          if (await this.exists(repo, `refs/tags/${name}`)) throw conflict(`A tag named ${name} already exists.`);
+          const message = action.message?.trim();
+          await this.git(repo, message ? ["tag", "-a", name, "-m", message, commit] : ["tag", name, commit], { env });
+          return this.view(await this.sync(repo));
+        }
+      }
     });
   }
+}
+
+/**
+ * The env that makes `git rebase -i` use these steps instead of opening an editor: GIT_SEQUENCE_EDITOR
+ * writes the todo list (hashes and fixed words only), and each reword's message rides in its own env
+ * var, read by an `exec git commit --amend` line, so no message text is ever parsed by a shell.
+ * The steps must be exactly the commits git would list (`expected`), each once.
+ */
+export function rebaseTodoEnv(steps: RebaseStep[], expected: string[]): Record<string, string> {
+  const want = new Set(expected);
+  const seen = new Set<string>();
+  for (const s of steps) {
+    if (!SHA.test(s.hash) || !want.has(s.hash) || seen.has(s.hash)) {
+      throw conflict("The branch changed since the rebase was planned. Close it and try again.");
+    }
+    seen.add(s.hash);
+  }
+  if (seen.size !== want.size) throw conflict("The branch changed since the rebase was planned. Close it and try again.");
+  const first = steps.find((s) => s.action !== "drop");
+  if (first && (first.action === "squash" || first.action === "fixup")) {
+    throw badRequest("The first commit can't be squashed: there's no commit before it to squash into.");
+  }
+  const env: Record<string, string> = {};
+  const lines: string[] = [];
+  steps.forEach((s, i) => {
+    if (s.action === "reword") {
+      const message = (s.message ?? "").trim();
+      if (!message) throw badRequest("A reworded commit needs a message.");
+      env[`SLAVES_REWORD_${i}`] = message;
+      lines.push(`pick ${s.hash}`, `exec git commit --amend --allow-empty --no-verify -q -m "$SLAVES_REWORD_${i}"`);
+    } else lines.push(`${s.action} ${s.hash}`);
+  });
+  // Git runs the editor as `<editor> "$@"` with the todo file's path.
+  env.GIT_SEQUENCE_EDITOR = `f() { printf '%s\\n' ${lines.map((l) => `'${l.replace(/'/g, `'\\''`)}'`).join(" ")} > "$1"; }; f`;
+  return env;
 }
 
 /** File paths from the WIP panel: relative, non-empty, never something git could take for an option. */

@@ -170,6 +170,55 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const repo = await repos.get(params(req).id);
     return { history: await actions.commit(repo, body, identityOf(repo, await stores.settings.read())) };
   });
+  // The graph's right-click menu on a branch / commit (GitKraken's), again only on a click.
+  const Ref = z.string().min(1).max(250);
+  const Sha = z.string().regex(/^[0-9a-f]{40,64}$/i);
+  const RefActionBody = z.discriminatedUnion("op", [
+    z.object({ op: z.literal("pull"), branch: Ref }),
+    z.object({ op: z.literal("push"), branch: Ref, remote: Ref.optional() }),
+    z.object({ op: z.literal("set-upstream"), branch: Ref, upstream: Ref }),
+    z.object({ op: z.literal("merge"), ref: Ref }),
+    z.object({ op: z.literal("rebase"), ref: Ref }),
+    z.object({
+      op: z.literal("interactive-rebase"),
+      ref: Ref,
+      steps: z
+        .array(
+          z.object({
+            hash: Sha,
+            action: z.enum(["pick", "reword", "squash", "fixup", "drop"]),
+            message: z.string().max(100_000).optional(),
+          }),
+        )
+        .min(1)
+        .max(2000),
+    }),
+    z.object({ op: z.literal("checkout"), ref: Ref }),
+    z.object({ op: z.literal("create-branch"), name: Ref, commit: Sha }),
+    z.object({ op: z.literal("cherry-pick"), commit: Sha }),
+    z.object({ op: z.literal("reset"), commit: Sha, mode: z.enum(["soft", "mixed", "hard"]) }),
+    z.object({ op: z.literal("revert"), commit: Sha }),
+    z.object({ op: z.literal("rename-branch"), branch: Ref, name: Ref }),
+    z.object({ op: z.literal("delete-branch"), ref: Ref, remote: z.boolean().optional() }),
+    z.object({ op: z.literal("tag"), name: Ref, commit: Sha, message: z.string().max(100_000).optional() }),
+  ]);
+  app.post("/api/repos/:id/git/ref", async (req) => {
+    const body = parseBody(RefActionBody, req.body);
+    const repo = await repos.get(params(req).id);
+    return { history: await actions.refAction(repo, body, identityOf(repo, await stores.settings.read())) };
+  });
+  // What an interactive rebase onto a branch would replay (read-only).
+  app.get("/api/repos/:id/rebase-plan", async (req) => {
+    const { onto } = req.query as { onto?: string };
+    if (!onto || onto.length > 250) throw badRequest("Which branch to rebase onto?");
+    return git.rebasePlan(await repos.get(params(req).id), onto);
+  });
+  // A commit vs the working directory (read-only), for "Compare commit against working directory".
+  app.get("/api/repos/:id/compare/:hash", async (req) => {
+    const { id, hash } = params(req) as { id: string; hash: string };
+    if (!/^[0-9a-f]{4,64}$/i.test(hash)) throw badRequest("Not a commit hash");
+    return git.compare(await repos.get(id), hash);
+  });
   // Uncommitted changes (read-only git status + diff), for the graph view's WIP row.
   app.get("/api/repos/:id/wip", async (req) => git.workingChanges(await repos.get(params(req).id)));
   // One commit's message, files and diff (read-only), for the graph view's details pane.

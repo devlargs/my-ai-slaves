@@ -98,8 +98,12 @@ desktop app also uses 3005 and refuses to start if it's taken).
   `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and Cursor never gets `-w`.
   The one exception is the Repos commit graph (`src/services/repo-actions.ts`): the toolbar's Undo, Redo,
   Pull and Branch, and the WIP panel's Stage / Unstage file (or all) and Commit (summary + description,
-  amend, skip hooks; uses the repo's committer) change the repo **only when you click them**, and are
-  refused while a task runs there.
+  amend, skip hooks; uses the repo's committer), and the right-click menu on a branch or commit
+  (GitKraken's: pull/push/set upstream, merge, rebase, interactive rebase, checkout, create branch,
+  cherry-pick, reset soft/mixed/hard, revert, rename/delete branch, tags; a conflicting merge/rebase/
+  cherry-pick/revert is aborted) change the repo **only when you click them**, and are refused while a
+  task runs there. Its Hide / Solo / Pin to Left only change the view (localStorage); its "Create
+  worktree" and "Explain Branch Changes" items are left out on purpose.
   Undo/Redo read HEAD's reflog (their own commands are tagged `my-ai-slaves` via GIT_REFLOG_ACTION).
 - **Cross-repo tasks:** a task can tick several repos (`extraRepos`, same machine as the main `repo`).
   The CLI runs in the main repo and gets the others via `--add-dir` + the "Other repositories:" list.

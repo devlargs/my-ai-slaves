@@ -3,8 +3,10 @@ import { rm } from "node:fs/promises";
 import type {
   CommitDetail,
   CommitFile,
+  CompareResult,
   GraphCommit,
   LocalBranch,
+  RebasePlan,
   RemoteBranch,
   Repo,
   RepoGraph,
@@ -236,6 +238,26 @@ export class RepoGit {
     };
   }
 
+  /** A commit compared to the working directory (`git diff <commit>`, tracked files), for "Compare commit against working directory". Read-only. */
+  async compare(repo: Repo, hash: string): Promise<CompareResult> {
+    if (!HASH.test(hash)) throw new Error(`Not a commit hash: ${hash}`);
+    const diffArgs = ["--no-color", "--no-ext-diff", "-M"];
+    const [names, patch] = await Promise.all([
+      this.git(repo, ["diff", ...diffArgs, "--name-status", "-z", hash, "--"]),
+      this.git(repo, ["diff", ...diffArgs, hash, "--"]),
+    ]);
+    return { hash, files: parseNameStatus(names, hash), patch };
+  }
+
+  /**
+   * The commits an interactive rebase of the checked-out branch onto `onto` would replay, oldest first
+   * (what git itself lists: no merges, nothing already upstream). Read-only.
+   */
+  async rebasePlan(repo: Repo, onto: string): Promise<RebasePlan> {
+    if (!onto || onto.startsWith("-") || /[\s\0]/.test(onto)) throw new Error(`Not a branch or commit: ${onto}`);
+    return { onto, commits: parseRebasePlan(await this.git(repo, rebasePlanArgs(onto))) };
+  }
+
   /** Read-only diff of a branch made by an older version of the app (`ai/<task-id>`), for tasks still queued. */
   async legacyDiff(repo: Repo, br: LegacyTaskBranch): Promise<string> {
     return this.git(repo, ["diff", "--no-color", "--no-ext-diff", br.baseCommit, br.name, "--"]);
@@ -258,6 +280,19 @@ export class RepoGit {
     await rm(path, { recursive: true, force: true });
     await gitOk(["worktree", "prune"], repo.path);
   }
+}
+
+/** `git log` of the commits `git rebase -i <onto>` lists for the checked-out branch, oldest first. */
+export const rebasePlanArgs = (onto: string) => [
+  "log", "--no-color", "--reverse", "--right-only", "--topo-order", "--cherry-pick", "--no-merges",
+  "--format=%H%x1f%s%x1e", `${onto}...HEAD`, "--",
+];
+export function parseRebasePlan(out: string): RebasePlan["commits"] {
+  return out
+    .split("\x1e")
+    .map((r) => r.replace(/^\s+/, "").split("\x1f"))
+    .filter((f) => f.length >= 2 && f[0])
+    .map(([hash, subject]) => ({ hash: hash!, subject: subject ?? "" }));
 }
 
 /** `git diff --name-status -z` output → files. `diff-tree` (root commits) prints the commit hash first. */

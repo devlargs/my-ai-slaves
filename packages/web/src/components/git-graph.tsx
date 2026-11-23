@@ -1,11 +1,15 @@
 import type {
   CommitDetail,
   CommitFile,
+  CompareResult,
   GitCommitRequest,
   GitHistory,
+  GitRefAction,
   GraphCommit,
   LocalBranch,
   PullMode,
+  RebaseAction,
+  RebaseStep,
   RemoteBranch,
   RepoGraph,
   WipSummary,
@@ -17,8 +21,10 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
   CloudIcon,
   CopyIcon,
+  EyeOffIcon,
   FileMinusIcon,
   FilePenIcon,
   FilePlusIcon,
@@ -30,6 +36,7 @@ import {
   GitCommitHorizontalIcon,
   LaptopIcon,
   ListIcon,
+  PinIcon,
   Loader2Icon,
   Redo2Icon,
   RefreshCwIcon,
@@ -42,7 +49,17 @@ import { parseDiff } from "react-diff-view";
 import { FileDiff, filePath } from "@/components/diff-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { api } from "@/lib/api";
@@ -84,11 +101,13 @@ interface Row {
  * lane waiting for it (lanes of other children converge into it), hands that lane to its first
  * parent and opens (or joins) lanes for the other parents.
  */
-function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
+function layout(commits: GraphCommit[], pinned: string | null = null): { rows: Row[]; width: number } {
   // The lane the WIP row opened towards the checked-out commit, drawn dotted until it gets there.
   let dashedLane: number | null = null;
   let dashedHash: string | null = null;
-  const lanes: (string | null)[] = [];
+  // "Pin to Left": lane 0 is kept for the pinned branch (its tip, then its first parents) until it arrives.
+  const pin = pinned && commits.some((c) => c.hash === pinned) ? pinned : null;
+  const lanes: (string | null)[] = pin ? [PIN] : [];
   const colors: number[] = [];
   let nextColor = 0;
   let maxLanes = 1;
@@ -103,13 +122,16 @@ function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
   for (const commit of commits) {
     const before = [...lanes];
     let lane = lanes.indexOf(commit.hash);
-    if (lane < 0) {
+    if (commit.hash === pin) {
+      lane = 0;
+      colors[0] = nextColor++;
+    } else if (lane < 0) {
       lane = freeLane();
       colors[lane] = nextColor++;
     }
     const edges: Edge[] = [];
     before.forEach((h, i) => {
-      if (h === null) return;
+      if (h === null || h === PIN) return;
       if (h === commit.hash) {
         const dashed = i === dashedLane && h === dashedHash;
         edges.push({ from: i, to: lane, half: "top", dashed, color: laneColor(colors[i] ?? 0) });
@@ -136,7 +158,7 @@ function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
     }
     // Lanes that just pass by this row.
     before.forEach((h, i) => {
-      if (h !== null && h !== commit.hash && lanes[i] === h) {
+      if (h !== null && h !== PIN && h !== commit.hash && lanes[i] === h) {
         const dashed = i === dashedLane && h === dashedHash;
         edges.push({ from: i, to: i, half: "top", through: true, dashed, color: laneColor(colors[i] ?? 0) });
       }
@@ -149,6 +171,8 @@ function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
 }
 
 const x = (lane: number) => PAD + lane * LANE;
+/** Lane 0's placeholder while a pinned branch's tip is still further down. */
+const PIN = "\0pin";
 
 /** The synthetic "// WIP" commit at the top of the graph: the checkout's uncommitted changes. */
 const WIP = "WIP";
@@ -296,7 +320,16 @@ function RefPill({ group, color }: { group: RefGroup; color: string }) {
 }
 
 /** The commit's branch and tag labels, joined to its avatar by a line in the lane's colour. */
-function RefCell({ groups, color }: { groups: RefGroup[]; color: string }) {
+function RefCell({
+  groups,
+  color,
+  onMenu,
+}: {
+  groups: RefGroup[];
+  color: string;
+  /** Right-click on a branch label. */
+  onMenu?: (e: React.MouseEvent, group: RefGroup) => void;
+}) {
   const [first] = groups;
   if (!first) return null;
   // A tag gets its own pill next to the branch, rather than hiding behind "+n".
@@ -306,7 +339,13 @@ function RefCell({ groups, color }: { groups: RefGroup[]; color: string }) {
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1">
       {shown.map((g) => (
-        <RefPill key={`${g.kind}:${g.name}`} group={g} color={color} />
+        <span
+          key={`${g.kind}:${g.name}`}
+          className="flex min-w-0 shrink"
+          onContextMenu={g.kind === "branch" && onMenu ? (e) => onMenu(e, g) : undefined}
+        >
+          <RefPill group={g} color={color} />
+        </span>
       ))}
       {rest.length > 0 && (
         <Badge variant="outline" className="shrink-0 rounded-md px-1.5" title={rest.map((g) => g.name).join("\n")}>
@@ -332,7 +371,7 @@ const storedPullMode = (): PullMode => {
   return v && v in PULL_LABELS ? (v as PullMode) : "pull-ff";
 };
 
-type GitAction = "undo" | "redo" | "pull" | "branch";
+type GitAction = "undo" | "redo" | "pull" | "branch" | "ref";
 
 function ToolButton({
   icon,
@@ -564,7 +603,10 @@ function BranchRow({
   loaded,
   selected,
   extra,
+  hidden,
+  pinned,
   onPick,
+  onMenu,
 }: {
   depth: number;
   name: string;
@@ -573,12 +615,17 @@ function BranchRow({
   loaded: boolean;
   selected: boolean;
   extra?: React.ReactNode;
+  /** Hidden from the graph (Hide, or another branch is soloed). */
+  hidden?: boolean;
+  pinned?: boolean;
   onPick: (hash: string) => void;
+  onMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
     <button
       type="button"
       onClick={() => onPick(commit)}
+      onContextMenu={onMenu}
       title={loaded ? name : `${name}: older than the loaded commits (load older commits to see it)`}
       className={cn(
         "flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs text-ink-2 hover:bg-paper-2 hover:text-ink",
@@ -589,7 +636,9 @@ function BranchRow({
       style={{ paddingLeft: 8 + depth * 14 }}
     >
       {current ? <CheckIcon className="size-3.5 shrink-0" /> : <GitBranchIcon className="size-3.5 shrink-0 opacity-70" />}
-      <span className="min-w-0 flex-1 truncate font-mono">{name}</span>
+      <span className={cn("min-w-0 flex-1 truncate font-mono", hidden && "opacity-50")}>{name}</span>
+      {pinned && <PinIcon className="size-3 shrink-0 opacity-70" aria-label="Pinned to left" />}
+      {hidden && <EyeOffIcon className="size-3 shrink-0 opacity-70" aria-label="Hidden from the graph" />}
       {extra}
     </button>
   );
@@ -642,13 +691,20 @@ function BranchSidebar({
   graph,
   loaded,
   selected,
+  view,
   onPick,
+  onMenu,
+  onShowAll,
 }: {
   graph: RepoGraph;
   loaded: Set<string>;
   selected: string | null;
+  view: GraphView;
   onPick: (hash: string) => void;
+  onMenu: (e: React.MouseEvent, target: MenuTarget) => void;
+  onShowAll: () => void;
 }) {
+  const isHidden = (key: string) => (view.solo.length > 0 ? !view.solo.includes(key) : view.hidden.includes(key));
   const [filter, setFilter] = useState("");
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const toggle = (key: string) =>
@@ -677,7 +733,10 @@ function BranchSidebar({
       current={b.current}
       loaded={loaded.has(b.commit)}
       selected={selected === b.commit}
+      hidden={isHidden(b.name)}
+      pinned={view.pinned === b.name}
       onPick={onPick}
+      onMenu={(e) => onMenu(e, { commit: b.commit, local: b.name, remotes: [] })}
       extra={
         (b.ahead > 0 || b.behind > 0 || b.gone) && (
           <span
@@ -697,15 +756,23 @@ function BranchSidebar({
       commit={b.commit}
       loaded={loaded.has(b.commit)}
       selected={selected === b.commit}
+      hidden={isHidden(b.ref)}
+      pinned={view.pinned === b.ref}
       onPick={onPick}
+      onMenu={(e) => onMenu(e, { commit: b.commit, local: null, remotes: [b.ref] })}
     />
   );
 
   return (
     <aside className="flex w-60 shrink-0 flex-col overflow-hidden rounded-lg border border-rule bg-surface">
       <div className="flex shrink-0 flex-col gap-1.5 border-b border-rule p-2">
-        <span className="text-xs text-ink-2">
-          Viewing <span className="num font-medium text-signal-ink">{local.length + remote.length}</span>
+        <span className="flex items-center text-xs text-ink-2">
+          Viewing <span className="num ml-1 font-medium text-signal-ink">{local.length + remote.length}</span>
+          {(view.hidden.length > 0 || view.solo.length > 0) && (
+            <button type="button" onClick={onShowAll} className="ml-auto cursor-pointer text-signal-ink hover:underline">
+              {view.solo.length > 0 ? "Unsolo all" : "Show all"}
+            </button>
+          )}
         </span>
         <div className="relative">
           <Input
@@ -1372,6 +1439,626 @@ function WipMessage({ summary }: { summary: WipSummary }) {
   );
 }
 
+// ── Right-click menu (branches and commits) ─────────────────────────────────
+
+/** What was right-clicked: a branch label (local and/or on remotes) or a commit row. */
+interface MenuTarget {
+  commit: string;
+  /** Local branch name, when the label is (or has) a local branch. */
+  local: string | null;
+  /** Remote-tracking refs on the label ("origin/main"). */
+  remotes: string[];
+}
+const targetName = (t: MenuTarget) => t.local ?? t.remotes[0] ?? null;
+/** The refs Hide / Solo / Pin act on: the local branch and its remote copies. */
+const targetKeys = (t: MenuTarget) => [...(t.local ? [t.local] : []), ...t.remotes];
+
+/** Which branches the graph shows (GitKraken's Hide / Solo / Pin to Left), remembered per repo. */
+interface GraphView {
+  hidden: string[];
+  solo: string[];
+  pinned: string | null;
+}
+const EMPTY_VIEW: GraphView = { hidden: [], solo: [], pinned: null };
+const viewKey = (repoId: string) => `git-graph.view.${repoId}`;
+function storedView(repoId: string): GraphView {
+  try {
+    const v = JSON.parse(storageGet(viewKey(repoId)) ?? "null") as Partial<GraphView> | null;
+    if (!v) return EMPTY_VIEW;
+    const list = (a: unknown) => (Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : []);
+    return { hidden: list(v.hidden), solo: list(v.solo), pinned: typeof v.pinned === "string" ? v.pinned : null };
+  } catch {
+    return EMPTY_VIEW;
+  }
+}
+
+/** The ref key ("main", "origin/main") → its commit. */
+function refCommits(graph: RepoGraph): Map<string, string> {
+  return new Map([...graph.local.map((b) => [b.name, b.commit] as const), ...graph.remote.map((b) => [b.ref, b.commit] as const)]);
+}
+
+/**
+ * The commits to draw with branches hidden or soloed: those reachable (in the loaded page) from the
+ * branches still shown, plus tags and the checked-out commit (unless soloing).
+ */
+function visibleCommits(graph: RepoGraph, view: GraphView): GraphCommit[] {
+  if (view.hidden.length === 0 && view.solo.length === 0) return graph.commits;
+  const tips = new Set<string>();
+  const byRef = refCommits(graph);
+  if (view.solo.length > 0) {
+    for (const key of view.solo) {
+      const c = byRef.get(key);
+      if (c) tips.add(c);
+    }
+  } else {
+    const hidden = new Set(view.hidden);
+    for (const [key, c] of byRef) if (!hidden.has(key)) tips.add(c);
+    for (const c of graph.commits) {
+      if (c.refs.some((r) => r === "HEAD" || r.startsWith("HEAD -> ") || r.startsWith("tag: "))) tips.add(c.hash);
+    }
+  }
+  const byHash = new Map(graph.commits.map((c) => [c.hash, c]));
+  const seen = new Set<string>();
+  const stack = [...tips];
+  while (stack.length) {
+    const h = stack.pop()!;
+    if (seen.has(h)) continue;
+    const c = byHash.get(h);
+    if (!c) continue;
+    seen.add(h);
+    stack.push(...c.parents);
+  }
+  return graph.commits.filter((c) => seen.has(c.hash));
+}
+
+/** A dialog's text field. */
+interface Field {
+  key: string;
+  label: string;
+  placeholder?: string;
+  initial?: string;
+  multiline?: boolean;
+  optional?: boolean;
+  /** Suggestions (a datalist), e.g. the remote branches for Set Upstream. */
+  options?: string[];
+}
+/** A confirmation or a short form before a menu action runs. */
+interface ActionSpec {
+  title: string;
+  description?: React.ReactNode;
+  fields?: Field[];
+  confirmLabel: string;
+  destructive?: boolean;
+  run: (values: Record<string, string>) => Promise<void>;
+}
+
+function ActionDialog({ spec, onClose }: { spec: ActionSpec | null; onClose: () => void }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setValues(Object.fromEntries((spec?.fields ?? []).map((f) => [f.key, f.initial ?? ""])));
+    setError(null);
+    setBusy(false);
+  }, [spec]);
+  const ready = (spec?.fields ?? []).every((f) => f.optional || values[f.key]?.trim());
+  const submit = async () => {
+    if (!spec || !ready || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await spec.run(Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.trim()])));
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open={spec !== null} onOpenChange={(o) => !o && !busy && onClose()}>
+      <DialogContent>
+        <DialogTitle>{spec?.title}</DialogTitle>
+        {spec?.description && (
+          <DialogDescription asChild>
+            <div>{spec.description}</div>
+          </DialogDescription>
+        )}
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+        >
+          {spec?.fields?.map((f, i) => (
+            <label key={f.key} className="flex flex-col gap-1 text-xs text-ink-2">
+              {f.label}
+              {f.multiline ? (
+                <textarea
+                  value={values[f.key] ?? ""}
+                  placeholder={f.placeholder}
+                  rows={4}
+                  onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                  className="scroll-quiet resize-y rounded-md border border-rule bg-paper px-3 py-2 text-sm text-ink outline-none focus:border-signal"
+                />
+              ) : (
+                <Input
+                  autoFocus={i === 0}
+                  value={values[f.key] ?? ""}
+                  placeholder={f.placeholder}
+                  list={f.options ? `field-${f.key}` : undefined}
+                  onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                  className="font-mono"
+                />
+              )}
+              {f.options && (
+                <datalist id={`field-${f.key}`}>
+                  {f.options.map((o) => (
+                    <option key={o} value={o} />
+                  ))}
+                </datalist>
+              )}
+            </label>
+          ))}
+          {error && <p className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs whitespace-pre-wrap text-danger-ink">{error}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" variant={spec?.destructive ? "destructive" : "signal"} disabled={!ready || busy}>
+              {busy && <Loader2Icon className="animate-spin" />}
+              {spec?.confirmLabel}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const REBASE_ACTIONS: { value: RebaseAction; label: string; hint: string }[] = [
+  { value: "pick", label: "Pick", hint: "keep the commit" },
+  { value: "reword", label: "Reword", hint: "keep it, with a new message" },
+  { value: "squash", label: "Squash", hint: "fold into the commit below, keeping both messages" },
+  { value: "fixup", label: "Fixup", hint: "fold into the commit below, dropping this message" },
+  { value: "drop", label: "Drop", hint: "remove the commit" },
+];
+
+/**
+ * GitKraken's interactive rebase: the commits to replay, newest on top; pick / reword / squash /
+ * fixup / drop each one and move them up or down. Nothing runs until "Start Rebase".
+ */
+function RebaseDialog({
+  repoId,
+  onto,
+  branch,
+  onClose,
+  onDone,
+}: {
+  repoId: string;
+  onto: string | null;
+  branch: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  /** Oldest first, the order git replays them in. */
+  const [steps, setSteps] = useState<(RebaseStep & { subject: string; original: string })[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setSteps(null);
+    setError(null);
+    setBusy(false);
+    if (!onto) return;
+    let live = true;
+    api.getRebasePlan(repoId, onto).then(
+      (plan) => live && setSteps(plan.commits.map((c) => ({ hash: c.hash, action: "pick", subject: c.subject, original: c.subject }))),
+      (e: unknown) => live && setError(e instanceof Error ? e.message : String(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [repoId, onto]);
+
+  const update = (i: number, change: Partial<RebaseStep>) =>
+    setSteps((list) => list && list.map((s, n) => (n === i ? { ...s, ...change } : s)));
+  const move = (i: number, by: number) =>
+    setSteps((list) => {
+      if (!list || i + by < 0 || i + by >= list.length) return list;
+      const next = [...list];
+      [next[i], next[i + by]] = [next[i + by]!, next[i]!];
+      return next;
+    });
+  const firstKept = steps?.find((s) => s.action !== "drop");
+  const problem = !steps
+    ? null
+    : steps.length === 0
+      ? "Nothing to rebase: the branch has no commits that aren't already there."
+      : firstKept && (firstKept.action === "squash" || firstKept.action === "fixup")
+        ? "The bottom commit can't be squashed: there's nothing below it to squash into."
+        : steps.some((s) => s.action === "reword" && !s.subject.trim())
+          ? "A reworded commit needs a message."
+          : null;
+
+  const start = async () => {
+    if (!steps || !onto || problem) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.gitRefAction(repoId, {
+        op: "interactive-rebase",
+        ref: onto,
+        steps: steps.map((s) => (s.action === "reword" ? { hash: s.hash, action: s.action, message: s.subject } : { hash: s.hash, action: s.action })),
+      });
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={onto !== null} onOpenChange={(o) => !o && !busy && onClose()}>
+      <DialogContent className="max-w-3xl">
+        <DialogTitle>
+          Interactive rebase <span className="font-mono text-signal-ink">{branch}</span> onto{" "}
+          <span className="font-mono text-signal-ink">{onto}</span>
+        </DialogTitle>
+        <DialogDescription>Newest on top. Squash and fixup fold a commit into the one below it.</DialogDescription>
+        {!steps && !error && (
+          <div className="flex justify-center py-6 text-muted-foreground">
+            <Loader2Icon className="size-4 animate-spin" />
+          </div>
+        )}
+        {steps && steps.length > 0 && (
+          <div className="scroll-quiet flex max-h-[55vh] flex-col overflow-y-auto rounded-md border border-rule">
+            {[...steps].reverse().map((s, n) => {
+              const i = steps.length - 1 - n;
+              return (
+                <div key={s.hash} className={cn("flex items-center gap-2 border-b border-rule px-2 py-1.5 last:border-b-0", s.action === "drop" && "opacity-50")}>
+                  <div className="flex flex-col">
+                    <button
+                      type="button"
+                      title="Move up (later)"
+                      disabled={busy || i === steps.length - 1}
+                      onClick={() => move(i, 1)}
+                      className="cursor-pointer rounded px-0.5 text-muted-foreground hover:text-ink disabled:cursor-default disabled:opacity-30"
+                    >
+                      <ChevronUpIcon className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title="Move down (earlier)"
+                      disabled={busy || i === 0}
+                      onClick={() => move(i, -1)}
+                      className="cursor-pointer rounded px-0.5 text-muted-foreground hover:text-ink disabled:cursor-default disabled:opacity-30"
+                    >
+                      <ChevronDownIcon className="size-3.5" />
+                    </button>
+                  </div>
+                  <select
+                    value={s.action}
+                    disabled={busy}
+                    title={REBASE_ACTIONS.find((a) => a.value === s.action)?.hint}
+                    onChange={(e) => update(i, { action: e.target.value as RebaseAction })}
+                    className="h-7 w-24 shrink-0 cursor-pointer rounded-md border border-rule bg-paper px-1.5 text-xs text-ink outline-none focus:border-signal"
+                  >
+                    {REBASE_ACTIONS.map((a) => (
+                      <option key={a.value} value={a.value}>
+                        {a.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="w-16 shrink-0 font-mono text-[11px] text-muted-foreground">{s.hash.slice(0, 7)}</span>
+                  {s.action === "reword" ? (
+                    <Input
+                      value={s.subject}
+                      disabled={busy}
+                      onChange={(e) => setSteps((list) => list && list.map((x, k) => (k === i ? { ...x, subject: e.target.value } : x)))}
+                      className="h-7 flex-1 text-xs"
+                    />
+                  ) : (
+                    <span className={cn("min-w-0 flex-1 truncate text-xs text-ink", s.action === "drop" && "line-through")}>{s.original}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {(error ?? problem) && <p className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs whitespace-pre-wrap text-danger-ink">{error ?? problem}</p>}
+        <DialogFooter>
+          <Button variant="outline" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="signal" disabled={!steps || !!problem || busy} onClick={() => void start()}>
+            {busy && <Loader2Icon className="animate-spin" />} Start Rebase
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** "Compare commit against working directory": the files that differ, like a commit's panel. */
+function ComparePanel({
+  result,
+  openFile,
+  onOpenFile,
+  onClose,
+}: {
+  result: CompareResult;
+  openFile: string | null;
+  onOpenFile: (path: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <aside className="scroll-quiet flex w-80 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-rule bg-surface p-3 text-sm">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="label-mono">Compare</span>
+        <span className="font-mono text-ink-2">{result.hash.slice(0, 7)}</span>
+        <span>↔ working directory</span>
+        <Button size="sm" variant="ghost" className="ml-auto h-6 px-2" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+      <div className="border-t border-rule" />
+      <CommitFiles files={result.files} openFile={openFile} onOpen={onOpenFile} />
+    </aside>
+  );
+}
+
+/** The right-click menu, GitKraken's items in GitKraken's order. */
+function RefMenu({
+  menu,
+  graph,
+  view,
+  onClose,
+  onRun,
+  onAsk,
+  onRebase,
+  onBranchHere,
+  onView,
+  onCompare,
+}: {
+  menu: { x: number; y: number; target: MenuTarget } | null;
+  graph: RepoGraph;
+  view: GraphView;
+  onClose: () => void;
+  /** Runs it; from a dialog (`fromDialog`), errors are thrown back to show there. */
+  onRun: (action: GitRefAction, fromDialog?: boolean) => Promise<void>;
+  onAsk: (spec: ActionSpec) => void;
+  onRebase: (onto: string) => void;
+  onBranchHere: (commit: string) => void;
+  onView: (view: GraphView) => void;
+  onCompare: (commit: string) => void;
+}) {
+  if (!menu) return null;
+  const t = menu.target;
+  const name = targetName(t);
+  const currentBranch = graph.local.find((b) => b.current) ?? null;
+  const here = currentBranch?.name ?? "HEAD";
+  const headCommit = currentBranch?.commit ?? graph.commits.find((c) => c.refs.includes("HEAD"))?.hash ?? null;
+  const isCurrent = !!t.local && t.local === currentBranch?.name;
+  const local = t.local ? graph.local.find((b) => b.name === t.local) : undefined;
+  const short = t.commit.slice(0, 7);
+  const keys = targetKeys(t);
+  const hidden = keys.length > 0 && keys.every((k) => view.hidden.includes(k));
+  const soloed = keys.length > 0 && keys.every((k) => view.solo.includes(k));
+  const pinned = view.pinned !== null && keys.includes(view.pinned);
+  const copy = (text: string) => void navigator.clipboard?.writeText(text);
+  const remoteRefs = graph.remote.map((r) => r.ref);
+  const defaultRemote = graph.remote.some((r) => r.remote === "origin") ? "origin" : (graph.remote[0]?.remote ?? "origin");
+
+  const resetSpec = (mode: "soft" | "mixed" | "hard"): ActionSpec => ({
+    title: `Reset ${here} to ${short} (${mode})`,
+    description:
+      mode === "hard" ? (
+        <>Moves {here} to this commit and <b>throws away</b> every uncommitted change. Undo brings the commits back, not the changes.</>
+      ) : mode === "mixed" ? (
+        <>Moves {here} to this commit. The changes of the commits after it stay in your files, unstaged.</>
+      ) : (
+        <>Moves {here} to this commit. The changes of the commits after it stay staged.</>
+      ),
+    confirmLabel: `Reset ${mode}`,
+    destructive: mode === "hard",
+    run: async () => onRun({ op: "reset", commit: t.commit, mode }, true),
+  });
+
+  const sections: React.ReactNode[][] = [];
+  if (t.local) {
+    sections.push([
+      <DropdownMenuItem key="pull" disabled={!isCurrent && !local?.upstream} onSelect={() => void onRun({ op: "pull", branch: t.local! })}>
+        Pull (fast-forward if possible)
+      </DropdownMenuItem>,
+      <DropdownMenuItem key="push" onSelect={() => void onRun({ op: "push", branch: t.local! })}>
+        Push
+      </DropdownMenuItem>,
+      <DropdownMenuItem
+        key="upstream"
+        onSelect={() =>
+          onAsk({
+            title: `Set upstream for ${t.local}`,
+            description: "Pick a remote branch to track. A branch that isn't on the remote yet is pushed there.",
+            fields: [
+              { key: "upstream", label: "Upstream", initial: local?.upstream ?? `${defaultRemote}/${t.local}`, options: remoteRefs },
+            ],
+            confirmLabel: "Set Upstream",
+            run: async (v) => onRun({ op: "set-upstream", branch: t.local!, upstream: v.upstream! }, true),
+          })
+        }
+      >
+        Set Upstream
+      </DropdownMenuItem>,
+    ]);
+  }
+  if (name && !isCurrent) {
+    sections.push([
+      <DropdownMenuItem key="merge" onSelect={() => void onRun({ op: "merge", ref: name })}>
+        Merge {name} into {here}
+      </DropdownMenuItem>,
+      <DropdownMenuItem key="rebase" onSelect={() => void onRun({ op: "rebase", ref: name })}>
+        Rebase {here} onto {name}
+      </DropdownMenuItem>,
+      <DropdownMenuItem key="irebase" onSelect={() => onRebase(name)}>
+        Interactive Rebase {here} onto {name}
+      </DropdownMenuItem>,
+    ]);
+    sections.push([
+      <DropdownMenuItem key="checkout" onSelect={() => void onRun({ op: "checkout", ref: name })}>
+        Checkout {name}
+      </DropdownMenuItem>,
+    ]);
+  }
+  sections.push([
+    <DropdownMenuItem key="branch" onSelect={() => onBranchHere(t.commit)}>
+      Create branch here
+    </DropdownMenuItem>,
+    <DropdownMenuItem key="pick" disabled={t.commit === headCommit} onSelect={() => void onRun({ op: "cherry-pick", commit: t.commit })}>
+      Cherry pick commit
+    </DropdownMenuItem>,
+    <DropdownMenuSub key="reset">
+      <DropdownMenuSubTrigger disabled={t.commit === headCommit}>Reset {here} to this commit</DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        <DropdownMenuItem onSelect={() => onAsk(resetSpec("soft"))}>Soft - keep all changes</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAsk(resetSpec("mixed"))}>Mixed - keep working copy but reset index</DropdownMenuItem>
+        <DropdownMenuItem destructive onSelect={() => onAsk(resetSpec("hard"))}>
+          Hard - discard all changes
+        </DropdownMenuItem>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>,
+    <DropdownMenuItem key="revert" onSelect={() => void onRun({ op: "revert", commit: t.commit })}>
+      Revert commit
+    </DropdownMenuItem>,
+  ]);
+  if (name) {
+    const remoteOnly = !t.local;
+    sections.push([
+      ...(t.local
+        ? [
+            <DropdownMenuItem
+              key="rename"
+              onSelect={() =>
+                onAsk({
+                  title: `Rename ${t.local}`,
+                  fields: [{ key: "name", label: "New name", initial: t.local! }],
+                  confirmLabel: "Rename",
+                  run: async (v) => onRun({ op: "rename-branch", branch: t.local!, name: v.name! }, true),
+                })
+              }
+            >
+              Rename {t.local}
+            </DropdownMenuItem>,
+          ]
+        : []),
+      <DropdownMenuItem
+        key="delete"
+        destructive
+        disabled={isCurrent}
+        onSelect={() =>
+          onAsk({
+            title: `Delete ${name}`,
+            description: remoteOnly ? (
+              <>Deletes the branch on the remote (<span className="font-mono">git push --delete</span>). Everyone loses it.</>
+            ) : (
+              <>Deletes the local branch, even when it has commits that aren't merged anywhere. Its remote copy stays.</>
+            ),
+            confirmLabel: "Delete",
+            destructive: true,
+            run: async () => onRun({ op: "delete-branch", ref: name, remote: remoteOnly }, true),
+          })
+        }
+      >
+        Delete {name}
+      </DropdownMenuItem>,
+    ]);
+  }
+  sections.push([
+    ...(name
+      ? [
+          <DropdownMenuItem key="copyname" onSelect={() => copy(name)}>
+            Copy branch name
+          </DropdownMenuItem>,
+        ]
+      : []),
+    <DropdownMenuItem key="copysha" onSelect={() => copy(t.commit)}>
+      Copy commit sha
+    </DropdownMenuItem>,
+  ]);
+  if (keys.length > 0) {
+    const without = (list: string[]) => list.filter((k) => !keys.includes(k));
+    sections.push([
+      <DropdownMenuItem
+        key="hide"
+        onSelect={() => onView({ ...view, hidden: hidden ? without(view.hidden) : [...without(view.hidden), ...keys], solo: without(view.solo) })}
+      >
+        {hidden ? "Show" : "Hide"}
+      </DropdownMenuItem>,
+      <DropdownMenuItem key="pin" onSelect={() => onView({ ...view, pinned: pinned ? null : keys[0]! })}>
+        {pinned ? "Unpin from Left" : "Pin to Left"}
+      </DropdownMenuItem>,
+      <DropdownMenuItem
+        key="solo"
+        onSelect={() => onView({ ...view, solo: soloed ? without(view.solo) : [...without(view.solo), ...keys], hidden: without(view.hidden) })}
+      >
+        {soloed ? "Unsolo" : "Solo"}
+      </DropdownMenuItem>,
+    ]);
+  }
+  sections.push([
+    <DropdownMenuItem key="compare" onSelect={() => onCompare(t.commit)}>
+      Compare commit against working directory
+    </DropdownMenuItem>,
+  ]);
+  sections.push([
+    <DropdownMenuItem
+      key="tag"
+      onSelect={() =>
+        onAsk({
+          title: `Create tag at ${short}`,
+          fields: [{ key: "name", label: "Tag name", placeholder: "v1.0.0" }],
+          confirmLabel: "Create Tag",
+          run: async (v) => onRun({ op: "tag", name: v.name!, commit: t.commit }, true),
+        })
+      }
+    >
+      Create tag here
+    </DropdownMenuItem>,
+    <DropdownMenuItem
+      key="atag"
+      onSelect={() =>
+        onAsk({
+          title: `Create annotated tag at ${short}`,
+          fields: [
+            { key: "name", label: "Tag name", placeholder: "v1.0.0" },
+            { key: "message", label: "Message", multiline: true },
+          ],
+          confirmLabel: "Create Tag",
+          run: async (v) => onRun({ op: "tag", name: v.name!, commit: t.commit, message: v.message }, true),
+        })
+      }
+    >
+      Create annotated tag here
+    </DropdownMenuItem>,
+  ]);
+
+  return (
+    // Not modal: a menu item can open a dialog straight away without the page staying blocked.
+    <DropdownMenu key={`${menu.x},${menu.y}`} open modal={false} onOpenChange={(o) => !o && onClose()}>
+      <DropdownMenuTrigger asChild>
+        <span aria-hidden className="pointer-events-none fixed size-0" style={{ left: menu.x, top: menu.y }} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="bottom" className="max-w-[min(640px,90vw)]">
+        {sections.map((items, i) => (
+          <div key={i}>
+            {i > 0 && <DropdownMenuSeparator />}
+            {items}
+          </div>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 // ── Dialog ───────────────────────────────────────────────────────────────────
 
 /**
@@ -1410,7 +2097,19 @@ export function GitGraphDialog({
   const [viewport, setViewport] = useState(600);
   const [acting, setActing] = useState<GitAction | null>(null);
   const [pullMode, setPullMode] = useState<PullMode>(storedPullMode);
-  const [naming, setNaming] = useState(false);
+  /** The inline branch-name field: at the checked-out commit (Branch button) or a right-clicked one. */
+  const [naming, setNaming] = useState<{ at: string | null } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; target: MenuTarget } | null>(null);
+  const [ask, setAsk] = useState<ActionSpec | null>(null);
+  const [rebaseOnto, setRebaseOnto] = useState<string | null>(null);
+  const [view, setViewState] = useState<GraphView>(() => storedView(repoId));
+  const [compare, setCompare] = useState<CompareResult | null>(null);
+  const [compareFile, setCompareFile] = useState<string | null>(null);
+  useEffect(() => setViewState(storedView(repoId)), [repoId]);
+  const setView = (next: GraphView) => {
+    setViewState(next);
+    storageSet(viewKey(repoId), JSON.stringify(next));
+  };
 
   const load = async (n: number): Promise<RepoGraph | null> => {
     setLoading(true);
@@ -1439,7 +2138,10 @@ export function GitGraphDialog({
       setSelected(null);
       setLimit(PAGE);
       setScrollTop(0);
-      setNaming(false);
+      setNaming(null);
+      setMenu(null);
+      setCompare(null);
+      setCompareFile(null);
       details.current.clear();
     }
   }, [open]);
@@ -1499,18 +2201,21 @@ export function GitGraphDialog({
     const observer = new ResizeObserver(() => setViewport(el.clientHeight));
     observer.observe(el);
     return () => observer.disconnect();
-  }, [graph !== null, openFile === null, wipFile === null]);
+  }, [graph !== null, openFile === null, wipFile === null, compareFile === null]);
 
   const { rows, width } = useMemo(() => {
     if (!graph) return layout([]);
-    if (!graph.wip) return layout(graph.commits);
-    // The WIP row hangs off the checked-out commit.
+    const commits = visibleCommits(graph, view);
+    const pinned = view.pinned ? (refCommits(graph).get(view.pinned) ?? null) : null;
+    if (!graph.wip) return layout(commits, pinned);
+    // The WIP row hangs off the checked-out commit (when that's shown).
     const head =
       graph.commits.find((c) => c.refs.some((ref) => ref === "HEAD" || ref.startsWith("HEAD -> ")))?.hash ??
       graph.local.find((b) => b.current)?.commit ??
       null;
-    return layout([wipCommit(head), ...graph.commits]);
-  }, [graph]);
+    if (head && !commits.some((c) => c.hash === head)) return layout(commits, pinned);
+    return layout([wipCommit(head), ...commits], pinned);
+  }, [graph, view]);
   const graphWidth = Math.min(Math.max(width, 56), 240);
   const index = useMemo(() => new Map(rows.map((r, i) => [r.commit.hash, i])), [rows]);
   const loaded = useMemo(() => new Set(index.keys()), [index]);
@@ -1525,12 +2230,7 @@ export function GitGraphDialog({
 
   const act = async (action: GitAction, name?: string) => {
     if (action === "branch" && name === undefined) {
-      setOpenFile(null);
-      setNaming(true);
-      requestAnimationFrame(() => {
-        const el = scroller.current;
-        if (el && (headRow * ROW < el.scrollTop || (headRow + 1) * ROW > el.scrollTop + el.clientHeight)) el.scrollTop = headRow * ROW;
-      });
+      startNaming(null);
       return;
     }
     setActing(action);
@@ -1540,12 +2240,64 @@ export function GitGraphDialog({
       else if (action === "redo") await api.gitRedo(repoId);
       else if (action === "pull") await api.gitPull(repoId, pullMode);
       else await api.gitBranch(repoId, name!);
-      setNaming(false);
+      setNaming(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setActing(null);
       await load(limit);
+    }
+  };
+
+  /** The inline branch name field, on the checked-out commit (at = null) or another one. */
+  const startNaming = (at: string | null) => {
+    setOpenFile(null);
+    setWipFile(null);
+    setCompareFile(null);
+    setNaming({ at });
+    const row = at ? (index.get(at) ?? headRow) : headRow;
+    requestAnimationFrame(() => {
+      const el = scroller.current;
+      if (el && (row * ROW < el.scrollTop || (row + 1) * ROW > el.scrollTop + el.clientHeight)) el.scrollTop = Math.max(0, row * ROW - el.clientHeight / 2);
+    });
+  };
+  const namingRow = naming ? (naming.at ? (index.get(naming.at) ?? headRow) : headRow) : headRow;
+
+  /** A right-click menu action. Errors show above the graph (or in the dialog that asked for it). */
+  const runRef = async (action: GitRefAction, fromDialog = false) => {
+    setActing("ref");
+    setError(null);
+    try {
+      await api.gitRefAction(repoId, action);
+      if (action.op === "create-branch") setNaming(null);
+    } catch (e) {
+      if (fromDialog) throw e;
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActing(null);
+      details.current.clear();
+      await load(limit);
+    }
+  };
+
+  const openMenu = (e: React.MouseEvent, target: MenuTarget) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (acting !== null) return;
+    setMenu({ x: e.clientX, y: e.clientY, target });
+  };
+
+  const compareWith = async (commit: string) => {
+    setError(null);
+    try {
+      const result = await api.compareCommit(repoId, commit);
+      setSelected(null);
+      setOpenFile(null);
+      setWipFile(null);
+      setCompare(result);
+      setCompareFile(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -1593,6 +2345,8 @@ export function GitGraphDialog({
     setSelected(hash);
     setOpenFile(null);
     setWipFile(null);
+    setCompare(null);
+    setCompareFile(null);
     // The graph may be remounting (coming back from a file): scroll once it's there.
     requestAnimationFrame(() => {
       const el = scroller.current;
@@ -1610,7 +2364,7 @@ export function GitGraphDialog({
           // Escape in the branch name field cancels it, not the whole view.
           if (naming) {
             e.preventDefault();
-            setNaming(false);
+            setNaming(null);
           }
         }}
       >
@@ -1625,6 +2379,11 @@ export function GitGraphDialog({
           <DialogDescription className="text-xs">
             {graph ? `${graph.commits.length}${graph.more ? "+" : ""} commits · all branches` : "Commit graph"}
           </DialogDescription>
+          {acting === "ref" && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Loader2Icon className="size-3.5 animate-spin" /> Working…
+            </span>
+          )}
           <div className="mx-auto">
             <GitToolbar
               history={graph?.history ?? null}
@@ -1660,8 +2419,25 @@ export function GitGraphDialog({
         )}
         {graph && rows.length > 0 && (
           <div className="flex min-h-0 flex-1 gap-3">
-            <BranchSidebar graph={graph} loaded={loaded} selected={selected} onPick={jump} />
-            {selected === WIP && wipFile && wip ? (
+            <BranchSidebar
+              graph={graph}
+              loaded={loaded}
+              selected={selected}
+              view={view}
+              onPick={jump}
+              onMenu={openMenu}
+              onShowAll={() => setView({ ...view, hidden: [], solo: [] })}
+            />
+            {compare && compareFile ? (
+              <CommitFileView
+                files={compare.files}
+                patch={compare.patch}
+                path={compareFile}
+                label={`${compare.hash.slice(0, 7)} ↔ working directory`}
+                onBack={() => setCompareFile(null)}
+                onOpen={setCompareFile}
+              />
+            ) : selected === WIP && wipFile && wip ? (
               <CommitFileView
                 files={wip[wipFile.section]}
                 patch={wipFile.section === "staged" ? wip.stagedPatch : wip.unstagedPatch}
@@ -1710,7 +2486,11 @@ export function GitGraphDialog({
                         <button
                           key={c.hash}
                           type="button"
-                          onClick={() => setSelected(isSelected ? null : c.hash)}
+                          onClick={() => {
+                            setCompare(null);
+                            setSelected(isSelected ? null : c.hash);
+                          }}
+                          onContextMenu={isWip ? undefined : (e) => openMenu(e, { commit: c.hash, local: null, remotes: [] })}
                           className={cn(
                             "absolute inset-x-0 flex cursor-pointer items-center text-left text-xs hover:bg-paper-2",
                             isSelected && "bg-signal-soft hover:bg-signal-soft",
@@ -1718,7 +2498,17 @@ export function GitGraphDialog({
                           style={{ top: i * ROW, height: ROW }}
                         >
                           <span className="flex shrink-0 items-center pl-2" style={{ width: REF_COL }}>
-                            <RefCell groups={groups} color={row.color} />
+                            <RefCell
+                              groups={groups}
+                              color={row.color}
+                              onMenu={(e, g) =>
+                                openMenu(e, {
+                                  commit: c.hash,
+                                  local: g.local ? g.name : null,
+                                  remotes: g.remotes.map((r) => `${r}/${g.name}`),
+                                })
+                              }
+                            />
                           </span>
                           <svg
                             width={graphWidth}
@@ -1774,9 +2564,15 @@ export function GitGraphDialog({
                     {naming && (
                       <div
                         className="absolute left-0 z-10 flex items-center bg-surface px-2"
-                        style={{ top: headRow * ROW, height: ROW, width: REF_COL }}
+                        style={{ top: namingRow * ROW, height: ROW, width: REF_COL }}
                       >
-                        <BranchNameInput busy={acting === "branch"} onSubmit={(n) => void act("branch", n)} onCancel={() => setNaming(false)} />
+                        <BranchNameInput
+                          busy={acting === "branch" || acting === "ref"}
+                          onSubmit={(n) =>
+                            void (naming.at ? runRef({ op: "create-branch", name: n, commit: naming.at }) : act("branch", n))
+                          }
+                          onCancel={() => setNaming(null)}
+                        />
                       </div>
                     )}
                     {graph.more && (
@@ -1790,7 +2586,18 @@ export function GitGraphDialog({
                 </div>
               </div>
             )}
-            {current && selected === WIP && (
+            {compare && (
+              <ComparePanel
+                result={compare}
+                openFile={compareFile}
+                onOpenFile={setCompareFile}
+                onClose={() => {
+                  setCompare(null);
+                  setCompareFile(null);
+                }}
+              />
+            )}
+            {!compare && current && selected === WIP && (
               <WipPanel
                 repoId={repoId}
                 headCommit={current.parents[0] ?? null}
@@ -1804,7 +2611,7 @@ export function GitGraphDialog({
                 onCommit={commitStaged}
               />
             )}
-            {current && selected !== WIP && (
+            {!compare && current && selected !== WIP && (
               <CommitPanel
                 commit={current}
                 detail={detail}
@@ -1816,6 +2623,32 @@ export function GitGraphDialog({
             )}
           </div>
         )}
+        {graph && (
+          <RefMenu
+            menu={menu}
+            graph={graph}
+            view={view}
+            onClose={() => setMenu(null)}
+            onRun={runRef}
+            onAsk={setAsk}
+            onRebase={setRebaseOnto}
+            onBranchHere={startNaming}
+            onView={setView}
+            onCompare={(c) => void compareWith(c)}
+          />
+        )}
+        <ActionDialog spec={ask} onClose={() => setAsk(null)} />
+        <RebaseDialog
+          repoId={repoId}
+          onto={rebaseOnto}
+          branch={graph?.local.find((b) => b.current)?.name ?? "HEAD"}
+          onClose={() => setRebaseOnto(null)}
+          onDone={() => {
+            setRebaseOnto(null);
+            details.current.clear();
+            void load(limit);
+          }}
+        />
       </DialogContent>
     </Dialog>
   );

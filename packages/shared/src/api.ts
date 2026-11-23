@@ -221,6 +221,62 @@ export interface GitCommitRequest {
 export interface GitActionResult {
   history: GitHistory;
 }
+
+/**
+ * The graph's right-click menu on a branch or commit (like GitKraken's). Only run on a click, refused
+ * with 409 while a task runs in the repo. A merge, rebase, cherry-pick or revert that stops on a
+ * conflict is aborted, so the repo is left as it was.
+ * POST /api/repos/:id/git/ref GitRefAction → GitActionResult
+ *
+ * `branch` = a local branch name ("main"); `ref` = a local branch or a remote-tracking ref
+ * ("origin/main"); `commit` = a full commit hash.
+ */
+export type GitRefAction =
+  /** Fast-forward a local branch to its upstream (the checked-out one is pulled, fast-forward if possible). */
+  | { op: "pull"; branch: string }
+  /** Push a local branch to its upstream, or to the given remote (and set it as upstream) when it has none. */
+  | { op: "push"; branch: string; remote?: string }
+  /** "origin/main": tracks it when it exists, else pushes the branch there and tracks it. */
+  | { op: "set-upstream"; branch: string; upstream: string }
+  /** Merge `ref` into the checked-out branch. */
+  | { op: "merge"; ref: string }
+  /** Rebase the checked-out branch onto `ref`. */
+  | { op: "rebase"; ref: string }
+  /** Rebase the checked-out branch onto `ref`, with the commits reordered / squashed / reworded / dropped. */
+  | { op: "interactive-rebase"; ref: string; steps: RebaseStep[] }
+  /** Check out a local branch; a remote one gets a local tracking branch (or checks out the existing one). */
+  | { op: "checkout"; ref: string }
+  /** A new branch at `commit`, checked out. */
+  | { op: "create-branch"; name: string; commit: string }
+  | { op: "cherry-pick"; commit: string }
+  /** Move the checked-out branch to `commit` (hard = local changes are thrown away). */
+  | { op: "reset"; commit: string; mode: "soft" | "mixed" | "hard" }
+  | { op: "revert"; commit: string }
+  | { op: "rename-branch"; branch: string; name: string }
+  /** Delete a local branch (even when unmerged), or a remote one (`git push <remote> --delete`). */
+  | { op: "delete-branch"; ref: string; remote?: boolean }
+  /** A lightweight tag, or an annotated one when `message` is given. */
+  | { op: "tag"; name: string; commit: string; message?: string };
+
+export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop";
+/** One line of an interactive rebase, in the order the commits are replayed (oldest first). */
+export interface RebaseStep {
+  hash: string;
+  action: RebaseAction;
+  /** New message for "reword". */
+  message?: string;
+}
+/** GET /api/repos/:id/rebase-plan?onto=<ref> → RebasePlan (read-only: the commits it would replay, oldest first) */
+export interface RebasePlan {
+  onto: string;
+  commits: { hash: string; subject: string }[];
+}
+/** GET /api/repos/:id/compare/:hash → CompareResult (read-only `git diff <hash>`: the commit vs the working directory) */
+export interface CompareResult {
+  hash: string;
+  files: CommitFile[];
+  patch: string;
+}
 export interface LocalBranch {
   /** "main", "fix/announce-notice-banner". */
   name: string;
