@@ -155,6 +155,30 @@ export interface RepoGraph {
   remote: RemoteBranch[];
   /** What the toolbar's Undo / Redo would do right now. */
   history: GitHistory;
+  /** Uncommitted changes in the checkout (the graph's "// WIP" row); null when the tree is clean. */
+  wip: WipSummary | null;
+}
+
+/** Counts of the checkout's uncommitted files (staged, unstaged and untracked), each path counted once. */
+export interface WipSummary {
+  files: number;
+  added: number;
+  modified: number;
+  deleted: number;
+}
+/**
+ * GET /api/repos/:id/wip → WorkingChanges (read-only `git status` + `git diff`): what isn't committed yet.
+ * Untracked files count as unstaged additions. A file can be in both lists (part staged, part not).
+ */
+export interface WorkingChanges {
+  /** The checked-out branch (or commit, when detached). */
+  head: string | null;
+  staged: CommitFile[];
+  unstaged: CommitFile[];
+  /** Index vs HEAD (`git diff --cached`). */
+  stagedPatch: string;
+  /** Working tree vs index (`git diff`), plus untracked files as new files. */
+  unstagedPatch: string;
 }
 
 /**

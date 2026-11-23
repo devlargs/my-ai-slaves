@@ -1,6 +1,17 @@
 import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
-import type { CommitDetail, CommitFile, GraphCommit, LocalBranch, RemoteBranch, Repo, RepoGraph, Task } from "@my-ai-slaves/shared";
+import type {
+  CommitDetail,
+  CommitFile,
+  GraphCommit,
+  LocalBranch,
+  RemoteBranch,
+  Repo,
+  RepoGraph,
+  Task,
+  WipSummary,
+  WorkingChanges,
+} from "@my-ai-slaves/shared";
 import { type GitIdentity, gitIdentityEnv } from "../providers/types";
 import { runOn } from "../remote/machine";
 import { git, gitOk, run } from "./git";
@@ -108,8 +119,44 @@ export class RepoGit {
       });
     }
     const more = commits.length > limit;
-    const { local, remote } = await this.branches(repo).catch(() => ({ local: [], remote: [] }));
-    return { commits: commits.slice(0, limit), head, more, local, remote };
+    const [{ local, remote }, status] = await Promise.all([
+      this.branches(repo).catch(() => ({ local: [], remote: [] })),
+      this.status(repo).catch(() => ({ staged: [], unstaged: [] })),
+    ]);
+    return { commits: commits.slice(0, limit), head, more, local, remote, wip: summarize(status.staged, status.unstaged) };
+  }
+
+  /** Staged and unstaged (incl. untracked) files, from `git status`. Read-only. */
+  async status(repo: Repo): Promise<{ staged: CommitFile[]; unstaged: CommitFile[] }> {
+    const out = await this.git(repo, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    return parseStatus(out);
+  }
+
+  /** What isn't committed yet: staged and unstaged files with their diffs, for the graph's WIP row. Read-only. */
+  async workingChanges(repo: Repo): Promise<WorkingChanges> {
+    const diffArgs = ["--no-color", "--no-ext-diff", "-M"];
+    const [head, { staged, unstaged }, stagedPatch, trackedPatch] = await Promise.all([
+      this.currentRef(repo).catch(() => null),
+      this.status(repo),
+      this.git(repo, ["diff", "--cached", ...diffArgs, "--"]),
+      this.git(repo, ["diff", ...diffArgs, "--"]),
+    ]);
+    const untracked = (await this.git(repo, ["ls-files", "--others", "--exclude-standard", "-z"]))
+      .split("\0")
+      .filter(Boolean)
+      .slice(0, UNTRACKED_LIMIT);
+    const added: string[] = [];
+    for (const file of untracked) {
+      // Exit code 1 = "the files differ", the normal answer here.
+      added.push(await this.git(repo, ["diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file], [1]));
+    }
+    return {
+      head,
+      staged,
+      unstaged,
+      stagedPatch,
+      unstagedPatch: [trackedPatch, ...added].filter((p) => p.trim()).join(""),
+    };
   }
 
   /** Local and remote-tracking branches, with how far each local one is ahead of / behind its upstream. Read-only. */
@@ -229,6 +276,54 @@ function parseNameStatus(out: string, hash: string): CommitFile[] {
     }
   }
   return files;
+}
+
+/** One `git status --porcelain=v1 -z` letter → a file status. */
+function statusLetter(c: string): CommitFile["status"] {
+  return c === "A" || c === "D" || c === "R" || c === "C" || c === "T" ? c : "M";
+}
+
+/**
+ * `git status --porcelain=v1 -z` → staged (index) and unstaged (working tree + untracked) files.
+ * Renames print the new path, then the old one. Conflicted files count as unstaged.
+ */
+export function parseStatus(out: string): { staged: CommitFile[]; unstaged: CommitFile[] } {
+  const parts = out.split("\0");
+  const staged: CommitFile[] = [];
+  const unstaged: CommitFile[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i]!;
+    if (entry.length < 4) continue;
+    const [x, y, path] = [entry[0]!, entry[1]!, entry.slice(3)];
+    const oldPath = x === "R" || x === "C" ? (parts[++i] ?? null) : null;
+    if (x === "!") continue;
+    if (x === "?") {
+      unstaged.push({ status: "A", path, oldPath: null });
+      continue;
+    }
+    if (x === "U" || y === "U" || (x === "A" && y === "A") || (x === "D" && y === "D")) {
+      unstaged.push({ status: "M", path, oldPath: null });
+      continue;
+    }
+    if (x !== " ") staged.push({ status: statusLetter(x), path, oldPath });
+    if (y !== " ") unstaged.push({ status: statusLetter(y), path, oldPath: null });
+  }
+  return { staged, unstaged };
+}
+
+/** The WIP row's counts: each path once, by what it looks like overall. */
+function summarize(staged: CommitFile[], unstaged: CommitFile[]): WipSummary | null {
+  const by = new Map<string, CommitFile["status"]>();
+  for (const f of [...staged, ...unstaged]) {
+    const before = by.get(f.path);
+    // Staged as new, then edited: still a new file. Deleted anywhere: deleted.
+    by.set(f.path, f.status === "D" ? "D" : before === "A" || before === "D" ? before : f.status);
+  }
+  if (by.size === 0) return null;
+  const all = [...by.values()];
+  const added = all.filter((s) => s === "A" || s === "C").length;
+  const deleted = all.filter((s) => s === "D").length;
+  return { files: by.size, added, deleted, modified: by.size - added - deleted };
 }
 
 /** Gravatar id: SHA-256 of the trimmed, lowercased email. */

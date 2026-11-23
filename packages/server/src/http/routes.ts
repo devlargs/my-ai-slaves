@@ -145,6 +145,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const { name } = parseBody(z.object({ name: z.string().min(1).max(250) }), req.body);
     return { history: await actions.createBranch(await repos.get(params(req).id), name) };
   });
+  // Uncommitted changes (read-only git status + diff), for the graph view's WIP row.
+  app.get("/api/repos/:id/wip", async (req) => git.workingChanges(await repos.get(params(req).id)));
   // One commit's message, files and diff (read-only), for the graph view's details pane.
   app.get("/api/repos/:id/commits/:hash", async (req) => {
     const { id, hash } = params(req) as { id: string; hash: string };

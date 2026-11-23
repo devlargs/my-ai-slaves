@@ -1,4 +1,15 @@
-import type { CommitDetail, CommitFile, GitHistory, GraphCommit, LocalBranch, PullMode, RemoteBranch, RepoGraph } from "@my-ai-slaves/shared";
+import type {
+  CommitDetail,
+  CommitFile,
+  GitHistory,
+  GraphCommit,
+  LocalBranch,
+  PullMode,
+  RemoteBranch,
+  RepoGraph,
+  WipSummary,
+  WorkingChanges,
+} from "@my-ai-slaves/shared";
 import {
   ArrowDownToLineIcon,
   ArrowLeftIcon,
@@ -55,6 +66,8 @@ interface Edge {
   half: "top" | "bottom";
   /** Pass-through lines run the full row height without touching the dot. */
   through?: boolean;
+  /** The dotted line from the WIP row down to the checked-out commit. */
+  dashed?: boolean;
   color: string;
 }
 interface Row {
@@ -70,6 +83,9 @@ interface Row {
  * parent and opens (or joins) lanes for the other parents.
  */
 function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
+  // The lane the WIP row opened towards the checked-out commit, drawn dotted until it gets there.
+  let dashedLane: number | null = null;
+  let dashedHash: string | null = null;
   const lanes: (string | null)[] = [];
   const colors: number[] = [];
   let nextColor = 0;
@@ -93,7 +109,8 @@ function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
     before.forEach((h, i) => {
       if (h === null) return;
       if (h === commit.hash) {
-        edges.push({ from: i, to: lane, half: "top", color: laneColor(colors[i] ?? 0) });
+        const dashed = i === dashedLane && h === dashedHash;
+        edges.push({ from: i, to: lane, half: "top", dashed, color: laneColor(colors[i] ?? 0) });
         if (i !== lane) lanes[i] = null;
       }
     });
@@ -101,7 +118,11 @@ function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
     // Parents outside the loaded page still get a line down, so the graph doesn't look cut off.
     const parents = commit.parents;
     lanes[lane] = parents[0] ?? null;
-    if (parents[0]) edges.push({ from: lane, to: lane, half: "bottom", color });
+    if (commit.hash === WIP) {
+      dashedLane = lane;
+      dashedHash = parents[0] ?? null;
+    } else if (lane === dashedLane) dashedLane = null;
+    if (parents[0]) edges.push({ from: lane, to: lane, half: "bottom", dashed: commit.hash === WIP, color });
     for (const parent of parents.slice(1)) {
       let target = lanes.indexOf(parent);
       if (target < 0) {
@@ -114,7 +135,8 @@ function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
     // Lanes that just pass by this row.
     before.forEach((h, i) => {
       if (h !== null && h !== commit.hash && lanes[i] === h) {
-        edges.push({ from: i, to: i, half: "top", through: true, color: laneColor(colors[i] ?? 0) });
+        const dashed = i === dashedLane && h === dashedHash;
+        edges.push({ from: i, to: i, half: "top", through: true, dashed, color: laneColor(colors[i] ?? 0) });
       }
     });
     while (lanes.length && lanes.at(-1) === null) lanes.pop();
@@ -125,6 +147,12 @@ function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
 }
 
 const x = (lane: number) => PAD + lane * LANE;
+
+/** The synthetic "// WIP" commit at the top of the graph: the checkout's uncommitted changes. */
+const WIP = "WIP";
+function wipCommit(head: string | null): GraphCommit {
+  return { hash: WIP, parents: head ? [head] : [], author: "", email: "", avatar: "", date: "", subject: "// WIP", refs: [] };
+}
 
 const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";
 /** Gravatar by SHA-256 email hash; authors without one get a generated identicon. */
@@ -775,23 +803,43 @@ function FileRow({
   );
 }
 
-function CommitFiles({
+type FileView = "path" | "tree";
+
+function ViewToggle({ view, onView }: { view: FileView; onView: (view: FileView) => void }) {
+  return (
+    <div className="flex w-fit rounded-md border border-rule p-0.5">
+      {(["path", "tree"] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onView(v)}
+          className={cn(
+            "flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-ink",
+            view === v && "bg-paper-2 text-ink",
+          )}
+        >
+          {v === "path" ? <ListIcon className="size-3.5" /> : <FolderTreeIcon className="size-3.5" />}
+          {v === "path" ? "Path" : "Tree"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A list of changed files, as full paths or as a folder tree. */
+function FileList({
   files,
+  view,
   openFile,
   onOpen,
 }: {
   files: CommitFile[];
+  view: FileView;
   openFile: string | null;
   onOpen: (path: string) => void;
 }) {
-  const [view, setView] = useState<"path" | "tree">("path");
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const tree = useMemo(() => buildTree(files, (f) => f.path), [files]);
-  const counts = useMemo(() => {
-    const by = new Map<CommitFile["status"], number>();
-    for (const f of files) by.set(f.status, (by.get(f.status) ?? 0) + 1);
-    return [...by];
-  }, [files]);
 
   const renderTree = (nodes: TreeNode<CommitFile>[], depth: number): React.ReactNode =>
     nodes.map((node) => {
@@ -828,6 +876,49 @@ function CommitFiles({
     });
 
   return (
+    <div className="flex flex-col">
+      {view === "path"
+        ? files.map((f) => {
+            const slash = f.path.lastIndexOf("/");
+            return (
+              <FileRow
+                key={f.path}
+                file={f}
+                depth={0}
+                active={openFile === f.path}
+                onOpen={onOpen}
+                label={
+                  // A long folder path gives way first, so the file name stays readable.
+                  <>
+                    {slash >= 0 && <span className="min-w-0 truncate text-muted-foreground">{f.path.slice(0, slash + 1)}</span>}
+                    <span className="max-w-full shrink-0 truncate">{f.path.slice(slash + 1)}</span>
+                  </>
+                }
+              />
+            );
+          })
+        : renderTree(tree, 0)}
+    </div>
+  );
+}
+
+function CommitFiles({
+  files,
+  openFile,
+  onOpen,
+}: {
+  files: CommitFile[];
+  openFile: string | null;
+  onOpen: (path: string) => void;
+}) {
+  const [view, setView] = useState<FileView>("path");
+  const counts = useMemo(() => {
+    const by = new Map<CommitFile["status"], number>();
+    for (const f of files) by.set(f.status, (by.get(f.status) ?? 0) + 1);
+    return [...by];
+  }, [files]);
+
+  return (
     <div className="flex min-h-0 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-2">
         {counts.length === 0 && <span className="text-muted-foreground">No file changes.</span>}
@@ -838,48 +929,94 @@ function CommitFiles({
           </span>
         ))}
       </div>
-      {files.length > 0 && (
-        <div className="flex w-fit rounded-md border border-rule p-0.5">
-          {(["path", "tree"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setView(v)}
-              className={cn(
-                "flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:text-ink",
-                view === v && "bg-paper-2 text-ink",
-              )}
-            >
-              {v === "path" ? <ListIcon className="size-3.5" /> : <FolderTreeIcon className="size-3.5" />}
-              {v === "path" ? "Path" : "Tree"}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="flex flex-col">
-        {view === "path"
-          ? files.map((f) => {
-              const slash = f.path.lastIndexOf("/");
-              return (
-                <FileRow
-                  key={f.path}
-                  file={f}
-                  depth={0}
-                  active={openFile === f.path}
-                  onOpen={onOpen}
-                  label={
-                    // A long folder path gives way first, so the file name stays readable.
-                    <>
-                      {slash >= 0 && <span className="min-w-0 truncate text-muted-foreground">{f.path.slice(0, slash + 1)}</span>}
-                      <span className="max-w-full shrink-0 truncate">{f.path.slice(slash + 1)}</span>
-                    </>
-                  }
-                />
-              );
-            })
-          : renderTree(tree, 0)}
-      </div>
+      {files.length > 0 && <ViewToggle view={view} onView={setView} />}
+      <FileList files={files} view={view} openFile={openFile} onOpen={onOpen} />
     </div>
+  );
+}
+
+/** Which list of the WIP panel a file was opened from. */
+type WipSection = "unstaged" | "staged";
+
+/** The WIP row's details: the checkout's unstaged and staged files, like GitKraken's. Read-only. */
+function WipPanel({
+  changes,
+  error,
+  openFile,
+  onOpenFile,
+}: {
+  changes: WorkingChanges | null;
+  error: string | null;
+  openFile: { section: WipSection; path: string } | null;
+  onOpenFile: (section: WipSection, path: string) => void;
+}) {
+  const [view, setView] = useState<FileView>("path");
+  const [closed, setClosed] = useState<Set<WipSection>>(new Set());
+  const total = changes ? new Set([...changes.staged, ...changes.unstaged].map((f) => f.path)).size : 0;
+  const section = (key: WipSection, label: string, files: CommitFile[]) => {
+    const open = !closed.has(key);
+    return (
+      <div className="flex flex-col">
+        <button
+          type="button"
+          onClick={() =>
+            setClosed((prev) => {
+              const next = new Set(prev);
+              if (!next.delete(key)) next.add(key);
+              return next;
+            })
+          }
+          className="flex w-full cursor-pointer items-center gap-1.5 py-1 text-left text-xs font-medium text-ink-2 hover:text-ink"
+        >
+          {open ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
+          {label} <span className="num text-muted-foreground">({files.length})</span>
+        </button>
+        {open &&
+          (files.length === 0 ? (
+            <p className="px-2 py-1 text-xs text-muted-foreground">None.</p>
+          ) : (
+            <FileList
+              files={files}
+              view={view}
+              openFile={openFile?.section === key ? openFile.path : null}
+              onOpen={(path) => onOpenFile(key, path)}
+            />
+          ))}
+      </div>
+    );
+  };
+  return (
+    <aside className="scroll-quiet flex w-80 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-rule bg-surface p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-2">
+        <span className="label-mono text-muted-foreground">Work in progress</span>
+        {changes && (
+          <span>
+            <span className="num font-medium text-ink">{total}</span> {total === 1 ? "file change" : "file changes"}
+            {changes.head && (
+              <>
+                {" "}
+                on{" "}
+                <span className="font-mono text-signal-ink">{changes.head.length === 40 ? changes.head.slice(0, 10) : changes.head}</span>
+              </>
+            )}
+          </span>
+        )}
+      </div>
+      {error ? (
+        <p className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger-ink">{error}</p>
+      ) : !changes ? (
+        <div className="flex justify-center py-4 text-muted-foreground">
+          <Loader2Icon className="size-4 animate-spin" />
+        </div>
+      ) : (
+        <>
+          {total > 0 && <ViewToggle view={view} onView={setView} />}
+          {total === 0 && <p className="text-xs text-muted-foreground">No uncommitted changes.</p>}
+          {section("unstaged", "Unstaged files", changes.unstaged)}
+          {section("staged", "Staged files", changes.staged)}
+        </>
+      )}
+    </aside>
   );
 }
 
@@ -966,30 +1103,35 @@ function CommitPanel({
   );
 }
 
-/** One file's changes in the selected commit, in place of the graph. */
+/** One file's changes in the selected commit (or the WIP's staged / unstaged list), in place of the graph. */
 function CommitFileView({
-  detail,
+  files,
+  patch,
   path,
+  label,
   onBack,
   onOpen,
 }: {
-  detail: CommitDetail;
+  files: CommitFile[];
+  patch: string;
   path: string;
+  /** Shown before the path, e.g. "Unstaged". */
+  label?: string;
   onBack: () => void;
   onOpen: (path: string) => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const parsed = useMemo(() => {
     try {
-      return parseDiff(detail.patch, { nearbySequences: "zip" });
+      return parseDiff(patch, { nearbySequences: "zip" });
     } catch {
       return null;
     }
-  }, [detail.patch]);
+  }, [patch]);
   const file = parsed?.find((f) => filePath(f) === path);
-  const index = detail.files.findIndex((f) => f.path === path);
-  const prev = detail.files[index - 1];
-  const next = detail.files[index + 1];
+  const index = files.findIndex((f) => f.path === path);
+  const prev = files[index - 1];
+  const next = files[index + 1];
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = 0;
   }, [path]);
@@ -999,11 +1141,12 @@ function CommitFileView({
         <Button size="sm" variant="ghost" onClick={onBack}>
           <ArrowLeftIcon /> Graph
         </Button>
+        {label && <Badge variant="outline">{label}</Badge>}
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2" title={path}>
           {path}
         </span>
         <span className="num text-[11px] text-muted-foreground">
-          {index + 1} / {detail.files.length}
+          {index + 1} / {files.length}
         </span>
         <Button size="sm" variant="ghost" disabled={!prev} onClick={() => prev && onOpen(prev.path)}>
           Previous
@@ -1022,6 +1165,33 @@ function CommitFileView({
         )}
       </div>
     </div>
+  );
+}
+
+/** The WIP row's message: "// WIP" and how many files are modified, added and deleted. */
+function WipMessage({ summary }: { summary: WipSummary }) {
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2.5 px-2">
+      <span className="truncate text-muted-foreground italic">// WIP</span>
+      {summary.modified > 0 && (
+        <span className="flex items-center gap-0.5 text-warning-ink" title={`${summary.modified} modified`}>
+          <FilePenIcon className="size-3" />
+          <span className="num">{summary.modified}</span>
+        </span>
+      )}
+      {summary.added > 0 && (
+        <span className="flex items-center gap-0.5 text-success-ink" title={`${summary.added} added`}>
+          <FilePlusIcon className="size-3" />
+          <span className="num">{summary.added}</span>
+        </span>
+      )}
+      {summary.deleted > 0 && (
+        <span className="flex items-center gap-0.5 text-danger-ink" title={`${summary.deleted} deleted`}>
+          <FileMinusIcon className="size-3" />
+          <span className="num">{summary.deleted}</span>
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -1050,6 +1220,9 @@ export function GitGraphDialog({
   const [detail, setDetail] = useState<CommitDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [openFile, setOpenFile] = useState<string | null>(null);
+  const [wip, setWip] = useState<WorkingChanges | null>(null);
+  const [wipError, setWipError] = useState<string | null>(null);
+  const [wipFile, setWipFile] = useState<{ section: WipSection; path: string } | null>(null);
   const details = useRef(new Map<string, CommitDetail>());
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -1087,11 +1260,29 @@ export function GitGraphDialog({
     }
   }, [open]);
 
+  // The WIP row's files and diffs: read again whenever the graph is (they change all the time).
+  useEffect(() => {
+    if (selected !== WIP) {
+      setWip(null);
+      setWipFile(null);
+      return;
+    }
+    setWipError(null);
+    let live = true;
+    api.getWorkingChanges(repoId).then(
+      (w) => live && setWip(w),
+      (e: unknown) => live && setWipError(e instanceof Error ? e.message : String(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [selected, repoId, graph]);
+
   // The selected commit's files and diff (kept per commit: a commit never changes).
   useEffect(() => {
     setOpenFile(null);
     setDetailError(null);
-    if (!selected) return setDetail(null);
+    if (!selected || selected === WIP) return setDetail(null);
     const cached = details.current.get(selected);
     setDetail(cached ?? null);
     if (cached) return;
@@ -1114,9 +1305,18 @@ export function GitGraphDialog({
     const observer = new ResizeObserver(() => setViewport(el.clientHeight));
     observer.observe(el);
     return () => observer.disconnect();
-  }, [graph !== null, openFile === null]);
+  }, [graph !== null, openFile === null, wipFile === null]);
 
-  const { rows, width } = useMemo(() => layout(graph?.commits ?? []), [graph]);
+  const { rows, width } = useMemo(() => {
+    if (!graph) return layout([]);
+    if (!graph.wip) return layout(graph.commits);
+    // The WIP row hangs off the checked-out commit.
+    const head =
+      graph.commits.find((c) => c.refs.some((ref) => ref === "HEAD" || ref.startsWith("HEAD -> ")))?.hash ??
+      graph.local.find((b) => b.current)?.commit ??
+      null;
+    return layout([wipCommit(head), ...graph.commits]);
+  }, [graph]);
   const graphWidth = Math.min(Math.max(width, 56), 240);
   const index = useMemo(() => new Map(rows.map((r, i) => [r.commit.hash, i])), [rows]);
   const loaded = useMemo(() => new Set(index.keys()), [index]);
@@ -1160,6 +1360,7 @@ export function GitGraphDialog({
     if (i === undefined) return;
     setSelected(hash);
     setOpenFile(null);
+    setWipFile(null);
     // The graph may be remounting (coming back from a file): scroll once it's there.
     requestAnimationFrame(() => {
       const el = scroller.current;
@@ -1222,14 +1423,23 @@ export function GitGraphDialog({
             <Loader2Icon className="size-5 animate-spin" />
           </div>
         )}
-        {graph && graph.commits.length === 0 && (
+        {graph && rows.length === 0 && (
           <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">No commits yet.</p>
         )}
-        {graph && graph.commits.length > 0 && (
+        {graph && rows.length > 0 && (
           <div className="flex min-h-0 flex-1 gap-3">
             <BranchSidebar graph={graph} loaded={loaded} selected={selected} onPick={jump} />
-            {openFile && detail ? (
-              <CommitFileView detail={detail} path={openFile} onBack={() => jump(detail.hash)} onOpen={setOpenFile} />
+            {selected === WIP && wipFile && wip ? (
+              <CommitFileView
+                files={wip[wipFile.section]}
+                patch={wipFile.section === "staged" ? wip.stagedPatch : wip.unstagedPatch}
+                path={wipFile.path}
+                label={wipFile.section === "staged" ? "Staged" : "Unstaged"}
+                onBack={() => jump(WIP)}
+                onOpen={(path) => setWipFile({ section: wipFile.section, path })}
+              />
+            ) : openFile && detail ? (
+              <CommitFileView files={detail.files} patch={detail.patch} path={openFile} onBack={() => jump(detail.hash)} onOpen={setOpenFile} />
             ) : (
               <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-rule bg-surface">
                 <div
@@ -1257,6 +1467,7 @@ export function GitGraphDialog({
                       const i = first + n;
                       const c = row.commit;
                       const isSelected = c.hash === selected;
+                      const isWip = c.hash === WIP;
                       const groups = c.refs.length ? groupRefs(c.refs, remoteRefs) : [];
                       return (
                         <button
@@ -1283,19 +1494,42 @@ export function GitGraphDialog({
                               <path d={`M0 ${ROW / 2}H${x(row.lane) - DOT}`} stroke={row.color} strokeOpacity={0.7} strokeWidth={1} />
                             )}
                             {row.edges.map((e, k) => (
-                              <path key={k} d={edgePath(e)} stroke={e.color} strokeWidth={2} fill="none" />
+                              <path
+                                key={k}
+                                d={edgePath(e)}
+                                stroke={e.color}
+                                strokeWidth={2}
+                                strokeDasharray={e.dashed ? "2 3" : undefined}
+                                fill="none"
+                              />
                             ))}
-                            <CommitAvatar commit={c} cx={x(row.lane)} color={row.color} />
+                            {isWip ? (
+                              <circle
+                                cx={x(row.lane)}
+                                cy={ROW / 2}
+                                r={DOT - 2}
+                                fill="var(--color-surface)"
+                                stroke={row.color}
+                                strokeWidth={2}
+                                strokeDasharray="3 2"
+                              />
+                            ) : (
+                              <CommitAvatar commit={c} cx={x(row.lane)} color={row.color} />
+                            )}
                           </svg>
-                          <span className={cn("min-w-0 flex-1 truncate px-2", c.parents.length > 1 ? "text-muted-foreground" : "text-ink")}>
-                            {c.subject}
-                          </span>
+                          {isWip && graph.wip ? (
+                            <WipMessage summary={graph.wip} />
+                          ) : (
+                            <span className={cn("min-w-0 flex-1 truncate px-2", c.parents.length > 1 ? "text-muted-foreground" : "text-ink")}>
+                              {c.subject}
+                            </span>
+                          )}
                           <span className="hidden w-36 shrink-0 truncate px-2 text-muted-foreground xl:block">{c.author}</span>
-                          <span className="w-24 shrink-0 truncate px-2 text-muted-foreground" title={new Date(c.date).toLocaleString()}>
-                            {formatTime(c.date)}
+                          <span className="w-24 shrink-0 truncate px-2 text-muted-foreground" title={isWip ? undefined : new Date(c.date).toLocaleString()}>
+                            {isWip ? "" : formatTime(c.date)}
                           </span>
                           <span className="hidden w-20 shrink-0 px-2 font-mono text-[11px] text-muted-foreground 2xl:block">
-                            {c.hash.slice(0, 7)}
+                            {isWip ? "" : c.hash.slice(0, 7)}
                           </span>
                         </button>
                       );
@@ -1319,7 +1553,15 @@ export function GitGraphDialog({
                 </div>
               </div>
             )}
-            {current && (
+            {current && selected === WIP && (
+              <WipPanel
+                changes={wip}
+                error={wipError}
+                openFile={wipFile}
+                onOpenFile={(section, path) => setWipFile({ section, path })}
+              />
+            )}
+            {current && selected !== WIP && (
               <CommitPanel
                 commit={current}
                 detail={detail}

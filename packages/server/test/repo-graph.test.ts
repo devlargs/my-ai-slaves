@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Repo } from "@my-ai-slaves/shared";
 import { describe, expect, it } from "vitest";
-import { RepoGit } from "../src/services/repo-git";
+import { parseStatus, RepoGit } from "../src/services/repo-git";
 import { tempDir } from "./helpers";
 
 const sh = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -101,5 +101,58 @@ describe("RepoGit branches and commit details", () => {
     expect(root.patch.startsWith("diff --git")).toBe(true);
 
     await expect(new RepoGit().commit(repo, "--output=x")).rejects.toThrow(/Not a commit hash/);
+  });
+});
+
+describe("RepoGit working changes (the graph's WIP row)", () => {
+  it("lists staged, unstaged and untracked files with their diffs, read-only", async () => {
+    const path = await tempDir();
+    sh(path, "init", "-q", "-b", "main");
+    sh(path, "config", "user.email", "test@example.com");
+    sh(path, "config", "user.name", "Test");
+    await commit(path, "a.txt", "init");
+    await commit(path, "b.txt", "second");
+    const repo = { path, host: null, defaultBranch: "main" } as unknown as Repo;
+    const git = new RepoGit();
+
+    expect((await git.graph(repo, 10)).wip).toBeNull();
+
+    await writeFile(join(path, "a.txt"), "changed\n");
+    sh(path, "add", "a.txt");
+    await writeFile(join(path, "a.txt"), "changed again\n");
+    sh(path, "rm", "-q", "b.txt");
+    await mkdir(join(path, "dir"));
+    await writeFile(join(path, "dir", "new.txt"), "brand new\n");
+    const status = sh(path, "status", "--porcelain");
+
+    const graph = await git.graph(repo, 10);
+    expect(graph.wip).toEqual({ files: 3, added: 1, modified: 1, deleted: 1 });
+
+    const wip = await git.workingChanges(repo);
+    expect(wip.head).toBe("main");
+    expect(wip.staged).toEqual([
+      { status: "M", path: "a.txt", oldPath: null },
+      { status: "D", path: "b.txt", oldPath: null },
+    ]);
+    expect(wip.unstaged).toEqual([
+      { status: "M", path: "a.txt", oldPath: null },
+      { status: "A", path: "dir/new.txt", oldPath: null },
+    ]);
+    expect(wip.stagedPatch).toContain("+changed\n");
+    expect(wip.stagedPatch).toContain("deleted file mode");
+    expect(wip.unstagedPatch).toContain("+changed again\n");
+    expect(wip.unstagedPatch).toContain("+brand new\n");
+    // Nothing in the repo changed.
+    expect(sh(path, "status", "--porcelain")).toBe(status);
+  });
+
+  it("parses renames and conflicts from git status", () => {
+    expect(parseStatus("R  new.txt\0old.txt\0UU both.txt\0?? x\0")).toEqual({
+      staged: [{ status: "R", path: "new.txt", oldPath: "old.txt" }],
+      unstaged: [
+        { status: "M", path: "both.txt", oldPath: null },
+        { status: "A", path: "x", oldPath: null },
+      ],
+    });
   });
 });
