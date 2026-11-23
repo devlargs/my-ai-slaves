@@ -35,8 +35,8 @@ const isProduction = process.env.NODE_ENV === "production";
 const webRoot = process.env.SLAVES_WEB_DIR ? resolve(process.env.SLAVES_WEB_DIR) : join(PROJECT_ROOT, "packages", "web");
 
 // ── data + services ─────────────────────────────────────────────────────────
-// Activity is written at most about once a second: a streaming run logs many entries, and each write
-// rewrites the current (up to 5 MB) file. Shutdown writes whatever is still waiting.
+// Activity is appended at most about once a second: a streaming run logs many entries, and each write
+// appends their lines in one go. Shutdown writes whatever is still waiting and saves the activity index.
 const stores = await openDataStores({ dataDir: resolveDataDir(), activityFlushDelayMs: 1000 }).then(
   (opened) => opened.stores,
   async (error: unknown) => {

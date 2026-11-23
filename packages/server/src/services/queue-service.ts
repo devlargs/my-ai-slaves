@@ -519,8 +519,18 @@ export class QueueService {
 
   // ── history ──────────────────────────────────────────────────────────────
 
+  /** Every ended task, newest first, rebuilt only when the activity log's `historyVersion` moves. */
+  private historyCache: { version: number; items: HistoryItem[] } | null = null;
+
   async history(): Promise<HistoryItem[]> {
     const inQueue = new Set((await this.stores.queue.read()).tasks.map((t) => t.id));
+    const items = this.endedTasks();
+    return inQueue.size === 0 ? [...items] : items.filter((item) => !inQueue.has(item.taskId));
+  }
+
+  private endedTasks(): HistoryItem[] {
+    const activity = this.stores.activity;
+    if (this.historyCache?.version === activity.historyVersion) return this.historyCache.items;
     const outcomes: Record<string, HistoryItem["outcome"]> = {
       kept: "done",
       pushed: "done",
@@ -531,8 +541,8 @@ export class QueueService {
     };
     // From the activity log's in-memory summaries: no re-reading every activity file per page.
     const items: HistoryItem[] = [];
-    for (const s of this.stores.activity.taskSummaries()) {
-      if (inQueue.has(s.taskId) || !s.terminal) continue;
+    for (const s of activity.taskSummaries()) {
+      if (!s.terminal) continue;
       items.push({
         taskId: s.taskId,
         title: String(s.queued?.title ?? s.taskId),
@@ -545,7 +555,9 @@ export class QueueService {
         endedAt: s.terminal.at,
       });
     }
-    return items.sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
+    items.sort((a, b) => (a.endedAt < b.endedAt ? 1 : -1));
+    this.historyCache = { version: activity.historyVersion, items };
+    return items;
   }
 
   /** One page of history (newest first), for the History page's lazy loading. */

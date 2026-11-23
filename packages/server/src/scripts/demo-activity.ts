@@ -36,9 +36,10 @@ for (let i = 0; i < count; i++) {
     detail: `Demo entry #${i + 1} for ${taskId}`,
   });
 }
+await log.close();
 
 console.log(`\nFolder: ${values.dir}  (limit ${maxBytes} bytes per file)\n`);
-const files = (await readdir(values.dir)).filter((n) => n.endsWith("_activity.json")).sort();
+const files = (await readdir(values.dir)).filter((n) => /_activity\.jsonl?$/.test(n)).sort();
 for (const name of files) {
   const { size } = await stat(join(values.dir, name));
   console.log(`  ${name}  ${String(size).padStart(7)} bytes${size > maxBytes ? "  (single oversized entry)" : ""}`);

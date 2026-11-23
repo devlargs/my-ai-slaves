@@ -34,6 +34,7 @@ export const ActivityEntry = z.object({
 });
 export type ActivityEntry = z.infer<typeof ActivityEntry>;
 
+/** The older activity file format (`NNNN_activity.json`, one document per file): still read, no longer written. */
 export const ActivityFile = z.object({
   file: z.string().regex(/^\d{4,}_activity\.json$/),
   createdAt: Timestamp,

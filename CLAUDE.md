@@ -37,7 +37,7 @@ Node 22 (`.nvmrc`). The dev server's Vite HMR uses port `SLAVES_PORT + 1`.
 packages/shared   zod schemas for every .data file and every REST request body (schemas/requests.ts: the server
                   validates with them, the web app uses their inferred types) + REST/WS contract types (api.ts, ws.ts, stream.ts)
 packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with tsx)
-  src/storage     JsonStore (atomic writes, per-file queue, corrupt-file backup), ActivityLog (5 MB rotation),
+  src/storage     JsonStore (atomic writes, per-file queue, corrupt-file backup), ActivityLog (append-only JSON Lines, 5 MB rotation, index file),
                   AttachmentStore. The only code that touches .data/.
   src/providers   ProviderAdapter per CLI: claude-code/, cursor-agent/ (args, stream parser, limit detection)
   src/services    PromptAssembler, AccountRouter (pure) + AccountService, RepoService,
@@ -75,7 +75,9 @@ design.md         locked visual design system (Hallmark, Coral theme): read befo
 
 Plain pretty-printed JSON: `settings.json`, `accounts.json`, `repos.json`, `queue.json`,
 `prompts.json` (saved prompt library), `knowledge/<repo>.json` (the repo's prompts; repos also carry
-a display name and `labels` for filtering, renaming never touches the folder), `activity/NNNN_activity.json`, `attachments/<id>/`,
+a display name and `labels` for filtering, renaming never touches the folder), `activity/NNNN_activity.jsonl` (JSON Lines, only ever appended to, 5 MB rotation;
+older `NNNN_activity.json` files are still read) + `activity/activity-index.json` (summaries + usage cache, so startup
+doesn't parse every file; rebuilt when it doesn't match), `attachments/<id>/`,
 `cli-config/<account>/` (CLI logins: never read, log or serve). It can contain the user's API tokens.
 Use `SLAVES_DATA_DIR=<dir>` to point the server or scripts at a scratch folder when testing, and
 `SLAVES_PORT=<port>` (default 3005) to run that test copy next to the user's running app. Never stop
