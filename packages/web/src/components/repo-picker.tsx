@@ -23,6 +23,10 @@ function collectLabels(repos: RepoView[]): string[] {
   return [...byKey.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
 }
 
+const byName = (a: RepoView, b: RepoView) =>
+  a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }) ||
+  (a.host ?? "").localeCompare(b.host ?? "", undefined, { sensitivity: "base", numeric: true });
+
 const machine = (r: RepoView) => r.host ?? null;
 const where = (r: RepoView) => (r.host ? `on ${r.host}` : "on this Mac");
 
@@ -31,7 +35,7 @@ const where = (r: RepoView) => (r.host ? `on ${r.host}` : "on this Mac");
  * machine (one CLI run reaches them all), so ticking one elsewhere switches to it instead.
  */
 export function RepoPicker({
-  repos,
+  repos: unsorted,
   value,
   onChange,
 }: {
@@ -40,6 +44,8 @@ export function RepoPicker({
   onChange: (next: RepoSelection) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Listed alphabetically by name (then machine), whatever order they were added in.
+  const repos = useMemo(() => [...unsorted].sort(byName), [unsorted]);
   const colorOf = useLabelColor();
   const main = repos.find((r) => r.id === value.main);
   const extras = value.extras.map((id) => repos.find((r) => r.id === id)).filter((r): r is RepoView => Boolean(r));
