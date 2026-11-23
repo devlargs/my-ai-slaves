@@ -101,7 +101,7 @@ export class RepoGit {
         parents: parents.split(" ").filter(Boolean),
         author,
         email,
-        avatar: createHash("sha256").update(email.trim().toLowerCase()).digest("hex"),
+        avatar: gravatarId(email),
         date,
         subject,
         refs: refs.split(", ").map((r) => r.trim()).filter(Boolean),
@@ -176,6 +176,7 @@ export class RepoGit {
       parents: parentList,
       author: author ?? "",
       email: email ?? "",
+      avatar: gravatarId(email ?? ""),
       date: date ?? "",
       subject: subject ?? "",
       refs: (refs ?? "").split(", ").map((r) => r.trim()).filter(Boolean),
@@ -228,4 +229,9 @@ function parseNameStatus(out: string, hash: string): CommitFile[] {
     }
   }
   return files;
+}
+
+/** Gravatar id: SHA-256 of the trimmed, lowercased email. */
+function gravatarId(email: string): string {
+  return createHash("sha256").update(email.trim().toLowerCase()).digest("hex");
 }
