@@ -1,7 +1,7 @@
 import type { RepoView } from "@my-ai-slaves/shared";
 import { CheckIcon, ChevronDownIcon, TagIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
-import { labelColorAttr } from "@/components/label-badge";
+import { LabelColorsButton, labelColorAttr } from "@/components/label-badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useLabelColor } from "@/lib/hooks";
 import { cn, storageGet, storageSet } from "@/lib/utils";
@@ -134,6 +134,7 @@ export function RepoPicker({
                 No label
               </FilterChip>
             )}
+            <LabelColorsButton labels={labels} className="ml-auto" />
           </div>
         )}
         <ul className="scroll-quiet max-h-72 overflow-auto p-1" role="listbox" aria-multiselectable aria-label="Repositories">

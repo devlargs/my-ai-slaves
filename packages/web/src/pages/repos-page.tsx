@@ -19,7 +19,7 @@ import { ConfirmButton } from "@/components/confirm-dialog";
 import { FolderBrowserDialog } from "@/components/folder-browser";
 import { GitGraphDialog } from "@/components/git-graph";
 import { RepoScriptsPanel } from "@/components/repo-scripts";
-import { LabelBadge, LabelColorPicker, labelColorAttr } from "@/components/label-badge";
+import { LabelBadge, LabelColorPicker, LabelColorsButton, labelColorAttr } from "@/components/label-badge";
 import { PageHeader } from "@/components/page-header";
 import { RepoPromptsEditor } from "@/components/repo-prompts";
 import { SortableList } from "@/components/sortable-list";
@@ -132,6 +132,7 @@ export function ReposPage() {
                   No label
                 </FilterChip>
               )}
+              <LabelColorsButton labels={allLabels.map((l) => l.label)} />
             </div>
           )}
           {shown.length > 1 && (
