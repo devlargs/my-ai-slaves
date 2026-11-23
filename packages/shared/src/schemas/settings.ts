@@ -41,6 +41,11 @@ export const SettingsFile = z.object({
   committers: z.array(Committer).default([]),
   /** Used by repos that don't pick one. null = your git config. */
   defaultCommitterId: z.string().min(1).nullable().default(null),
+  /**
+   * Show commit authors' Gravatar pictures in the commit graph. Off by default: when on, the server asks
+   * gravatar.com for each author's email hash (the browser never does); when off, nothing leaves the machine.
+   */
+  commitAvatars: z.boolean().default(false),
   providers: z
     .object({
       "claude-code": ClaudeCodeSettings.prefault({}),

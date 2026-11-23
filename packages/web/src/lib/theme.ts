@@ -4,7 +4,7 @@ import { storageGet, storageSet } from "@/lib/utils";
 /** "system" follows the OS appearance; the other two pin it. Kept per browser / desktop window. */
 export type ThemePref = "system" | "light" | "dark";
 
-// Same key and logic as the inline script in index.html, which applies it before the first paint.
+// Same key and logic as public/theme-init.js (loaded by index.html), which applies it before the first paint.
 const KEY = "slaves.theme";
 const media = window.matchMedia("(prefers-color-scheme: dark)");
 const listeners = new Set<() => void>();

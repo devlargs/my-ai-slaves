@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { api, attempt } from "@/lib/api";
 import { checkedLabel, desktop, desktopAction, useDesktop, useUpdateCheck } from "@/lib/desktop";
 import { useApi } from "@/lib/hooks";
@@ -736,6 +737,17 @@ function GeneralSettingsCard() {
               onChange={(e) => set({ limitCooldownMinutes: Number(e.target.value) || 1 })}
             />
           </div>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-ink select-none">
+            <Switch checked={draft.commitAvatars} onCheckedChange={(commitAvatars) => set({ commitAvatars })} />
+            Show author avatars in the commit graph
+          </label>
+          <p className="text-[11px] text-muted-foreground">
+            Off: authors show as initials and nothing leaves this machine. On: this app&rsquo;s server asks
+            gravatar.com for each author&rsquo;s picture by a hash of their email.
+          </p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

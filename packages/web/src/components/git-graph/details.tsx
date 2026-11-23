@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { type FileAction, type FileView, ViewToggle, FileList, CommitFiles } from "./files";
-import { initial, gravatarUrl } from "./rows";
+import { initial, avatarUrl } from "./rows";
 
 /** Which list of the WIP panel a file was opened from. */
 export type WipSection = "unstaged" | "staged";
@@ -258,9 +258,12 @@ export function CommitPanel({
   openFile,
   onOpenFile,
   onJump,
+  avatars,
 }: {
   commit: GraphCommit;
   kind?: string;
+  /** Settings → "Show author avatars". */
+  avatars: boolean;
   detail: CommitDetail | null;
   error: string | null;
   openFile: string | null;
@@ -293,13 +296,16 @@ export function CommitPanel({
       <div className="flex items-start gap-2.5">
         <span className="relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-signal-soft text-sm font-medium text-signal-ink">
           {initial(commit.author)}
-          <img
-            src={gravatarUrl(commit.avatar, 64)}
-            alt=""
-            loading="lazy"
-            className="absolute inset-0 size-full"
-            onError={(e) => (e.currentTarget.style.display = "none")}
-          />
+          {avatars && commit.avatar && (
+            <img
+              key={commit.avatar}
+              src={avatarUrl(commit.avatar, 64)}
+              alt=""
+              loading="lazy"
+              className="absolute inset-0 size-full"
+              onError={(e) => (e.currentTarget.style.display = "none")}
+            />
+          )}
         </span>
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-ink" title={commit.email}>

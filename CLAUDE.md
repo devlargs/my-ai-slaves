@@ -120,7 +120,11 @@ desktop app also uses 3005 and refuses to start if it's taken).
 - **Base prompts reach the CLI:** tests assert the exact text the (fake) CLIs receive; each task view shows
   "… received: ✓ global base prompt ✓ repo: <ticked prompts>" from the run's recorded prompt.
 - **Security:** bind 127.0.0.1 only; spawn with argument arrays, never a shell string; scrub
-  `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` etc. from child envs.
+  `ANTHROPIC_API_KEY` / `CURSOR_API_KEY` etc. from child envs. The built page gets a strict
+  Content-Security-Policy (`src/security/csp.ts`: everything `'self'`, no inline scripts, so keep
+  index.html's early theme code in `public/theme-init.js`). The browser never contacts a third party:
+  commit-graph avatars are off by default (Settings → General) and, when on, fetched by the server
+  (`/api/avatars/:hash`, `services/avatar-proxy.ts`).
 - Cursor supports **one** account on this Mac (its login lives in the macOS Keychain under a fixed name).
 - **Remote repos (SSH, like VS Code Remote Explorer):** a repo or account can have a `host` (an alias from
   `~/.ssh/config`). For those, git and the CLI run **on that server** via `ssh` (`src/remote/machine.ts`):

@@ -28,6 +28,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AdapterRegistry } from "../providers";
 import type { AccountService } from "../services/account-service";
+import { AvatarProxy } from "../services/avatar-proxy";
 import { badRequest, HttpError } from "../services/common";
 import { CommandError } from "../services/git";
 import { EmptyMessageError, type PromptAssembler } from "../services/prompt-assembler";
@@ -56,6 +57,8 @@ export interface RouteDeps {
   git: RepoGit;
   actions: RepoActions;
   scripts: ScriptService;
+  /** Commit-graph avatars; defaults to one that fetches from Gravatar. */
+  avatars?: AvatarProxy;
 }
 
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -71,6 +74,7 @@ const params = (req: { params: unknown }) => req.params as { id: string };
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   const { stores, accounts, repos, queue, assembler, logins, attachments, prompts, git, actions, scripts } = deps;
+  const avatars = deps.avatars ?? new AvatarProxy();
 
   app.setErrorHandler((error, _req, reply) => {
     if (error instanceof HttpError) return reply.code(error.status).send({ error: error.message });
@@ -384,6 +388,23 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
       .header("Content-Security-Policy", "default-src 'none'; sandbox")
       .header("Cache-Control", "private, max-age=31536000, immutable")
       .send(await attachments.read(a));
+  });
+
+  // Commit-graph avatars: only when Settings → "Show author avatars" is on, fetched by the server so the
+  // browser never talks to Gravatar. Off (the default) = 404 and the graph shows initials.
+  app.get("/api/avatars/:hash", async (req, reply) => {
+    const hash = (req.params as { hash: string }).hash;
+    const size = Number((req.query as { s?: string }).s ?? 48);
+    if (!AvatarProxy.valid(hash, size)) return reply.code(400).send({ error: "Invalid avatar request" });
+    if (!(await stores.settings.read()).commitAvatars) return reply.code(404).send({ error: "Avatars are off" });
+    const avatar = await avatars.get(hash, size);
+    if (!avatar) return reply.code(404).send({ error: "No avatar" });
+    return reply
+      .header("Content-Type", avatar.type)
+      .header("X-Content-Type-Options", "nosniff")
+      .header("Content-Security-Policy", "default-src 'none'; sandbox")
+      .header("Cache-Control", "private, max-age=86400")
+      .send(avatar.body);
   });
 
   // Unknown /api routes → JSON 404 (not the SPA).

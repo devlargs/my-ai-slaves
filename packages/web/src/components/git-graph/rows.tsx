@@ -7,14 +7,27 @@ import { ROW, DOT } from "./layout";
 import type { RefGroup } from "./view-state";
 
 export const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";
-/** Gravatar by SHA-256 email hash; authors without one get a generated identicon. */
-export const gravatarUrl = (hash: string, size: number) => `https://gravatar.com/avatar/${hash}?s=${size}&d=identicon`;
+/**
+ * The author's Gravatar (by SHA-256 email hash), fetched through this app's server so the browser never
+ * contacts gravatar.com. Only used when Settings → "Show author avatars" is on.
+ */
+export const avatarUrl = (hash: string, size: number) => `/api/avatars/${hash}?s=${size}`;
 
 /**
- * The commit's mark on its lane: the author's Gravatar in a ring of the lane's colour. Under it sits the
- * author's initial, which shows while the image loads or when offline. Merges get a dashed ring.
+ * The commit's mark on its lane: the author's initial in a ring of the lane's colour, with their Gravatar
+ * over it when avatars are on (the initial shows while it loads or when there is none). Merges get a dashed ring.
  */
-export function CommitAvatar({ commit, cx, color }: { commit: GraphCommit; cx: number; color: string }) {
+export function CommitAvatar({
+  commit,
+  cx,
+  color,
+  avatars,
+}: {
+  commit: GraphCommit;
+  cx: number;
+  color: string;
+  avatars: boolean;
+}) {
   const cy = ROW / 2;
   const r = DOT - 1;
   const clip = `avatar-${commit.hash}`;
@@ -37,9 +50,9 @@ export function CommitAvatar({ commit, cx, color }: { commit: GraphCommit; cx: n
       >
         {initial(commit.author)}
       </text>
-      {!failed && (
+      {avatars && commit.avatar && !failed && (
         <image
-          href={gravatarUrl(commit.avatar, 48)}
+          href={avatarUrl(commit.avatar, 48)}
           x={cx - r}
           y={cy - r}
           width={r * 2}

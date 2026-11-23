@@ -6,6 +6,7 @@ import Fastify from "fastify";
 import { registerRoutes } from "./http/routes";
 import { PROJECT_ROOT, resolveDataDir } from "./paths";
 import { createAdapters } from "./providers";
+import { registerCsp } from "./security/csp";
 import { createRequestGuard } from "./security/request-guard";
 import { AccountService } from "./services/account-service";
 import { PromptAssembler } from "./services/prompt-assembler";
@@ -74,6 +75,7 @@ hub.setSources({
 // ── http ────────────────────────────────────────────────────────────────────
 const app = Fastify({ logger: false, bodyLimit: 10 * 1024 * 1024 }); // attachments have their own 20 MB limit
 app.addHook("onRequest", createRequestGuard(PORT)); // before everything else, including Vite and /ws
+if (isProduction) registerCsp(app, PORT); // the built page and its assets; Vite's dev server needs inline scripts
 await app.register(fastifyWebsocket);
 app.register(async (scope) => {
   scope.get("/ws", { websocket: true }, (socket) => hub.handle(socket));

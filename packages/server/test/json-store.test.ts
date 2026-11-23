@@ -30,9 +30,11 @@ describe("JsonStore", () => {
       "limitCooldownMinutes",
       "committers",
       "defaultCommitterId",
+      "commitAvatars",
       "providers",
       "updatedAt",
     ]);
+    expect(parsed.commitAvatars).toBe(false); // no Gravatar unless turned on
     expect(parsed.updatedAt).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/);
   });
 

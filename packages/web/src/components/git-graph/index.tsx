@@ -6,6 +6,7 @@ import type {
   GitRefAction,
   PullMode,
   RepoGraph,
+  Settings,
   StashEntry,
   WorkingChanges,
 } from "@my-ai-slaves/shared";
@@ -15,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import { useApi } from "@/lib/hooks";
 import { cn, formatTime, storageSet } from "@/lib/utils";
 import { type WipSection, WipPanel, CommitPanel, CommitFileView, ComparePanel } from "./details";
 import { PAGE, ROW, DOT, OVERSCAN, REF_COL, layout, x, WIP, wipCommit, edgePath } from "./layout";
@@ -49,6 +51,8 @@ export function GitGraphDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { data: settings } = useApi<Settings>(() => api.getSettings(), [], "settings");
+  const avatars = settings?.commitAvatars ?? false;
   const [limit, setLimit] = useState(PAGE);
   const [graph, setGraph] = useState<RepoGraph | null>(null);
   const [loading, setLoading] = useState(false);
@@ -538,7 +542,7 @@ export function GitGraphDialog({
                                 strokeDasharray="3 2"
                               />
                             ) : (
-                              <CommitAvatar commit={c} cx={x(row.lane)} color={row.color} />
+                              <CommitAvatar commit={c} cx={x(row.lane)} color={row.color} avatars={avatars} />
                             )}
                           </svg>
                           {isWip && graph.wip ? (
@@ -617,6 +621,7 @@ export function GitGraphDialog({
                 openFile={openFile}
                 onOpenFile={setOpenFile}
                 onJump={jump}
+                avatars={avatars}
               />
             )}
           </div>
