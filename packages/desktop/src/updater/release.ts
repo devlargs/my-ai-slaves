@@ -146,7 +146,7 @@ export function resolveUpdate(
   if (!wanted) return null;
   const asset = pickUpdateAsset(assets, platform, arch);
   const url = asset?.url;
-  if (!url || !url.startsWith(ASSET_API_PREFIX) || !isAllowedUpdateUrl(url)) return null;
+  if (!url?.startsWith(ASSET_API_PREFIX) || !isAllowedUpdateUrl(url)) return null;
   // GitHub publishes a sha256 digest per release asset
   return { version: latest, url, sha256: parseSha256Digest(asset?.digest) };
 }

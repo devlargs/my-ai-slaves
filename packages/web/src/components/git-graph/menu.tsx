@@ -363,6 +363,7 @@ export function RefMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="bottom" className="max-w-[min(640px,90vw)]">
         {sections.map((items, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: sections are fixed and never reorder
           <div key={i}>
             {i > 0 && <DropdownMenuSeparator />}
             {items}

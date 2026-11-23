@@ -268,6 +268,7 @@ export function CommitPanel({
   onJump: (hash: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when another commit is shown
   useEffect(() => setCopied(false), [commit.hash]);
   return (
     <aside className="scroll-quiet flex w-80 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-rule bg-surface p-3 text-sm">
@@ -305,7 +306,7 @@ export function CommitPanel({
             {commit.author}
           </span>
           <span className="text-[11px] text-muted-foreground">authored {new Date(commit.date).toLocaleString()}</span>
-          {detail && detail.committer && detail.committer !== commit.author && (
+          {detail?.committer && detail.committer !== commit.author && (
             <span className="text-[11px] text-muted-foreground">committed by {detail.committer}</span>
           )}
         </div>
@@ -367,6 +368,7 @@ export function CommitFileView({
   const index = files.findIndex((f) => f.path === path);
   const prev = files[index - 1];
   const next = files[index + 1];
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll back to the top when another file opens
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = 0;
   }, [path]);

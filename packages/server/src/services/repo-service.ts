@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Dirent } from "node:fs";
 import { access, readdir, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
@@ -337,7 +338,7 @@ export class RepoService {
 
   private async browseLocal(inputPath?: string): Promise<FsBrowseResponse> {
     const path = resolve(inputPath?.trim() || homedir());
-    let entries;
+    let entries: Dirent[];
     try {
       entries = await readdir(path, { withFileTypes: true });
     } catch {
@@ -370,6 +371,7 @@ export class RepoService {
       `cd ${target} || exit 3`,
       "pwd",
       'if [ -e .git ]; then echo "G ."; else echo "D ."; fi',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a shell parameter expansion, not a template
       'for d in */; do [ -d "$d" ] || continue; n="${d%/}"; if [ -e "$n/.git" ]; then echo "G $n"; else echo "D $n"; fi; done',
     ].join("; ");
     let out: string;

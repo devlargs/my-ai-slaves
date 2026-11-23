@@ -68,6 +68,7 @@ export class JsonStore<T> {
    * Change the file. `mutator` gets a copy it may edit in place or replace by returning a new value.
    * The result is validated before writing; if invalid, this throws and the file is untouched.
    */
+  // biome-ignore lint/suspicious/noConfusingVoidType: a mutator may return a new value or just edit the draft
   update(mutator: (draft: T) => T | void): Promise<T> {
     return enqueueFileJob(this.file, async () => {
       await this.syncFromDisk();

@@ -8,7 +8,7 @@ const FILE_EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
 type Json = Record<string, any>;
 
-function summarizeToolInput(name: string, input: Json | undefined): string {
+function summarizeToolInput(_name: string, input: Json | undefined): string {
   if (!input) return "";
   const pick = input.file_path ?? input.notebook_path ?? input.path ?? input.command ?? input.pattern ?? input.url ??
     input.description ?? input.prompt;

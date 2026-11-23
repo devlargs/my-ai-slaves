@@ -92,7 +92,7 @@ export class RepoGit {
   async graph(repo: Repo, limit: number): Promise<Omit<RepoGraph, "history">> {
     const head = await this.currentRef(repo).catch(() => null);
     // Unit separator between fields, record separator between commits: neither appears in git output.
-    const format = ["%H", "%P", "%an", "%ae", "%aI", "%s", "%D"].join("%x1f") + "%x1e";
+    const format = `${["%H", "%P", "%an", "%ae", "%aI", "%s", "%D"].join("%x1f")}%x1e`;
     const out = await this.git(repo, [
       "log",
       // Stashes (and their index / untracked commits) are listed in the sidebar, not drawn.
@@ -292,7 +292,7 @@ export class RepoGit {
 }
 
 /** `git stash list --format`: one record per stash, fields split by unit separators. */
-export const STASH_FORMAT = ["%gd", "%H", "%P", "%gs", "%aI", "%an", "%ae"].join("%x1f") + "%x1e";
+export const STASH_FORMAT = `${["%gd", "%H", "%P", "%gs", "%aI", "%an", "%ae"].join("%x1f")}%x1e`;
 export function parseStashList(out: string): StashEntry[] {
   const list: StashEntry[] = [];
   for (const record of out.split("\x1e")) {

@@ -52,7 +52,7 @@ export function RebaseDialog({
   }, [repoId, onto]);
 
   const update = (i: number, change: Partial<RebaseStep>) =>
-    setSteps((list) => list && list.map((s, n) => (n === i ? { ...s, ...change } : s)));
+    setSteps((list) => (list ? list.map((s, n) => (n === i ? { ...s, ...change } : s)) : list));
   const move = (i: number, by: number) =>
     setSteps((list) => {
       if (!list || i + by < 0 || i + by >= list.length) return list;
@@ -145,7 +145,7 @@ export function RebaseDialog({
                     <Input
                       value={s.subject}
                       disabled={busy}
-                      onChange={(e) => setSteps((list) => list && list.map((x, k) => (k === i ? { ...x, subject: e.target.value } : x)))}
+                      onChange={(e) => setSteps((list) => (list ? list.map((x, k) => (k === i ? { ...x, subject: e.target.value } : x)) : list))}
                       className="h-7 flex-1 text-xs"
                     />
                   ) : (

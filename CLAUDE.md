@@ -19,9 +19,10 @@ npm install            # also fixes node-pty's spawn-helper permission (postinst
 npm run dev            # server + Vite (middleware mode) at http://localhost:3005
 npm run build          # build the web app (packages/web/dist)
 npm start              # production mode, serves the built web app
-npm test               # Vitest (server + desktop packages): fake CLIs + real temp git repos
+npm test               # Vitest (server, desktop, web): fake CLIs + real temp git repos; web tests the pure parts only
 npm run typecheck      # tsc in every package (TypeScript 7)
-npx vitest run test/<file>.test.ts   # one test file (run inside packages/server or packages/desktop)
+npm run lint           # Biome lint (biome.json; formatter off), warnings fail too
+npx vitest run test/<file>.test.ts   # one test file (run inside packages/server, packages/desktop or packages/web)
 npm run desktop        # build web, stage packages/desktop/app, open it in Electron
 npm run desktop:dist   # same, then electron-builder → packages/desktop/release (this Mac's CPU only)
 npm run data:init | data:demo-activity | prompt:preview   # server scripts (src/scripts/)
@@ -62,8 +63,9 @@ packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder
                   offers to replace itself with the Apple Silicon one).
                   scripts/build.mjs stages app/ (esbuild + node-pty prebuilds); electron-builder.config.cjs
                   packages it unsigned (macOS ad-hoc signed in scripts/after-pack.cjs, asar off).
-.github/workflows release.yml: every push to main (except *.md / .github/** only) runs checks.yml
-                  (audit, typecheck, test), builds arm64 + x64 DMGs and a Windows NSIS .exe, commits
+.github/workflows checks.yml (audit, typecheck, lint on Linux; tests on Linux, macOS and Windows,
+                  Windows not yet blocking) runs on pull requests and other branches, and from release.yml:
+                  every push to main (except *.md / .github/** only) runs checks.yml, builds arm64 + x64 DMGs and a Windows NSIS .exe, commits
                   `chore: bump version to vX.Y.Z` and publishes a GitHub Release.
 docs/history/DESIGN.md  original architecture proposal (history: its worktree/branch parts are gone)
 design.md         locked visual design system (Hallmark, Coral theme): read before UI changes
@@ -149,7 +151,8 @@ desktop app also uses 3005 and refuses to start if it's taken).
 
 - Work on `main` directly. Never create worktrees or feature branches. `git pull` main before starting.
 - **Commit every finished request right away and push it to `main`**, one commit per request.
-  Pushing code to main triggers a desktop release (see `.github/workflows/release.yml`), and CI then
+  Pushing code to main triggers a desktop release (see `.github/workflows/release.yml`; its actions are
+  pinned by commit SHA, keep it that way), and CI then
   pushes its own `chore: bump version` commit, so pull before the next commit.
 - **Author / committer is always `Ralph Largo <devlargs@gmail.com>`** (set in this repo's local git
   config; check with `git config user.email` before committing, never commit as anyone else).

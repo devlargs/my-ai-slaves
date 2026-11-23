@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ROW, DOT } from "./layout";
-import { type RefGroup } from "./view-state";
+import type { RefGroup } from "./view-state";
 
 export const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";
 /** Gravatar by SHA-256 email hash; authors without one get a generated identicon. */
@@ -160,7 +160,7 @@ export function BranchNameInput({ onSubmit, onCancel, busy }: { onSubmit: (name:
 export function WipMessage({ summary }: { summary: WipSummary }) {
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2.5 px-2">
-      <span className="truncate text-muted-foreground italic">// WIP</span>
+      <span className="truncate text-muted-foreground italic">{"// WIP"}</span>
       {summary.modified > 0 && (
         <span className="flex items-center gap-0.5 text-warning-ink" title={`${summary.modified} modified`}>
           <FilePenIcon className="size-3" />

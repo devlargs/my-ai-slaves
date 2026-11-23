@@ -19,6 +19,5 @@ export function Textarea({ className, ...props }: React.ComponentProps<"textarea
 }
 
 export function Label({ className, ...props }: React.ComponentProps<"label">) {
-  // biome-ignore lint/a11y/noLabelWithoutControl: generic wrapper
   return <label className={cn("text-xs font-medium text-ink-2", className)} {...props} />;
 }

@@ -11,7 +11,10 @@ export function createTokenSource(env: () => NodeJS.ProcessEnv): () => Promise<s
     if (cached) return cached;
     const e = env();
     const fromEnv = e.GH_TOKEN?.trim() || e.GITHUB_TOKEN?.trim();
-    if (fromEnv) return (cached = fromEnv);
+    if (fromEnv) {
+      cached = fromEnv;
+      return fromEnv;
+    }
     const fromGh = await new Promise<string | null>((resolve) => {
       execFile("gh", ["auth", "token", "--hostname", "github.com"], { env: e, timeout: 5000, windowsHide: true }, (error, stdout) =>
         resolve(error ? null : String(stdout).trim() || null),

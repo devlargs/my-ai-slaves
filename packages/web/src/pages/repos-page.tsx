@@ -47,7 +47,9 @@ export function ReposPage() {
     void api
       .getRunningScriptRepos()
       .then(({ repoIds }) => {
-        if (repoIds.length > 0) updateExpanded((set) => repoIds.forEach((id) => set.add(id)));
+        if (repoIds.length > 0) updateExpanded((set) => {
+          for (const id of repoIds) set.add(id);
+        });
       })
       .catch(() => {});
   }, []);
@@ -146,7 +148,9 @@ export function ReposPage() {
           )}
           {shown.length > 1 && (
             <span className="ml-auto flex gap-1">
-              <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => shown.forEach((r) => set.add(r.id)))}>
+              <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => {
+                    for (const r of shown) set.add(r.id);
+                  })}>
                 Expand all
               </Button>
               <Button size="sm" variant="ghost" onClick={() => updateExpanded((set) => set.clear())}>

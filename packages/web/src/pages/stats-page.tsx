@@ -92,7 +92,10 @@ export function StatsPage() {
     const map = new Map<string, Totals>();
     for (const r of records) {
       let t = map.get(r.account);
-      if (!t) map.set(r.account, (t = emptyTotals()));
+      if (!t) {
+        t = emptyTotals();
+        map.set(r.account, t);
+      }
       add(t, r.usage);
     }
     // Every subscription shows, the ones without runs too, in Settings-page order; removed ones go last.

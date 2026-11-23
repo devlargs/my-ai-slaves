@@ -1,8 +1,8 @@
 name: Checks
 
-# Audit, typecheck and tests, run by Release before anything is built, so a commit
-# that fails them never ships to the installed apps. No concurrency group here:
-# the calling workflow owns that.
+# Audit, typecheck, lint and tests. Release calls this before anything is built, so a
+# commit that fails them never ships to the installed apps; pull requests and pushes to
+# other branches run it on their own, so a contribution is checked before it's merged.
 on:
   workflow_call:
     inputs:
@@ -10,16 +10,29 @@ on:
         description: Commit to check out. Empty means the commit that triggered the caller.
         type: string
         default: ""
+  pull_request:
+  push:
+    # main is checked by Release (which calls this workflow), not twice.
+    branches-ignore: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# No concurrency group here: when Release calls this workflow, Release owns that.
 
 jobs:
   checks:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      # Third-party actions are pinned to a commit (the tag it was at in the comment):
+      # this workflow gates installers that auto-update on users' machines.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -34,6 +47,37 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+  # The tests on every platform the app runs on: the installers are macOS and Windows,
+  # and much of the code is platform-specific (process groups, taskkill, node-pty, paths).
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      # Let every platform finish, so one run shows every platform's problem.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # The server suite starts its fake CLIs (test/fixtures/*.mjs) directly, which Windows
+    # can't do yet, so Windows reports its results without holding a release back until
+    # the suite is ported. Linux and macOS must pass.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Test
         run: npm test

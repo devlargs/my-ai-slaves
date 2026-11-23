@@ -126,7 +126,7 @@ describe("remote machine plumbing", () => {
 
 describe("repos on an SSH host", () => {
   it("registers, browses and runs a task on the server with the server's login", async () => {
-    const { accounts, repos, queue, repoPath, received, stores, createRemote } = await setup();
+    const { accounts, repos, queue, repoPath, received, createRemote } = await setup();
     await accounts.create("mac-claude", "claude-code");
     const remoteAccount = await createRemote("dev-claude");
     expect(remoteAccount).toMatchObject({ host: "testhost", configDir: "", binary: "claude" });

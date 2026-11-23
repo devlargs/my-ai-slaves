@@ -312,6 +312,7 @@ function PromptPreview({
   const [result, setResult] = useState<PromptPreviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: arrays are compared by content, not identity
   useEffect(() => {
     let cancelled = false;
     if (!debounced.trim() && attachmentIds.length === 0) {

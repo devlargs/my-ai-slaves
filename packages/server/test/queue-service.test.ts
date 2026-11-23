@@ -204,7 +204,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
       { id: "analyze-jira-ticket", name: "Analyze Jira ticket" },
       { id: "plan-first", name: "Plan first" },
     ]);
-    expect((started?.data?.layers as { name: string; included: boolean }[]).map((l) => l.name)).toEqual([
+    expect((started!.data!.layers as { name: string; included: boolean }[]).map((l) => l.name)).toEqual([
       "global",
       "repo",
       "prompts",

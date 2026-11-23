@@ -46,6 +46,7 @@ function LoginFlow({ accountId, onClose }: { accountId: string; onClose: () => v
   const latest = useRef<LoginState | null>(null);
   latest.current = login;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one login per account and attempt; the rest is read through refs
   useEffect(() => {
     let loginId: string | null = null;
     let disposed = false;

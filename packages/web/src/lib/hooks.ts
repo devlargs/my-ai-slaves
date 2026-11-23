@@ -63,9 +63,9 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = [], cache
     setDataState(cacheKey === undefined ? undefined : (apiCache.get(cacheKey) as T | undefined));
   }
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: deps are caller-supplied
   useEffect(() => {
     void reload();
+    // biome-ignore lint/correctness/useExhaustiveDependencies: deps are caller-supplied
   }, deps);
 
   return { data, setData, loading, error, reload };
@@ -139,6 +139,7 @@ export function useRepoName(): (id: string) => string {
 
 // ── Repo label colours (one per label, shared by every repo; keyed by lowercased label) ──
 let labelColors: LabelColors = {};
+// biome-ignore lint/correctness/noUnusedVariables: read by the ??= below
 let labelColorsLoading: Promise<void> | null = null;
 const labelColorListeners = new Set<() => void>();
 

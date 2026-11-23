@@ -78,7 +78,9 @@ process.stdin.on("end", async () => {
   writeFileSync(file, prompt);
   if (prompt.includes("TOUCH-OTHERS")) {
     // A cross-repo task that also changes the other repos it was given.
-    args.forEach((a, i) => a === "--add-dir" && writeFileSync(join(args[i + 1], `other-${label}.txt`), "changed\n"));
+    args.forEach((a, i) => {
+      if (a === "--add-dir") writeFileSync(join(args[i + 1], `other-${label}.txt`), "changed\n");
+    });
   }
   if (prompt.includes("COMMIT")) {
     // Like an agent that commits with an AI co-author trailer (identity comes from GIT_* env).

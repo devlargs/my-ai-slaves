@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { type ActionSpec } from "./menu";
+import type { ActionSpec } from "./menu";
 import { type TreeNode, buildTree, stashLabel, type MenuTarget, type GraphView } from "./view-state";
 
 function SectionHeader({

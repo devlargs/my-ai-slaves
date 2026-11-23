@@ -8,9 +8,11 @@ import type { AccountService } from "../services/account-service";
 import { conflict, notFound } from "../services/common";
 import type { DataStores } from "../storage/data-stores";
 
+// biome-ignore-start lint/suspicious/noControlCharactersInRegex: matching terminal escapes on purpose
 const OSC = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g; // e.g. hyperlinks
 const CSI = /\u001b\[[0-?]*[ -/]*[@-~]/g; // colours, cursor moves
 const ESC = /\u001b[@-Z\\-_]/g;
+// biome-ignore-end lint/suspicious/noControlCharactersInRegex: matching terminal escapes on purpose
 const URL_RE = /https:\/\/[^\s"'<>]+/;
 const CODE_PROMPT = /paste code/gi;
 const CODE_PROMPT_LINE = /paste code/i;

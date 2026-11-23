@@ -240,7 +240,7 @@ export class ScriptService {
 
   async stop(repoId: string, script: string): Promise<void> {
     const state = this.runs.get(repoId)?.get(script);
-    if (!state || state.info.status !== "running") return;
+    if (state?.info.status !== "running") return;
     state.stopping = true;
     const { child, host } = state;
     const pid = child.pid;

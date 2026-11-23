@@ -157,6 +157,7 @@ function ScriptOutput({ output }: { output: string }) {
   const ref = useRef<HTMLPreElement>(null);
   const pinned = useRef(true);
   const text = clean(output);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the output grows
   useLayoutEffect(() => {
     const el = ref.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;

@@ -30,13 +30,13 @@ export interface LiveState {
 }
 
 const RAW_CAP = 5000;
-const emptyLive = (): LiveState => ({ items: [], streaming: "", raw: [], lastStatus: null });
+export const emptyLive = (): LiveState => ({ items: [], streaming: "", raw: [], lastStatus: null });
 
 /**
  * Applies one event to a task's live state in place. Callers pass a draft whose `items` array is
  * already their own copy (one copy per flush, not one per event: a replay can hold thousands of events).
  */
-function applyEvent(live: LiveState, event: StreamEvent): void {
+export function applyEvent(live: LiveState, event: StreamEvent): void {
   const items = live.items;
   const flushStreaming = () => {
     if (live.streaming.trim()) items.push({ type: "message", text: live.streaming });
@@ -122,7 +122,6 @@ export function useStoreTransition<T>(selector: (s: AppState) => T, deps: unknow
   const [value, setValue] = useState(() => selector(state));
   const selectorRef = useRef(selector);
   selectorRef.current = selector;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: deps are caller-supplied
   useEffect(() => {
     const check = () => {
       const next = selectorRef.current(state);
@@ -130,6 +129,7 @@ export function useStoreTransition<T>(selector: (s: AppState) => T, deps: unknow
     };
     check(); // pick up what changed in the selector's inputs (deps) or the store since the last render
     return subscribe(check);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: deps are caller-supplied
   }, deps);
   return value;
 }

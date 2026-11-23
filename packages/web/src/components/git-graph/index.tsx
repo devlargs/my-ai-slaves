@@ -100,10 +100,9 @@ export function GitGraphDialog({
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload only when opened or when more commits are asked for
   useEffect(() => {
     if (open) void load(limit);
-    // Reload only when opened or when more commits are asked for.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, limit, repoId]);
 
   useEffect(() => {
@@ -122,6 +121,7 @@ export function GitGraphDialog({
   }, [open]);
 
   // The WIP row's files and diffs: read again whenever the graph is (they change all the time).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload whenever the graph is reloaded
   useEffect(() => {
     if (selected !== WIP) {
       setWip(null);
@@ -170,6 +170,7 @@ export function GitGraphDialog({
     };
   }, [selected, repoId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-observe only when the scrolled element is swapped
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -517,6 +518,7 @@ export function GitGraphDialog({
                             )}
                             {row.edges.map((e, k) => (
                               <path
+                                // biome-ignore lint/suspicious/noArrayIndexKey: a row's edges are rebuilt together and never reorder
                                 key={k}
                                 d={edgePath(e)}
                                 stroke={e.color}

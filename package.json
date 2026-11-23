@@ -17,10 +17,14 @@
     "desktop": "npm run build && npm run stage --workspace @my-ai-slaves/desktop && electron packages/desktop/app",
     "desktop:dist": "npm run build && npm run stage --workspace @my-ai-slaves/desktop && npm run dist --workspace @my-ai-slaves/desktop --",
     "postinstall": "node scripts/postinstall.mjs",
-    "test": "npm run test --workspace @my-ai-slaves/server --workspace @my-ai-slaves/desktop",
+    "test": "npm run test --workspace @my-ai-slaves/server --workspace @my-ai-slaves/desktop --workspace @my-ai-slaves/web",
+    "lint": "biome lint --error-on-warnings",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "data:init": "npm run data:init --workspace @my-ai-slaves/server",
     "data:demo-activity": "npm run data:demo-activity --workspace @my-ai-slaves/server --",
     "prompt:preview": "npm run prompt:preview --workspace @my-ai-slaves/server --"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.8"
   }
 }
