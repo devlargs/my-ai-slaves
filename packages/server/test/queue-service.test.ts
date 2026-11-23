@@ -713,6 +713,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
         session: null,
         replies: [],
         pendingReply: null,
+        resumeOnStart: false,
         createdAt: "2026-11-18T10:00:00+08:00",
         updatedAt: "2026-11-18T10:00:00+08:00",
       });
