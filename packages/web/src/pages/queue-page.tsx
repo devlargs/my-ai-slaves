@@ -544,7 +544,7 @@ function Composer({
               Preview prompt
             </label>
             <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">
-              <kbd className="font-mono">⇧↵</kbd> to queue
+              <kbd className="font-mono">↵</kbd> to queue · <kbd className="font-mono">⇧↵</kbd> new line
             </span>
             <Button
               size="sm"
@@ -891,8 +891,8 @@ function MessageInput({
         insertText(e.currentTarget, addPaste(draftKey(draft), text));
       }}
       onKeyDown={(e) => {
-        // Shift+Enter sends (⌘/Ctrl+Enter too); plain Enter adds a new line. Skip while an IME is composing.
-        if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
+        // Enter sends; Shift+Enter adds a new line. Skip while an IME is composing.
+        if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
           e.preventDefault();
           onSubmit();
         }
