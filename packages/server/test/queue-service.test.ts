@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { Attachment } from "@my-ai-slaves/shared";
 import { createAdapters } from "../src/providers";
 import { AccountService } from "../src/services/account-service";
 import { RepoGit } from "../src/services/repo-git";
@@ -305,6 +306,36 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
       return t?.status === "needs-review" && t.pendingReply === null && t.replies.length === 1;
     });
     expect((await received()).at(-1)?.prompt).toBe("CONVENTIONAL COMMITS\n\nand commit it");
+  });
+
+  it("sends a prompt's screenshots with it: repo prompts' and saved prompts' files before the message's", async () => {
+    const { queue, repo, repos, prompts, attachments, received } = await setup();
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    const [r1, s1, s2, m1] = await Promise.all(
+      ["repo.png", "saved-1.png", "saved-2.png", "message.png"].map((n) => attachments.save(png, n, "image/png")),
+    );
+    const list = await repos.prompts(repo.id);
+    await list.update("repo-rules", { attachments: [r1 as Attachment] });
+    const saved = await prompts.create("Design", "MATCH THE DESIGN", { attachments: [s1 as Attachment, s2 as Attachment] });
+    expect(saved.attachments.map((a) => a.name)).toEqual(["saved-1.png", "saved-2.png"]);
+
+    const created = await queue.create({ repo: repo.id, message: "build it", promptIds: [saved.id], attachmentIds: [m1?.id as string] });
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+    const [call] = await received();
+    const paths = [r1, s1, s2, m1].map((a) => `- ${attachments.pathOf(a as Attachment)}`).join("\n");
+    expect(call?.prompt).toBe(`GLOBAL RULES\n\nREPO RULES\n\nMATCH THE DESIGN\n\nbuild it\n\nAttached files:\n${paths}`);
+    for (const a of [r1, s1, s2, m1]) {
+      expect(call?.args).toEqual(expect.arrayContaining(["--add-dir", attachments.dirOf((a as Attachment).id)]));
+    }
+
+    // A reply that binds the prompt again sends its files again, but not the repo prompt's.
+    await queue.reply(created.id, "again", [], [saved.id]);
+    await waitFor(async () => {
+      const t = (await queue.list()).find((x) => x.id === created.id);
+      return t?.status === "needs-review" && t.pendingReply === null && t.replies.length === 1;
+    });
+    const replyPaths = [s1, s2].map((a) => `- ${attachments.pathOf(a as Attachment)}`).join("\n");
+    expect((await received()).at(-1)?.prompt).toBe(`MATCH THE DESIGN\n\nagain\n\nAttached files:\n${replyPaths}`);
   });
 
   it("Claude never gets its worktree tools", async () => {

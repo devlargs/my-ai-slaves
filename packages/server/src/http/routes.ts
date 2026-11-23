@@ -169,13 +169,21 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
   // The repo's prompts: you tick which ones each task sends (default ones come pre-ticked).
-  const RepoPromptBody = z.object({ name: z.string().max(120), body: z.string().max(200_000), default: z.boolean().optional() });
+  const RepoPromptBody = z.object({
+    name: z.string().max(120),
+    body: z.string().max(200_000),
+    default: z.boolean().optional(),
+    attachmentIds: z.array(z.string()).optional(),
+  });
+  /** A prompt's `attachmentIds` → the stored files (undefined = leave them as they are). */
+  const promptFiles = async (ids: string[] | undefined) => (ids === undefined ? undefined : attachments.resolve(ids));
   const promptParams = (req: { params: unknown }) => req.params as { id: string; promptId: string };
   app.get("/api/repos/:id/prompts", async (req) => (await repos.prompts(params(req).id)).list());
   app.post("/api/repos/:id/prompts", async (req, reply) => {
     const body = parseBody(RepoPromptBody, req.body);
     const list = await repos.prompts(params(req).id);
-    return reply.code(201).send(await list.create(body.name, body.body, { default: body.default ?? false }));
+    const files = (await promptFiles(body.attachmentIds)) ?? [];
+    return reply.code(201).send(await list.create(body.name, body.body, { default: body.default ?? false, attachments: files }));
   });
   app.put("/api/repos/:id/prompts/order", async (req) => {
     await (await repos.prompts(params(req).id)).reorder(parseBody(Ids, req.body).ids);
@@ -183,7 +191,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
   app.patch("/api/repos/:id/prompts/:promptId", async (req) => {
     const { id, promptId } = promptParams(req);
-    return (await repos.prompts(id)).update(promptId, parseBody(RepoPromptBody.partial(), req.body));
+    const { attachmentIds, ...patch } = parseBody(RepoPromptBody.partial(), req.body);
+    return (await repos.prompts(id)).update(promptId, { ...patch, attachments: await promptFiles(attachmentIds) });
   });
   app.delete("/api/repos/:id/prompts/:promptId", async (req) => {
     const { id, promptId } = promptParams(req);
@@ -217,18 +226,21 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const repoBound = await repoPrompts.resolve(
       body.repoPromptIds === undefined ? await repoPrompts.defaultIds() : await repoPrompts.validate(body.repoPromptIds),
     );
-    const repoBodies = repoBound.prompts.map((p) => p.body);
+    const repoTicked = [...repoBound.prompts];
     for (const extra of extras) {
       const list = await repos.prompts(extra.id);
       const ticked = body.extraRepoPromptIds?.[extra.id];
       const got = await list.resolve(ticked === undefined ? await list.defaultIds() : await list.validate(ticked));
-      repoBodies.push(...got.prompts.map((p) => p.body));
+      repoTicked.push(...got.prompts);
     }
+    // A prompt's own files go with it, before the message's (the same order the run uses).
+    const allFiles = [...repoTicked, ...bound.prompts].flatMap((p) => p.attachments).concat(files);
+    const paths = [...new Map(allFiles.map((a) => [a.id, attachments.pathOf(a)])).values()];
     return assembler.forTask(body.message, {
-      repoPrompts: repoBodies,
+      repoPrompts: repoTicked.map((p) => p.body),
       boundPrompts: bound.prompts.map((p) => p.body),
       otherRepos: extras.map((r) => ({ name: r.name, path: r.path })),
-      attachmentPaths: files.map((a) => attachments.pathOf(a)),
+      attachmentPaths: paths,
     });
   });
 
@@ -291,17 +303,25 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
 
   // ── prompt library ────────────────────────────────────────────────────────
-  const PromptBody = z.object({ name: z.string().max(120), body: z.string().max(200_000) });
+  const PromptBody = z.object({
+    name: z.string().max(120),
+    body: z.string().max(200_000),
+    attachmentIds: z.array(z.string()).optional(),
+  });
   app.get("/api/prompts", () => prompts.list());
   app.post("/api/prompts", async (req, reply) => {
     const body = parseBody(PromptBody, req.body);
-    return reply.code(201).send(await prompts.create(body.name, body.body));
+    const files = (await promptFiles(body.attachmentIds)) ?? [];
+    return reply.code(201).send(await prompts.create(body.name, body.body, { attachments: files }));
   });
   app.put("/api/prompts/order", async (req) => {
     await prompts.reorder(parseBody(Ids, req.body).ids);
     return { ok: true };
   });
-  app.patch("/api/prompts/:id", async (req) => prompts.update(params(req).id, parseBody(PromptBody.partial(), req.body)));
+  app.patch("/api/prompts/:id", async (req) => {
+    const { attachmentIds, ...patch } = parseBody(PromptBody.partial(), req.body);
+    return prompts.update(params(req).id, { ...patch, attachments: await promptFiles(attachmentIds) });
+  });
   app.delete("/api/prompts/:id", async (req) => {
     await prompts.remove(params(req).id);
     return { ok: true };

@@ -1,6 +1,7 @@
 import type { SavedPromptView } from "@my-ai-slaves/shared";
 import { ChevronRightIcon, LibraryBigIcon, PlusIcon, SaveIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { DropZone, PromptFiles, sameFiles, useAttachments } from "@/components/attachments";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FullscreenButton, FullscreenEditor } from "@/components/fullscreen-editor";
 import { PageHeader } from "@/components/page-header";
@@ -36,7 +37,7 @@ export function PromptsPage() {
     <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 py-8">
       <PageHeader
         title="Prompts"
-        description="Saved prompts you can bind to any task or reply with the Prompts button in the composer. They're sent as written, after the base prompts and before your message, in the order below."
+        description="Saved prompts you can bind to any task or reply with the Prompts button in the composer. They're sent as written, after the base prompts and before your message, in the order below, with any screenshots you attach to them."
       />
 
       <NewPromptCard
@@ -83,16 +84,18 @@ function NewPromptCard({ onCreated }: { onCreated: (p: SavedPromptView) => void 
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const canAdd = name.trim() !== "" && !busy;
+  const files = useAttachments();
+  const canAdd = name.trim() !== "" && !busy && !files.uploading && !files.failed;
 
   const add = async () => {
     if (!canAdd) return;
     setBusy(true);
-    const created = await attempt(api.createPrompt({ name: name.trim(), body }));
+    const created = await attempt(api.createPrompt({ name: name.trim(), body, attachmentIds: files.ids }));
     setBusy(false);
     if (created) {
       setName("");
       setBody("");
+      files.clear();
       onCreated(created);
     }
   };
@@ -127,13 +130,17 @@ function NewPromptCard({ onCreated }: { onCreated: (p: SavedPromptView) => void 
                 <FullscreenButton onClick={() => setFullscreen(true)} />
               </span>
             </div>
-            <Textarea
-              id="new-prompt-body"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Exactly what should be sent when you bind this prompt."
-              className="min-h-28 font-mono text-xs"
-            />
+            <DropZone attachments={files}>
+              <Textarea
+                id="new-prompt-body"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                onPaste={files.onPaste}
+                placeholder="Exactly what should be sent when you bind this prompt."
+                className="min-h-28 font-mono text-xs"
+              />
+            </DropZone>
+            <PromptFiles attachments={files} />
           </div>
           <FullscreenEditor
             open={fullscreen}
@@ -173,16 +180,22 @@ function PromptCard({
   const [body, setBody] = useState(prompt.body);
   const [busy, setBusy] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const files = useAttachments(prompt.attachments);
+  const { reset } = files;
   useEffect(() => {
     setName(prompt.name);
     setBody(prompt.body);
   }, [prompt.name, prompt.body]);
-  const dirty = name.trim() !== prompt.name || body !== prompt.body;
+  const savedFiles = prompt.attachments.map((a) => a.id).join(",");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the saved files change
+  useEffect(() => reset(prompt.attachments), [savedFiles, reset]);
+  const dirty = name.trim() !== prompt.name || body !== prompt.body || !sameFiles(files, prompt.attachments);
+  const canSave = dirty && Boolean(name.trim()) && !busy && !files.uploading && !files.failed;
 
   const save = async () => {
-    if (!dirty || !name.trim() || busy) return;
+    if (!canSave) return;
     setBusy(true);
-    const saved = await attempt(api.updatePrompt(prompt.id, { name: name.trim(), body }));
+    const saved = await attempt(api.updatePrompt(prompt.id, { name: name.trim(), body, attachmentIds: files.ids }));
     setBusy(false);
     if (saved) onSaved(saved);
   };
@@ -206,6 +219,11 @@ function PromptCard({
             {!expanded && (
               <span className="min-w-0 truncate text-xs text-muted-foreground">
                 {prompt.body.trim().split("\n")[0] || "(empty)"}
+              </span>
+            )}
+            {!expanded && prompt.attachments.length > 0 && (
+              <span className="num shrink-0 text-[11px] text-muted-foreground">
+                · {prompt.attachments.length} file{prompt.attachments.length === 1 ? "" : "s"}
               </span>
             )}
           </button>
@@ -237,18 +255,22 @@ function PromptCard({
               <FullscreenButton onClick={() => setFullscreen(true)} />
             </span>
           </div>
-          <Textarea
-            id={`prompt-body-${prompt.id}`}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                void save();
-              }
-            }}
-            className="min-h-36 font-mono text-xs"
-          />
+          <DropZone attachments={files}>
+            <Textarea
+              id={`prompt-body-${prompt.id}`}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              onPaste={files.onPaste}
+              onKeyDown={(e) => {
+                if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  void save();
+                }
+              }}
+              className="min-h-36 font-mono text-xs"
+            />
+          </DropZone>
+          <PromptFiles attachments={files} />
         </div>
         <FullscreenEditor
           open={fullscreen}
@@ -263,7 +285,7 @@ function PromptCard({
         />
         <div className="flex items-center justify-between gap-2">
           <span className="font-mono text-[11px] text-muted-foreground">id: {prompt.id}</span>
-          <Button size="sm" disabled={!dirty || !name.trim() || busy} onClick={() => void save()}>
+          <Button size="sm" disabled={!canSave} onClick={() => void save()}>
             <SaveIcon /> Save
           </Button>
         </div>

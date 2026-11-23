@@ -1,6 +1,7 @@
 import {
   type Account,
   type ActivityEntry,
+  type Attachment,
   type CreateTaskRequest,
   type DiffResponse,
   formatLocalIso,
@@ -626,13 +627,6 @@ export class QueueService {
         });
       }
 
-      // Attached files: on this Mac they're read in place; for a remote repo they're copied to the server.
-      const allFiles = [...task.attachments, ...task.replies.flatMap((r) => r.attachments)];
-      const located = await this.deps.attachments.locate(repo.host ?? null, allFiles);
-      const runFiles = isReply ? (task.replies.at(-1)?.attachments ?? []) : task.attachments;
-      const runPaths = runFiles.map((a) => located.get(a.id)?.path as string);
-      // The session may refer back to earlier files, so every file of the task stays readable.
-      const addDirs = [...extras.map((x) => x.repo.path), ...allFiles.map((a) => located.get(a.id)?.dir as string)];
       // Bound saved prompts: their current text, read now (like the base prompts).
       const boundIds = isReply ? (task.replies.at(-1)?.promptIds ?? []) : task.promptIds;
       const bound = await this.deps.prompts.resolve(boundIds);
@@ -646,12 +640,11 @@ export class QueueService {
         });
       }
       const boundBodies = bound.prompts.map((p) => p.body);
-      // The repo's prompts ticked for this task, current text (a reply's session already has them).
+      // The repo's prompts ticked for this task, current text (a reply's session already has them, so
+      // they're only read for their attached files, which stay readable).
       const repoPromptList = await this.deps.repos.prompts(repo.id);
-      const repoBound = isReply
-        ? { prompts: [], missing: [] }
-        : await repoPromptList.resolve(task.repoPromptIds ?? (await repoPromptList.defaultIds()));
-      if (repoBound.missing.length) {
+      const repoBound = await repoPromptList.resolve(task.repoPromptIds ?? (await repoPromptList.defaultIds()));
+      if (repoBound.missing.length && !isReply) {
         this.log({
           taskId: task.id,
           repo: repo.id,
@@ -661,22 +654,44 @@ export class QueueService {
         });
       }
       // The other repos' ticked prompts (how to handle changes there), after the main repo's.
-      const repoSent = repoBound.prompts.map((p) => ({ repo: repo.id, id: p.id, name: p.name, body: p.body }));
-      if (!isReply) {
-        for (const x of extras) {
-          const got = await (await this.deps.repos.prompts(x.repo.id)).resolve(x.promptIds);
-          if (got.missing.length) {
-            this.log({
-              taskId: task.id,
-              repo: repo.id,
-              account: account.id,
-              event: "warning",
-              detail: `Repo prompt(s) no longer in ${x.repo.id}'s list, not sent: ${got.missing.join(", ")}`,
-            });
-          }
-          repoSent.push(...got.prompts.map((p) => ({ repo: x.repo.id, id: p.id, name: p.name, body: p.body })));
+      const repoTicked = repoBound.prompts.map((p) => ({ repo: repo.id, id: p.id, name: p.name, body: p.body, attachments: p.attachments }));
+      for (const x of extras) {
+        const got = await (await this.deps.repos.prompts(x.repo.id)).resolve(x.promptIds);
+        if (got.missing.length && !isReply) {
+          this.log({
+            taskId: task.id,
+            repo: repo.id,
+            account: account.id,
+            event: "warning",
+            detail: `Repo prompt(s) no longer in ${x.repo.id}'s list, not sent: ${got.missing.join(", ")}`,
+          });
         }
+        repoTicked.push(...got.prompts.map((p) => ({ repo: x.repo.id, id: p.id, name: p.name, body: p.body, attachments: p.attachments })));
       }
+      const repoSent = isReply ? [] : repoTicked;
+
+      // Attached files: on this Mac they're read in place; for a remote repo they're copied to the server.
+      // A prompt's files go with it, before the message's own (the same order as the text).
+      const runFiles = uniqueFiles([
+        ...repoSent.flatMap((p) => p.attachments),
+        ...bound.prompts.flatMap((p) => p.attachments),
+        ...(isReply ? (task.replies.at(-1)?.attachments ?? []) : task.attachments),
+      ]);
+      // The session may refer back to earlier files, so every file of the task (and of the prompts it
+      // was sent) stays readable.
+      const earlierBound = isReply
+        ? await this.deps.prompts.resolve([task.promptIds, ...task.replies.map((r) => r.promptIds)].flat())
+        : { prompts: [] };
+      const allFiles = uniqueFiles([
+        ...runFiles,
+        ...task.attachments,
+        ...task.replies.flatMap((r) => r.attachments),
+        ...repoTicked.flatMap((p) => p.attachments),
+        ...earlierBound.prompts.flatMap((p) => p.attachments),
+      ]);
+      const located = await this.deps.attachments.locate(repo.host ?? null, allFiles);
+      const runPaths = runFiles.map((a) => located.get(a.id)?.path as string);
+      const addDirs = [...extras.map((x) => x.repo.path), ...allFiles.map((a) => located.get(a.id)?.dir as string)];
       const assembled = isReply
         ? this.deps.assembler.forReply(task.pendingReply ?? "", runPaths, boundBodies)
         : await this.deps.assembler.forTask(task.message, {
@@ -744,7 +759,7 @@ export class QueueService {
         text: isReply ? (task.pendingReply ?? "") : task.message,
         reply: isReply,
         attachments: runFiles.map(({ id, name, mime, size }) => ({ id, name, mime, size })),
-        prompts: isReply ? bound.prompts.map((p) => p.name) : [...repoSent.map((p) => p.name), ...bound.prompts.map((p) => p.name)],
+        prompts: [...repoSent.map((p) => p.name), ...bound.prompts.map((p) => p.name)],
       };
       pushCapped(buffer.events, sent);
       this.deps.broadcaster.taskEvent(task.id, sent);
@@ -903,4 +918,10 @@ export class QueueService {
     await this.publish();
     void this.tick();
   }
+}
+
+/** Files in first-seen order, each once (two prompts may share a screenshot). */
+function uniqueFiles(files: Attachment[]): Attachment[] {
+  const seen = new Set<string>();
+  return files.filter((a) => !seen.has(a.id) && Boolean(seen.add(a.id)));
 }

@@ -1,4 +1,4 @@
-import { formatLocalIso, type RepoPrompt, type SavedPrompt } from "@my-ai-slaves/shared";
+import { type Attachment, formatLocalIso, type RepoPrompt, type SavedPrompt } from "@my-ai-slaves/shared";
 import type { DataStores } from "../storage/data-stores";
 import { badRequest, conflict, notFound, slugify } from "./common";
 
@@ -8,8 +8,8 @@ export interface PromptListIo<T extends SavedPrompt> {
   update(change: (list: T[]) => void): Promise<unknown>;
 }
 
-/** Fields a list adds on top of name + body (e.g. a repo prompt's `default`). */
-type Extra<T extends SavedPrompt> = Partial<Omit<T, keyof SavedPrompt>>;
+/** Fields a list adds on top of name + body (e.g. a repo prompt's `default`), plus its attachments. */
+type Extra<T extends SavedPrompt> = Partial<Omit<T, keyof SavedPrompt>> & { attachments?: Attachment[] };
 
 /**
  * An ordered list of named prompts, sent verbatim when bound. Used for the saved prompt library
@@ -38,7 +38,8 @@ export class PromptList<T extends SavedPrompt = SavedPrompt> {
     let id = base;
     for (let n = 2; prompts.some((p) => p.id === id); n++) id = `${base}-${n}`;
     const stamp = formatLocalIso(this.now());
-    const prompt = { ...extra, id, name: trimmed, body, createdAt: stamp, updatedAt: stamp } as T;
+    const { attachments = [], ...rest } = extra;
+    const prompt = { ...rest, id, name: trimmed, body, attachments, createdAt: stamp, updatedAt: stamp } as T;
     await this.io.update((list) => {
       list.push(prompt);
     });

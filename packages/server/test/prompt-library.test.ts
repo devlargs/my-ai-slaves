@@ -18,7 +18,7 @@ describe("PromptLibrary", () => {
     const renamed = await lib.update(p.id, { name: "Jira: analyze ticket", body: "new steps" });
     expect(renamed).toMatchObject({ id: "analyze-jira-ticket", name: "Jira: analyze ticket", body: "new steps" });
     const file = await stores.prompts.read();
-    expect(Object.keys(file.prompts[0]!)).toEqual(["id", "name", "body", "createdAt", "updatedAt"]);
+    expect(Object.keys(file.prompts[0]!)).toEqual(["id", "name", "body", "attachments", "createdAt", "updatedAt"]);
   });
 
   it("refuses duplicate or empty names", async () => {

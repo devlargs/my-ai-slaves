@@ -28,6 +28,24 @@ export interface PendingFile {
 
 let counter = 0;
 
+/** A file that's already uploaded (e.g. saved with a prompt), shown in the tray as ready. */
+function readyFile(a: Attachment): PendingFile {
+  return {
+    key: `a-${a.id}`,
+    name: a.name,
+    size: a.size,
+    previewUrl: PREVIEWABLE_IMAGE_TYPES.includes(a.mime) ? `/api/attachments/${a.id}` : null,
+    status: "ready",
+    attachment: a,
+    error: null,
+  };
+}
+
+/** Only previews made here (blob: URLs) need freeing; saved files preview from the server. */
+const revoke = (f: PendingFile) => {
+  if (f.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(f.previewUrl);
+};
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -38,8 +56,8 @@ export function formatBytes(bytes: number): string {
  * Upload-as-you-attach. Paste (⌘V an image or file), drop, or pick files; each one uploads right
  * away so sending is instant. `ids` are the uploaded attachment ids to send with the message.
  */
-export function useAttachments() {
-  const [files, setFiles] = useState<PendingFile[]>([]);
+export function useAttachments(initial: Attachment[] = []) {
+  const [files, setFiles] = useState<PendingFile[]>(() => initial.map(readyFile));
 
   const add = useCallback((incoming: File[]) => {
     if (incoming.length === 0) return;
@@ -83,17 +101,19 @@ export function useAttachments() {
   const remove = useCallback((key: string) => {
     setFiles((list) => {
       const gone = list.find((f) => f.key === key);
-      if (gone?.previewUrl) URL.revokeObjectURL(gone.previewUrl);
+      if (gone) revoke(gone);
       return list.filter((f) => f.key !== key);
     });
   }, []);
 
-  const clear = useCallback(() => {
+  /** Empty the tray, or put already-uploaded files back in it (e.g. a prompt's saved ones). */
+  const reset = useCallback((to: Attachment[] = []) => {
     setFiles((list) => {
-      for (const f of list) if (f.previewUrl) URL.revokeObjectURL(f.previewUrl);
-      return [];
+      for (const f of list) revoke(f);
+      return to.map(readyFile);
     });
   }, []);
+  const clear = useCallback(() => reset(), [reset]);
 
   /** Attach pasted files/images; plain-text pastes go through untouched. */
   const onPaste = useCallback(
@@ -111,6 +131,7 @@ export function useAttachments() {
     add,
     remove,
     clear,
+    reset,
     onPaste,
     ids: files.filter((f) => f.status === "ready" && f.attachment).map((f) => (f.attachment as Attachment).id),
     uploading: files.some((f) => f.status === "uploading"),
@@ -397,4 +418,24 @@ export function ImageViewer({
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   );
+}
+
+/** Screenshots / files saved with a prompt: the paperclip plus the tray (paste or drop them too). */
+export function PromptFiles({ attachments }: { attachments: AttachmentsState }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <AttachButton attachments={attachments} />
+      {attachments.files.length === 0 ? (
+        <span className="text-[11px] text-muted-foreground">Paste, drop or attach screenshots to send with this prompt</span>
+      ) : (
+        <AttachmentTray attachments={attachments} />
+      )}
+    </div>
+  );
+}
+
+/** Whether the tray still holds exactly the files saved with a prompt. */
+export function sameFiles(attachments: AttachmentsState, saved: Attachment[]): boolean {
+  const ids = attachments.files.map((f) => f.attachment?.id ?? f.key);
+  return ids.length === saved.length && ids.every((id, i) => id === saved[i]?.id);
 }

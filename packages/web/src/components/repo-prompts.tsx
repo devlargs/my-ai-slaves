@@ -1,6 +1,7 @@
 import type { RepoPrompt } from "@my-ai-slaves/shared";
 import { ChevronRightIcon, FolderGit2Icon, PlusIcon, SaveIcon, Trash2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { DropZone, PromptFiles, sameFiles, useAttachments } from "@/components/attachments";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { FullscreenButton, FullscreenEditor } from "@/components/fullscreen-editor";
 import { SortableList } from "@/components/sortable-list";
@@ -120,13 +121,14 @@ function NewRepoPrompt({
   const [isDefault, setIsDefault] = useState(first);
   const [busy, setBusy] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const canAdd = name.trim() !== "" && !busy;
+  const files = useAttachments();
+  const canAdd = name.trim() !== "" && !busy && !files.uploading && !files.failed;
 
   const add = async () => {
     if (!canAdd) return;
     setBusy(true);
     const created = await attempt(
-      api.createRepoPrompt(repoId, { name: name.trim(), body, default: isDefault }),
+      api.createRepoPrompt(repoId, { name: name.trim(), body, default: isDefault, attachmentIds: files.ids }),
     );
     setBusy(false);
     if (created) onCreated(created);
@@ -148,18 +150,20 @@ function NewRepoPrompt({
         maxLength={120}
         autoFocus
       />
-      <div className="relative">
+      <DropZone attachments={files}>
         <Textarea
           aria-label="Prompt text"
           value={body}
           onChange={(e) => setBody(e.target.value)}
+          onPaste={files.onPaste}
           placeholder="Exactly what should be sent when this prompt is ticked."
           className="min-h-28 font-mono text-xs"
         />
         <span className="absolute top-1.5 right-1.5">
           <FullscreenButton onClick={() => setFullscreen(true)} />
         </span>
-      </div>
+      </DropZone>
+      <PromptFiles attachments={files} />
       <FullscreenEditor
         open={fullscreen}
         onOpenChange={setFullscreen}
@@ -207,16 +211,24 @@ function RepoPromptRow({
   const [body, setBody] = useState(prompt.body);
   const [busy, setBusy] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const files = useAttachments(prompt.attachments);
+  const { reset } = files;
   useEffect(() => {
     setName(prompt.name);
     setBody(prompt.body);
   }, [prompt.name, prompt.body]);
-  const dirty = name.trim() !== prompt.name || body !== prompt.body;
+  const savedFiles = prompt.attachments.map((a) => a.id).join(",");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the saved files change
+  useEffect(() => reset(prompt.attachments), [savedFiles, reset]);
+  const dirty = name.trim() !== prompt.name || body !== prompt.body || !sameFiles(files, prompt.attachments);
+  const canSave = dirty && Boolean(name.trim()) && !busy && !files.uploading && !files.failed;
 
   const save = async () => {
-    if (!dirty || !name.trim() || busy) return;
+    if (!canSave) return;
     setBusy(true);
-    const saved = await attempt(api.updateRepoPrompt(repoId, prompt.id, { name: name.trim(), body }));
+    const saved = await attempt(
+      api.updateRepoPrompt(repoId, prompt.id, { name: name.trim(), body, attachmentIds: files.ids }),
+    );
     setBusy(false);
     if (saved) onSaved(saved);
   };
@@ -247,6 +259,11 @@ function RepoPromptRow({
               {prompt.body.trim().split("\n")[0] || "(empty)"}
             </span>
           )}
+          {!expanded && prompt.attachments.length > 0 && (
+            <span className="num shrink-0 text-[11px] text-muted-foreground">
+              · {prompt.attachments.length} file{prompt.attachments.length === 1 ? "" : "s"}
+            </span>
+          )}
         </button>
         <label
           className="flex shrink-0 cursor-pointer items-center gap-1.5 px-1 text-[11px] text-muted-foreground select-none"
@@ -272,11 +289,12 @@ function RepoPromptRow({
       </div>
       <div hidden={!expanded} className="flex flex-col gap-2.5 border-t border-rule p-3">
         <Input aria-label="Prompt name" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
-        <div className="relative">
+        <DropZone attachments={files}>
           <Textarea
             aria-label={`${prompt.name} text`}
             value={body}
             onChange={(e) => setBody(e.target.value)}
+            onPaste={files.onPaste}
             onKeyDown={(e) => {
               if (e.key === "s" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
@@ -288,7 +306,8 @@ function RepoPromptRow({
           <span className="absolute top-1.5 right-1.5">
             <FullscreenButton onClick={() => setFullscreen(true)} />
           </span>
-        </div>
+        </DropZone>
+        <PromptFiles attachments={files} />
         <FullscreenEditor
           open={fullscreen}
           onOpenChange={setFullscreen}
@@ -302,7 +321,7 @@ function RepoPromptRow({
         />
         <div className="flex items-center justify-between gap-2">
           <span className="font-mono text-[11px] text-muted-foreground">id: {prompt.id}</span>
-          <Button size="sm" disabled={!dirty || !name.trim() || busy} onClick={() => void save()}>
+          <Button size="sm" disabled={!canSave} onClick={() => void save()}>
             <SaveIcon /> Save
           </Button>
         </div>

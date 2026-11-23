@@ -166,6 +166,8 @@ export interface CreateRepoPromptRequest {
   body: string;
   /** Pre-ticked when you queue a task on this repo. */
   default?: boolean;
+  /** Uploaded attachments (POST /api/attachments) sent with the prompt. */
+  attachmentIds?: string[];
 }
 /** PATCH /api/repos/:id/prompts/:promptId → RepoPrompt · DELETE → { ok } · PUT /api/repos/:id/prompts/order (ReorderRequest) */
 export type UpdateRepoPromptRequest = Partial<CreateRepoPromptRequest>;
@@ -233,10 +235,14 @@ export type SavedPromptView = SavedPromptT;
 export interface CreatePromptRequest {
   name: string;
   body: string;
+  /** Uploaded attachments (POST /api/attachments) sent with the prompt. */
+  attachmentIds?: string[];
 }
 export interface UpdatePromptRequest {
   name?: string;
   body?: string;
+  /** Replaces the prompt's attachments. */
+  attachmentIds?: string[];
 }
 
 // ── Attachments ─────────────────────────────────────────────────────────────

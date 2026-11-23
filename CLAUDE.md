@@ -81,7 +81,8 @@ desktop app also uses 3005 and refuses to start if it's taken).
   task queued without `repoPromptIds` gets the defaults) → saved prompts bound to that message (from the
   Prompts library, `.data/prompts.json`, in library order) → task message, joined by a blank line, empty
   layers skipped. The only app-written text is two visible path lists: "Other repositories:" (a
-  cross-repo task's other repos, after the message) and "Attached files:" (when files are attached). Never add hidden system/role/wrapper text anywhere. Replies resume
+  cross-repo task's other repos, after the message) and "Attached files:" (when files are attached: the ticked/bound prompts' saved screenshots
+  first, in prompt order, then the message's). Never add hidden system/role/wrapper text anywhere. Replies resume
   the session and send only the reply (+ its attachments).
 - **Every started run is logged** in activity with its full assembled prompt.
 - **No AI attribution** in commits or PRs: Claude runs with `attribution: false`, Cursor's cli-config sets
