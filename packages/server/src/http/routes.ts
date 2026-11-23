@@ -258,6 +258,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
           repoPromptIds: z.array(z.string()).optional(),
           extraRepos: z.array(z.string()).optional(),
           extraRepoPromptIds: z.record(z.string(), z.array(z.string())).optional(),
+          draft: z.boolean().optional(),
+          replacesDraft: z.string().optional(),
         }),
         req.body,
       ),

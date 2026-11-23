@@ -212,6 +212,10 @@ export interface CreateTaskRequest {
   extraRepos?: string[];
   /** Per other repo, its prompts to send (they say how to handle changes there); left out = its defaults. */
   extraRepoPromptIds?: Record<string, string[]>;
+  /** Save it as a draft: it sits in the queue and never runs until it's loaded back and queued. */
+  draft?: boolean;
+  /** The draft this replaces (it was loaded into the composer): removed in the same step. */
+  replacesDraft?: string;
 }
 /** PUT /api/tasks/order (body ReorderRequest, only pending tasks move) */
 /** POST /api/tasks/:id/cancel — pending: removed from queue; running: stopped → interrupted */

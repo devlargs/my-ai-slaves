@@ -367,6 +367,33 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect(history.find((e) => e.event === "fallback")?.detail).toBe("work_1-claude hit usage limit, retrying on work_2-cursor");
   });
 
+  it("a draft sits in the queue and never runs; queueing it replaces it with a real task", async () => {
+    const { queue, repo, received } = await setup();
+    const draft = await queue.create({ repo: repo.id, message: "draft me", repoPromptIds: [], draft: true });
+    expect(draft.status).toBe("draft");
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await queue.list()).map((t) => [t.id, t.status])).toEqual([[draft.id, "draft"]]);
+    expect(await received()).toEqual([]);
+
+    // Saving it again keeps its place and stays a draft.
+    const again = await queue.create({ repo: repo.id, message: "draft me v2", draft: true, replacesDraft: draft.id });
+    expect((await queue.list()).map((t) => [t.id, t.status])).toEqual([[again.id, "draft"]]);
+
+    const task = await queue.create({ repo: repo.id, message: "run me", replacesDraft: again.id });
+    await waitFor(taskWith(queue, task.id, "needs-review"));
+    expect((await queue.list()).map((t) => t.id)).toEqual([task.id]);
+    expect((await received()).map((r) => r.prompt)).toEqual([FULL("run me")]);
+    await expect(queue.create({ repo: repo.id, message: "x", replacesDraft: task.id })).rejects.toThrow(/not a draft/);
+  });
+
+  it("discarding a draft leaves nothing in history", async () => {
+    const { queue, repo } = await setup();
+    const draft = await queue.create({ repo: repo.id, message: "never mind", draft: true });
+    await queue.discard(draft.id);
+    expect(await queue.list()).toEqual([]);
+    expect((await queue.history()).some((h) => h.taskId === draft.id)).toBe(false);
+  });
+
   it("removes a failed task, keeps it in history", async () => {
     const { queue, repo } = await setup();
     const created = await queue.create({ repo: repo.id, message: "FAIL now" });

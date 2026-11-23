@@ -7,11 +7,13 @@ import {
   ClockIcon,
   CornerDownRightIcon,
   FileDiffIcon,
+  FilePenLineIcon,
   HistoryIcon,
   InboxIcon,
   MinusIcon,
   MousePointerClickIcon,
   RotateCcwIcon,
+  SaveIcon,
   SendIcon,
   Trash2Icon,
   XIcon,
@@ -78,6 +80,9 @@ export function QueuePage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = tasks.find((t) => t.id === selectedId) ?? null;
   const previousTasks = useRef<TaskView[]>(tasks);
+  // The draft loaded into the composer (queueing or saving it replaces it).
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const editingDraft = tasks.find((t) => t.id === editingDraftId && t.status === "draft") ?? null;
 
   // When the open task leaves the queue (marked finished, discarded, deleted), open the task that was next in
   // line (or the one before it if it was last). With nothing left, fall back to the empty placeholder.
@@ -87,7 +92,8 @@ export function QueuePage() {
     if (!selectedId || tasks.some((t) => t.id === selectedId)) return;
     const index = before.findIndex((t) => t.id === selectedId);
     if (index === -1) return;
-    const remaining = new Set(tasks.map((t) => t.id));
+    // Drafts open in the composer, not here.
+    const remaining = new Set(tasks.filter((t) => t.status !== "draft").map((t) => t.id));
     const next =
       before.slice(index + 1).find((t) => remaining.has(t.id)) ??
       before
@@ -128,10 +134,16 @@ export function QueuePage() {
               </p>
             </div>
           ) : (
-            <QueueList tasks={tasks} selectedId={selectedId} onSelect={setSelectedId} />
+            <QueueList
+              tasks={tasks}
+              selectedId={selectedId}
+              editingDraftId={editingDraft?.id ?? null}
+              onSelect={setSelectedId}
+              onOpenDraft={setEditingDraftId}
+            />
           )}
         </div>
-        <Composer />
+        <Composer editingDraft={editingDraft} onEditingDraftChange={setEditingDraftId} />
       </div>
       <div className="min-w-0 flex-1">
         {selected ? (
@@ -152,11 +164,16 @@ export function QueuePage() {
 function QueueList({
   tasks,
   selectedId,
+  editingDraftId,
   onSelect,
+  onOpenDraft,
 }: {
   tasks: TaskView[];
   selectedId: string | null;
+  editingDraftId: string | null;
   onSelect: (id: string) => void;
+  /** A draft opens in the composer instead of the detail pane. */
+  onOpenDraft: (id: string) => void;
 }) {
   const repoName = useRepoName();
   const pendingIds = useMemo(() => new Set(tasks.filter((t) => t.status === "pending").map((t) => t.id)), [tasks]);
@@ -175,21 +192,29 @@ function QueueList({
       getId={(t) => t.id}
       sortableIds={pendingIds}
       onReorder={reorder}
-      renderItem={(task, handle) => (
+      renderItem={(task, handle) => {
+        const draft = task.status === "draft";
+        const open = () => (draft ? onOpenDraft(task.id) : onSelect(task.id));
+        const current = draft ? editingDraftId === task.id : selectedId === task.id;
+        return (
         <div
           role="button"
           tabIndex={0}
-          onClick={() => onSelect(task.id)}
+          onClick={open}
           onKeyDown={(e) => {
-            if (e.key === "Enter") onSelect(task.id);
+            if (e.key === "Enter") open();
           }}
-          aria-current={selectedId === task.id ? "true" : undefined}
+          title={draft ? "Draft: never runs. Click to load it into the composer." : undefined}
+          aria-current={current ? "true" : undefined}
           className={cn(
-            "group flex cursor-pointer items-start gap-2 rounded-lg border bg-surface px-2.5 py-2.5 transition-[border-color,box-shadow] duration-150",
+            "group flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2.5 transition-[border-color,box-shadow] duration-150",
             "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--color-focus)",
-            selectedId === task.id
+            draft ? "border-dashed bg-paper" : "bg-surface",
+            current
               ? "border-signal/55 ring-3 ring-signal/10"
-              : "border-rule hover:border-rule-strong",
+              : draft
+                ? "border-rule-strong hover:border-ink-2/40"
+                : "border-rule hover:border-rule-strong",
           )}
         >
           <div className="pt-0.5">{handle}</div>
@@ -303,14 +328,21 @@ function QueueList({
             <DiscardTaskButton task={task} />
           </div>
         </div>
-      )}
+        );
+      }}
     />
   );
 }
 
 // ── Composer ────────────────────────────────────────────────────────────────
 
-function Composer() {
+function Composer({
+  editingDraft,
+  onEditingDraftChange,
+}: {
+  editingDraft: TaskView | null;
+  onEditingDraftChange: (id: string | null) => void;
+}) {
   const { data: repos } = useApi<RepoView[]>(() => api.getRepos(), [], "repos");
   const accounts = useStore((s) => s.accounts);
   const [repo, setRepo] = useState<string | undefined>(() => storageGet(REPO_KEY) ?? undefined);
@@ -361,7 +393,37 @@ function Composer() {
   const hasContent = hasText || files.files.length > 0;
   const canSend = Boolean(repo && hasContent) && !busy && !files.uploading && !files.failed;
 
-  const submit = async () => {
+  const setMessage = (text: string) => {
+    if (input.current) input.current.value = text;
+    if (text) storageSet(draftKey(COMPOSER_DRAFT), text);
+    else storageRemove(draftKey(COMPOSER_DRAFT));
+    setHasText(text.trim().length > 0);
+    setPreviewText(text);
+  };
+
+  // A draft clicked in the queue: put its message, repos, account, prompts and files back in the composer.
+  const loadedDraft = useRef<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loads once per draft opened
+  useEffect(() => {
+    if (!editingDraft || loadedDraft.current === editingDraft.id) {
+      if (!editingDraft) loadedDraft.current = null;
+      return;
+    }
+    loadedDraft.current = editingDraft.id;
+    const t = editingDraft;
+    selectRepos({ main: t.repo, extras: t.extraRepos.map((x) => x.repo) });
+    setAccount(t.accountOverride && accounts.some((a) => a.id === t.accountOverride) ? t.accountOverride : CHAIN);
+    setMessage(t.message);
+    files.reset(t.attachments);
+    bound.setIds(t.promptIds);
+    repoSets.preset({
+      ...(t.repoPromptIds ? { [t.repo]: t.repoPromptIds } : {}),
+      ...Object.fromEntries(t.extraRepos.map((x) => [x.repo, x.promptIds])),
+    });
+    input.current?.focus();
+  }, [editingDraft?.id]);
+
+  const submit = async (asDraft = false) => {
     const message = input.current?.value ?? "";
     if (!repo || !canSend || (!message.trim() && files.ids.length === 0)) return;
     setBusy(true);
@@ -375,14 +437,14 @@ function Composer() {
         repoPromptIds: repoSets.tickedFor(repo),
         extraRepos: extras,
         extraRepoPromptIds,
+        draft: asDraft,
+        replacesDraft: editingDraft?.id,
       }),
     );
     setBusy(false);
     if (task) {
-      if (input.current) input.current.value = "";
-      storageRemove(draftKey(COMPOSER_DRAFT));
-      setHasText(false);
-      setPreviewText("");
+      onEditingDraftChange(null);
+      setMessage("");
       files.clear();
       bound.setIds([]);
       repoSets.resetToDefaults();
@@ -418,6 +480,23 @@ function Composer() {
               ]}
             />
           </div>
+          {editingDraft && (
+            <div className="flex items-center gap-1.5 border-b border-rule px-2.5 py-1 text-[11px] text-muted-foreground">
+              <FilePenLineIcon className="size-3 shrink-0" />
+              <span className="min-w-0 truncate">
+                Editing draft <span className="text-ink-2">{editingDraft.title}</span>
+              </span>
+              <button
+                type="button"
+                className="ml-auto shrink-0 cursor-pointer rounded-sm p-0.5 hover:bg-paper-2 hover:text-ink"
+                title="Stop editing the draft (keeps it in the queue and the text here)"
+                aria-label="Stop editing the draft"
+                onClick={() => onEditingDraftChange(null)}
+              >
+                <XIcon className="size-3" />
+              </button>
+            </div>
+          )}
           {bound.ids.length + repoSets.count > 0 && (
             <div className="px-2.5 pt-2">
               <BoundPromptChips sections={sections} />
@@ -458,7 +537,17 @@ function Composer() {
             <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">
               <kbd className="font-mono">⇧↵</kbd> to queue
             </span>
-            <Button size="sm" variant="signal" className="ml-1.5" disabled={!canSend} onClick={() => void submit()}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="ml-1.5"
+              disabled={!canSend}
+              title={editingDraft ? "Save the changes to this draft" : "Keep it in the queue as a draft: it never runs until you open it and queue it"}
+              onClick={() => void submit(true)}
+            >
+              <SaveIcon /> {editingDraft ? "Save draft" : "Mark as draft"}
+            </Button>
+            <Button size="sm" variant="signal" disabled={!canSend} onClick={() => void submit()}>
               <SendIcon /> {files.uploading ? "Uploading…" : "Queue"}
             </Button>
           </div>
@@ -813,10 +902,14 @@ export function DiscardTaskButton({ task, withLabel = false }: { task: TaskView;
         aria-label={`Discard ${task.title}`}
         title={`Discard “${task.title}”?`}
         description={
-          <p>
-            {task.status === "running" ? "Stops the run, then " : "This "}
-            {what}. The task&apos;s record stays in History.
-          </p>
+          task.status === "draft" ? (
+            <p>Deletes the draft. It never ran, so nothing is kept in History.</p>
+          ) : (
+            <p>
+              {task.status === "running" ? "Stops the run, then " : "This "}
+              {what}. The task&apos;s record stays in History.
+            </p>
+          )
         }
         confirmLabel={task.status === "running" ? "Stop and discard" : "Discard"}
         onConfirm={() => attempt(api.discardTask(task.id))}

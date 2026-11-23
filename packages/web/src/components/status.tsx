@@ -4,6 +4,7 @@ import { useNow } from "@/lib/hooks";
 import { cn, formatDuration } from "@/lib/utils";
 
 const taskVariants: Record<string, BadgeVariant> = {
+  draft: "secondary",
   pending: "outline",
   running: "signal",
   "needs-review": "warning",

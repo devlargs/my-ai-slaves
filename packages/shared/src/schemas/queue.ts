@@ -2,7 +2,8 @@ import { z } from "zod";
 import { Attachment } from "./attachment";
 import { ProviderId, Timestamp, timestampNow } from "./common";
 
-export const QueuedTaskStatus = z.enum(["pending", "running", "needs-review", "interrupted"]);
+/** `draft`: saved from the composer to finish later; never runs (clicking it loads it back into the composer). */
+export const QueuedTaskStatus = z.enum(["draft", "pending", "running", "needs-review", "interrupted"]);
 export type QueuedTaskStatus = z.infer<typeof QueuedTaskStatus>;
 
 /** Statuses a task can have anywhere (done/failed only exist in activity history). */

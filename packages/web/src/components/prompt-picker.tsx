@@ -65,13 +65,18 @@ export function useRepoPromptSets(repoIds: string[]) {
   const [lists, setLists] = useState<Record<string, RepoPrompt[]>>({});
   const [ticked, setTicked] = useState<Record<string, string[]>>({});
   const requested = useRef(new Set<string>());
+  /** Ticks to use instead of the defaults once a repo's list loads (a draft loaded back into the composer). */
+  const presets = useRef<Record<string, string[]>>({});
 
   const load = useCallback((repo: string, tickDefaults: boolean) => {
     api
       .getRepoPrompts(repo)
       .then((prompts) => {
         setLists((prev) => ({ ...prev, [repo]: prompts }));
-        if (tickDefaults) setTicked((prev) => ({ ...prev, [repo]: prompts.filter((p) => p.default).map((p) => p.id) }));
+        const preset = presets.current[repo];
+        delete presets.current[repo];
+        if (preset) setTicked((prev) => ({ ...prev, [repo]: preset }));
+        else if (tickDefaults) setTicked((prev) => ({ ...prev, [repo]: prompts.filter((p) => p.default).map((p) => p.id) }));
       })
       .catch(() => {});
   }, []);
@@ -83,6 +88,7 @@ export function useRepoPromptSets(repoIds: string[]) {
       if (repoIds.includes(repo)) continue;
       // Dropped: forget its ticks, so adding it again starts from its defaults.
       requested.current.delete(repo);
+      delete presets.current[repo];
       setTicked(({ [repo]: _, ...rest }) => rest);
     }
     for (const repo of repoIds) {
@@ -110,8 +116,16 @@ export function useRepoPromptSets(repoIds: string[]) {
   const tickedFor = (repo: string): string[] | undefined => (lists[repo] ? (ticked[repo] ?? []) : undefined);
   const resetToDefaults = () =>
     setTicked(Object.fromEntries(Object.entries(lists).map(([repo, prompts]) => [repo, prompts.filter((p) => p.default).map((p) => p.id)])));
+  /** Tick exactly these per repo (repos left out keep their defaults), even if their lists are still loading. */
+  const preset = (ticks: Record<string, string[]>) => {
+    for (const [repo, ids] of Object.entries(ticks)) {
+      // Not loaded, or about to load again (re-added): its load would tick the defaults over these.
+      if (!lists[repo] || !requested.current.has(repo)) presets.current[repo] = ids;
+    }
+    setTicked((prev) => ({ ...prev, ...ticks }));
+  };
   const count = repoIds.reduce((n, repo) => n + (ticked[repo]?.length ?? 0), 0);
-  return { source, bound, tickedFor, resetToDefaults, count };
+  return { source, bound, tickedFor, resetToDefaults, preset, count };
 }
 
 export interface BoundPrompts {

@@ -245,8 +245,13 @@ export class QueueService {
     if (!message.trim() && !req.attachmentIds?.length) throw badRequest("The task message is empty. Type a message or attach a file.");
     const repo = await this.deps.repos.get(req.repo);
     const override = req.accountOverride || null;
+    const draft = req.draft === true;
     if (override) await this.deps.accounts.get(override);
-    if (!override && repo.accountChain.length === 0) {
+    if (req.replacesDraft !== undefined && (await this.getTask(req.replacesDraft)).status !== "draft") {
+      throw conflict(`Task "${req.replacesDraft}" is not a draft.`);
+    }
+    // A draft never runs, so it doesn't need an account yet.
+    if (!draft && !override && repo.accountChain.length === 0) {
       throw badRequest(`"${repo.id}" has no accounts in its chain. Add some on the Repos page.`);
     }
     const attachments = await this.deps.attachments.resolve(req.attachmentIds);
@@ -268,6 +273,10 @@ export class QueueService {
 
     let task: Task | undefined;
     await this.stores.queue.update((q) => {
+      const replaced = req.replacesDraft;
+      if (replaced !== undefined && !q.tasks.some((t) => t.id === replaced && t.status === "draft")) {
+        throw conflict(`Task "${replaced}" is not a draft.`);
+      }
       const id = `task_${String(q.nextTaskNumber).padStart(4, "0")}_${slug}`;
       q.nextTaskNumber += 1;
       const stamp = this.stamp();
@@ -276,7 +285,7 @@ export class QueueService {
         title,
         repo: repo.id,
         extraRepos,
-        status: "pending",
+        status: draft ? "draft" : "pending",
         message,
         attachments,
         promptIds,
@@ -291,9 +300,21 @@ export class QueueService {
         createdAt: stamp,
         updatedAt: stamp,
       };
-      q.tasks.push(task);
+      const at = replaced === undefined ? -1 : q.tasks.findIndex((t) => t.id === replaced);
+      // A saved-again draft keeps its place; a queued one goes to the back like any new task.
+      if (at !== -1 && draft) q.tasks.splice(at, 1, task);
+      else {
+        if (at !== -1) q.tasks.splice(at, 1);
+        q.tasks.push(task);
+      }
     });
     const created = task as Task;
+    if (req.replacesDraft !== undefined) this.waitingNotes.delete(req.replacesDraft);
+    if (draft) {
+      // Nothing started, so nothing to log; it shows up in activity once it's queued.
+      await this.publish();
+      return { ...created, waitingNote: null };
+    }
     this.log({
       taskId: created.id,
       repo: repo.id,
@@ -416,6 +437,12 @@ export class QueueService {
   /** Remove a task from the queue in any state. A running task is stopped first. The repo is left as it is. */
   async discard(id: string): Promise<void> {
     let task = await this.getTask(id);
+    if (task.status === "draft") {
+      // Never queued or logged: it just goes.
+      await this.removeTask(id);
+      await this.publish();
+      return;
+    }
     const wasRunning = task.status === "running";
     if (wasRunning) task = await this.stopForDiscard(id);
     await this.removeTask(id);
