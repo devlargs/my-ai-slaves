@@ -1,8 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { QueueFile, SettingsFile } from "@my-ai-slaves/shared";
+import { type DataFileRecovery, QueueFile, ReposFile, SettingsFile } from "@my-ai-slaves/shared";
 import { describe, expect, it } from "vitest";
-import { JsonStore } from "../src/storage/json-store";
+import { DATA_SCHEMA_VERSION, JsonStore, NewerDataFileError } from "../src/storage/json-store";
 import { fixedNow, listDir, memoryLogger, tempDir } from "./helpers";
 
 async function settingsStore(dir: string, logger = memoryLogger()) {
@@ -24,6 +24,7 @@ describe("JsonStore", () => {
     expect(parsed.providers["claude-code"].permissionMode).toBe("auto");
     expect(raw).toBe(`${JSON.stringify(parsed, null, 2)}\n`);
     expect(Object.keys(parsed)).toEqual([
+      "schemaVersion",
       "basePrompt",
       "maxParallelTasks",
       "limitCooldownMinutes",
@@ -84,7 +85,7 @@ describe("JsonStore", () => {
     }));
 
     const parsed = JSON.parse(await readFile(store.file, "utf8"));
-    expect(Object.keys(parsed)).toEqual(["nextTaskNumber", "tasks"]);
+    expect(Object.keys(parsed)).toEqual(["schemaVersion", "nextTaskNumber", "tasks"]);
     expect(Object.keys(parsed.tasks[0])).toEqual([
       "id",
       "title",
@@ -128,6 +129,81 @@ describe("JsonStore", () => {
 
     expect(await store.load()).toBe("recovered");
     expect(logger.warnings[0]).toContain("maxParallelTasks");
+  });
+
+  it("drops only the invalid list items and keeps the rest", async () => {
+    const dir = await tempDir();
+    const file = join(dir, "settings.json");
+    const good = (id: string) => ({ id, name: id.toUpperCase(), email: `${id}@example.com` });
+    const original = JSON.stringify({
+      basePrompt: "keep me",
+      committers: [good("a"), { id: "b", name: "B" }, good("c"), { id: "d", email: 42 }],
+    });
+    await writeFile(file, original);
+    const recoveries: DataFileRecovery[] = [];
+    const logger = memoryLogger();
+    const store = new JsonStore({ file, schema: SettingsFile, logger, now: fixedNow, onRecovery: (r) => recoveries.push(r) });
+
+    expect(await store.load()).toBe("salvaged");
+    const value = await store.read();
+    expect(value.basePrompt).toBe("keep me");
+    expect(value.committers.map((c) => c.id)).toEqual(["a", "c"]);
+    expect(await readFile(join(dir, "settings.json.corrupt-2026-11-18T18-02-00"), "utf8")).toBe(original);
+    expect(logger.warnings).toHaveLength(1);
+    expect(recoveries).toEqual([
+      expect.objectContaining({
+        file,
+        outcome: "salvaged",
+        backup: join(dir, "settings.json.corrupt-2026-11-18T18-02-00"),
+        dropped: ["committers.1", "committers.3"],
+      }),
+    ]);
+    expect(recoveries[0]?.reason).toContain("committers.1");
+  });
+
+  it("drops an entry missing a required field, or just the bad item of a list inside one", async () => {
+    const dir = await tempDir();
+    const file = join(dir, "repos.json");
+    const repo = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      name: id,
+      path: `/code/${id}`,
+      defaultBranch: "main",
+      ...extra,
+    });
+    await writeFile(
+      file,
+      JSON.stringify({ repos: [repo("one"), repo("two", { path: "" }), repo("three", { labels: ["ok", 42] })] }),
+    );
+    const store = new JsonStore({ file, schema: ReposFile, logger: memoryLogger(), now: fixedNow });
+
+    expect(await store.load()).toBe("salvaged");
+    const { repos } = await store.read();
+    expect(repos.map((r) => r.id)).toEqual(["one", "three"]);
+    expect(repos[1]?.labels).toEqual(["ok"]);
+  });
+
+  it("refuses a file written by a newer version and leaves it alone", async () => {
+    const dir = await tempDir();
+    const file = join(dir, "settings.json");
+    const newer = JSON.stringify({ schemaVersion: DATA_SCHEMA_VERSION + 1, basePrompt: 5 });
+    await writeFile(file, newer);
+    const { store } = await settingsStore(dir);
+
+    await expect(store.load()).rejects.toBeInstanceOf(NewerDataFileError);
+    await expect(store.load()).rejects.toThrow(/newer version/);
+    expect(await readFile(file, "utf8")).toBe(newer);
+    expect(await listDir(dir)).toEqual(["settings.json"]);
+  });
+
+  it("reports a reset file through onRecovery", async () => {
+    const dir = await tempDir();
+    const file = join(dir, "settings.json");
+    await writeFile(file, "{ not json");
+    const recoveries: DataFileRecovery[] = [];
+    const store = new JsonStore({ file, schema: SettingsFile, logger: memoryLogger(), now: fixedNow, onRecovery: (r) => recoveries.push(r) });
+    await store.load();
+    expect(recoveries).toEqual([expect.objectContaining({ outcome: "recovered", dropped: [] })]);
   });
 
   it("does not overwrite an earlier backup", async () => {

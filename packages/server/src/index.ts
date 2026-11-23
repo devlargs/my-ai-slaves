@@ -17,6 +17,7 @@ import { RepoGit } from "./services/repo-git";
 import { ScriptService } from "./services/script-service";
 import { AttachmentStore } from "./storage/attachment-store";
 import { openDataStores } from "./storage/data-stores";
+import { NewerDataFileError } from "./storage/json-store";
 import { LoginService } from "./login/login-service";
 import { WsHub } from "./ws/hub";
 
@@ -35,7 +36,17 @@ const webRoot = process.env.SLAVES_WEB_DIR ? resolve(process.env.SLAVES_WEB_DIR)
 // ── data + services ─────────────────────────────────────────────────────────
 // Activity is written at most about once a second: a streaming run logs many entries, and each write
 // rewrites the current (up to 5 MB) file. Shutdown writes whatever is still waiting.
-const { stores } = await openDataStores({ dataDir: resolveDataDir(), activityFlushDelayMs: 1000 });
+const stores = await openDataStores({ dataDir: resolveDataDir(), activityFlushDelayMs: 1000 }).then(
+  (opened) => opened.stores,
+  async (error: unknown) => {
+    if (!(error instanceof NewerDataFileError)) throw error;
+    // Refuse to start rather than replace data a newer build wrote. The desktop app shows this message.
+    console.error(`\n${error.message}\n`);
+    if (process.send) process.send({ type: "startup-error", message: error.message }, () => process.exit(1));
+    else process.exit(1);
+    return new Promise<never>(() => {});
+  },
+);
 const adapters = createAdapters();
 const hub = new WsHub();
 const accounts = new AccountService(stores, adapters, hub);

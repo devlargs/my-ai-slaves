@@ -17,7 +17,14 @@ export interface ServerOptions {
 export type ServerStart =
   | { ok: true; port: number }
   | { ok: false; reason: "port-in-use"; port: number }
-  | { ok: false; reason: "crashed"; code: number | null; signal: NodeJS.Signals | null };
+  | {
+      ok: false;
+      reason: "crashed";
+      code: number | null;
+      signal: NodeJS.Signals | null;
+      /** Why, when the server said so before exiting (e.g. a data file written by a newer version). */
+      message?: string;
+    };
 
 export interface ServerHandle {
   started: Promise<ServerStart>;
@@ -63,13 +70,19 @@ export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
 
   const started = new Promise<ServerStart>((resolve) => {
     let portInUse = false;
+    let errorMessage: string | undefined;
     child.on("message", (message: unknown) => {
-      const m = message as { type?: string; port?: number } | null;
+      const m = message as { type?: string; port?: number; message?: string } | null;
       if (m?.type === "ready") resolve({ ok: true, port: m.port ?? opts.port });
       if (m?.type === "port-in-use") portInUse = true;
+      if (m?.type === "startup-error" && typeof m.message === "string") errorMessage = m.message;
     });
     child.once("exit", (code, signal) =>
-      resolve(portInUse ? { ok: false, reason: "port-in-use", port: opts.port } : { ok: false, reason: "crashed", code, signal }),
+      resolve(
+        portInUse
+          ? { ok: false, reason: "port-in-use", port: opts.port }
+          : { ok: false, reason: "crashed", code, signal, message: errorMessage },
+      ),
     );
   });
 

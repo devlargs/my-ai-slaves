@@ -75,7 +75,7 @@ async function bootServer(): Promise<boolean> {
       buttons: ["Quit"],
     });
   } else {
-    await showServerFailure(`The server stopped while starting (exit code ${result.code ?? result.signal}).`);
+    await showServerFailure(result.message ?? `The server stopped while starting (exit code ${result.code ?? result.signal}).`);
   }
   quitting = true;
   app.quit();

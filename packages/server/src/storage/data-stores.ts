@@ -2,6 +2,7 @@ import { mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AccountsFile,
+  type DataFileRecovery,
   KnowledgeFile,
   PromptsFile,
   QueueFile,
@@ -25,6 +26,8 @@ export interface DataStores {
   activity: ActivityLog;
   /** `.data/knowledge/<slug>.json`; created blank on first load. */
   knowledge(repoSlug: string): JsonStore<KnowledgeFile>;
+  /** Files backed up and repaired since the server started (oldest first), shown on the Settings page. */
+  recoveries: DataFileRecovery[];
 }
 
 export interface OpenDataStoresOptions {
@@ -42,7 +45,8 @@ export async function openDataStores(
 ): Promise<{ stores: DataStores; report: Record<string, LoadOutcome> }> {
   const paths = dataPaths(options.dataDir);
   const logger = options.logger ?? consoleLogger;
-  const common = { logger, now: options.now };
+  const recoveries: DataFileRecovery[] = [];
+  const common = { logger, now: options.now, onRecovery: (r: DataFileRecovery) => void recoveries.push(r) };
 
   await mkdir(paths.cliConfigDir, { recursive: true });
   await mkdir(paths.knowledgeDir, { recursive: true });
@@ -88,7 +92,7 @@ export async function openDataStores(
   await activity.init();
 
   return {
-    stores: { paths, settings, accounts, repos, queue, prompts, activity, knowledge },
+    stores: { paths, settings, accounts, repos, queue, prompts, activity, knowledge, recoveries },
     report,
   };
 }

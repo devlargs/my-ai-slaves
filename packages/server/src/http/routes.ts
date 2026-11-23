@@ -88,6 +88,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   app.get("/api/session", async () => ({ ok: true, dataDir: stores.paths.root }));
 
+  app.get("/api/data/recoveries", () => stores.recoveries);
+
   // ── settings ──────────────────────────────────────────────────────────────
   app.get("/api/settings", () => stores.settings.read());
   app.put("/api/settings", async (req) => {

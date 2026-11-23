@@ -26,6 +26,24 @@ export interface SessionInfo {
 export type Settings = SettingsFile;
 export type UpdateSettingsRequest = Omit<SettingsFile, "updatedAt">;
 
+// ── Data files ──────────────────────────────────────────────────────────────
+/**
+ * GET /api/data/recoveries → DataFileRecovery[]: data files that failed validation since the server
+ * started and were backed up and repaired (oldest first; empty almost always).
+ */
+export interface DataFileRecovery {
+  file: string;
+  /** `salvaged`: only the invalid list items were dropped. `recovered`: the whole file was reset. */
+  outcome: "salvaged" | "recovered";
+  /** Where the original file was moved; rename it back (after fixing it) to restore it. */
+  backup: string;
+  /** Why the file didn't validate (its first few problems). */
+  reason: string;
+  /** Paths of the list items that were dropped (`salvaged` only), e.g. `repos.2`. */
+  dropped: string[];
+  at: string;
+}
+
 // ── Accounts ────────────────────────────────────────────────────────────────
 /** `status` is the effective status right now (a past limitedUntil reads as available). */
 export type AccountView = Account & {

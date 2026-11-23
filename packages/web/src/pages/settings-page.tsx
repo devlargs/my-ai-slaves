@@ -1,4 +1,11 @@
-import type { AccountView, Committer, ProviderId, Settings, UpdateSettingsRequest } from "@my-ai-slaves/shared";
+import type {
+  AccountView,
+  Committer,
+  DataFileRecovery,
+  ProviderId,
+  Settings,
+  UpdateSettingsRequest,
+} from "@my-ai-slaves/shared";
 import {
   ArrowUpRightIcon,
   FileTextIcon,
@@ -45,8 +52,49 @@ export function SettingsPage() {
       <CommittersCard />
       <GeneralSettingsCard />
       <DesktopCard />
+      <DataRecoveriesCard />
     </div>
   );
+}
+
+// ── Data files repaired on startup (only when there are some) ────────────────
+
+function DataRecoveriesCard() {
+  const { data } = useApi<DataFileRecovery[]>(() => api.getDataRecoveries(), [], "data-recoveries");
+  if (!data || data.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Repaired data files</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <p className="text-xs text-muted-foreground">
+          These files didn't match what this version expects when the app started. The original of each was moved
+          to the backup shown; to restore one, quit the app, fix the backup and rename it back.
+        </p>
+        {data.map((r) => (
+          <div key={`${r.file}:${r.backup}`} className="flex flex-col gap-1">
+            <span className="text-[13px] font-medium">
+              {fileName(r.file)}{" "}
+              <span className="font-normal text-muted-foreground">
+                {r.outcome === "salvaged"
+                  ? `: dropped ${r.dropped.length} invalid ${r.dropped.length === 1 ? "entry" : "entries"} (${r.dropped.join(", ")}), kept the rest`
+                  : ": couldn't be read, so it was reset to blank"}
+              </span>
+            </span>
+            <span className="text-xs text-muted-foreground">{r.reason}</span>
+            <code className="truncate rounded-md border border-rule bg-paper-2 px-2.5 py-1.5 font-mono text-xs" title={r.backup}>
+              {r.backup}
+            </code>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
 }
 
 // ── Accounts ────────────────────────────────────────────────────────────────

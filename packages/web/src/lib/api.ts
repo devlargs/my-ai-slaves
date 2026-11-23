@@ -1,4 +1,5 @@
 import type {
+  DataFileRecovery,
   RepoGraph,
   GitActionResult,
   GitRefAction,
@@ -83,6 +84,8 @@ type Ok = { ok: true };
 
 export const api = {
   session: () => request<SessionInfo>("GET", "/session"),
+
+  getDataRecoveries: () => request<DataFileRecovery[]>("GET", "/data/recoveries"),
 
   getSettings: () => request<Settings>("GET", "/settings"),
   putSettings: (body: UpdateSettingsRequest) => request<Settings>("PUT", "/settings", body),
