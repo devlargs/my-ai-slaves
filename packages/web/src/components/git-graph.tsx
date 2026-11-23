@@ -699,6 +699,7 @@ function BranchSidebar({
   onPickStash,
   onStashMenu,
   onShowAll,
+  onShowStashes,
 }: {
   graph: RepoGraph;
   loaded: Set<string>;
@@ -709,6 +710,7 @@ function BranchSidebar({
   onPickStash: (stash: StashEntry) => void;
   onStashMenu: (e: React.MouseEvent, stash: StashEntry) => void;
   onShowAll: () => void;
+  onShowStashes: () => void;
 }) {
   const isHidden = (key: string) => (view.solo.length > 0 ? !view.solo.includes(key) : view.hidden.includes(key));
   const [filter, setFilter] = useState("");
@@ -728,7 +730,11 @@ function BranchSidebar({
     for (const b of remote) by.set(b.remote, [...(by.get(b.remote) ?? []), b]);
     return [...by].map(([name, list]) => ({ name, tree: buildTree(list, (b) => b.name) }));
   }, [remote]);
-  const stashes = useMemo(() => graph.stashes.filter((s) => !q || s.message.toLowerCase().includes(q)), [graph.stashes, q]);
+  const hiddenStashes = useMemo(() => graph.stashes.filter((s) => view.hiddenStashes.includes(s.hash)).length, [graph.stashes, view.hiddenStashes]);
+  const stashes = useMemo(
+    () => graph.stashes.filter((s) => !view.hiddenStashes.includes(s.hash) && (!q || s.message.toLowerCase().includes(q))),
+    [graph.stashes, view.hiddenStashes, q],
+  );
   const localOpen = !closed.has("section:local");
   const remoteOpen = !closed.has("section:remote");
   const stashesOpen = !closed.has("section:stashes");
@@ -837,9 +843,20 @@ function BranchSidebar({
           label="Stashes"
           count={stashes.length}
         />
+        {stashesOpen && hiddenStashes > 0 && (
+          <p className="flex items-center gap-1.5 py-1 pr-2 text-xs text-muted-foreground" style={{ paddingLeft: 8 + 14 }}>
+            <EyeOffIcon className="size-3 shrink-0 opacity-70" />
+            <span className="num">{hiddenStashes} hidden</span>
+            <button type="button" onClick={onShowStashes} className="ml-auto cursor-pointer text-signal-ink hover:underline">
+              Show
+            </button>
+          </p>
+        )}
         {stashesOpen &&
           (stashes.length === 0 ? (
-            <p className="px-3 py-1 text-xs text-muted-foreground">{q ? "No match." : "No stashes."}</p>
+            hiddenStashes > 0 && !q ? null : (
+              <p className="px-3 py-1 text-xs text-muted-foreground">{q ? "No match." : "No stashes."}</p>
+            )
           ) : (
             stashes.map((st) => (
               <button
@@ -883,17 +900,20 @@ function stashCommit(st: StashEntry): GraphCommit {
   };
 }
 
-/** Right-click on a stash: GitKraken's items (Share as Cloud Patch and Hide left out). */
+/** Right-click on a stash: GitKraken's items (Share as Cloud Patch left out). */
 function StashMenu({
   menu,
   onClose,
   onRun,
   onAsk,
+  onHide,
 }: {
   menu: { x: number; y: number; stash: StashEntry } | null;
   onClose: () => void;
   onRun: (action: GitRefAction, fromDialog?: boolean) => Promise<void>;
   onAsk: (spec: ActionSpec) => void;
+  /** Hide the stash from the sidebar (view only; nothing changes in the repo). */
+  onHide: (stash: StashEntry) => void;
 }) {
   if (!menu) return null;
   const st = menu.stash;
@@ -941,6 +961,8 @@ function StashMenu({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => void navigator.clipboard?.writeText(st.hash)}>Copy stash sha</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => onHide(st)}>Hide</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -1580,15 +1602,22 @@ interface GraphView {
   hidden: string[];
   solo: string[];
   pinned: string | null;
+  /** Stash commit hashes hidden from the sidebar's Stashes group (the stash's Hide). */
+  hiddenStashes: string[];
 }
-const EMPTY_VIEW: GraphView = { hidden: [], solo: [], pinned: null };
+const EMPTY_VIEW: GraphView = { hidden: [], solo: [], pinned: null, hiddenStashes: [] };
 const viewKey = (repoId: string) => `git-graph.view.${repoId}`;
 function storedView(repoId: string): GraphView {
   try {
     const v = JSON.parse(storageGet(viewKey(repoId)) ?? "null") as Partial<GraphView> | null;
     if (!v) return EMPTY_VIEW;
     const list = (a: unknown) => (Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : []);
-    return { hidden: list(v.hidden), solo: list(v.solo), pinned: typeof v.pinned === "string" ? v.pinned : null };
+    return {
+      hidden: list(v.hidden),
+      solo: list(v.solo),
+      pinned: typeof v.pinned === "string" ? v.pinned : null,
+      hiddenStashes: list(v.hiddenStashes),
+    };
   } catch {
     return EMPTY_VIEW;
   }
@@ -2570,6 +2599,7 @@ export function GitGraphDialog({
               onPickStash={pickStash}
               onStashMenu={openStashMenu}
               onShowAll={() => setView({ ...view, hidden: [], solo: [] })}
+              onShowStashes={() => setView({ ...view, hiddenStashes: [] })}
             />
             {compare && compareFile ? (
               <CommitFileView
@@ -2781,7 +2811,18 @@ export function GitGraphDialog({
             onCompare={(c) => void compareWith(c)}
           />
         )}
-        <StashMenu menu={stashMenu} onClose={() => setStashMenu(null)} onRun={runRef} onAsk={setAsk} />
+        <StashMenu
+          menu={stashMenu}
+          onClose={() => setStashMenu(null)}
+          onRun={runRef}
+          onAsk={setAsk}
+          onHide={(st) => {
+            // Drop hashes of stashes that are gone (popped, dropped, re-messaged) while adding this one.
+            const live = new Set(graph?.stashes.map((x) => x.hash));
+            setView({ ...view, hiddenStashes: [...view.hiddenStashes.filter((h) => live.has(h)), st.hash] });
+            if (selected === st.hash) setSelected(null);
+          }}
+        />
         <ActionDialog spec={ask} onClose={() => setAsk(null)} />
         <RebaseDialog
           repoId={repoId}
