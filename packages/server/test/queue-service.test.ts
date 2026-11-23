@@ -415,6 +415,30 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect(aiBranches(repo.path)).toBe("");
   });
 
+  it("an interrupted task (first run or reply) can still get a follow-up in the same session", async () => {
+    const { queue, repo, received } = await setup();
+    const created = await queue.create({ repo: repo.id, message: "SLOW first" });
+    const inits = () => queue.replay(created.id).events.filter((e) => e.kind === "init").length;
+    await waitFor(async () => inits() === 1);
+    await queue.cancel(created.id);
+    const stopped = await waitFor(taskWith(queue, created.id, "interrupted"));
+    expect(stopped.session?.sessionId).toBeTruthy();
+
+    await queue.reply(created.id, "SLOW keep going");
+    await waitFor(async () => inits() === 2);
+    await queue.cancel(created.id);
+    await waitFor(taskWith(queue, created.id, "interrupted"));
+
+    await queue.reply(created.id, "follow-up");
+    const done = await waitFor(async () => {
+      const t = (await queue.list()).find((x) => x.id === created.id);
+      return t?.status === "needs-review" && t.pendingReply === null ? t : null;
+    });
+    expect(done.session?.sessionId).toBe(stopped.session?.sessionId);
+    expect(done.replies.map((r) => r.message)).toEqual(["SLOW keep going", "follow-up"]);
+    expect((await received()).map((c) => c.prompt)).toEqual([FULL("SLOW first"), "SLOW keep going", "follow-up"]);
+  });
+
   it("replies continue the same session, without re-sending base prompts", async () => {
     const { queue, repo, received } = await setup();
     const created = await queue.create({ repo: repo.id, message: "first" });

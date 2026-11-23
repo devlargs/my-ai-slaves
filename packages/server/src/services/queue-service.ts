@@ -424,8 +424,8 @@ export class QueueService {
   async reply(id: string, message: string, attachmentIds: string[] = [], promptIdsIn: string[] = []): Promise<void> {
     if (!message.trim() && attachmentIds.length === 0) throw badRequest("The reply is empty. Type a message or attach a file.");
     const task = await this.getTask(id);
-    if (task.status !== "needs-review" || !task.session) {
-      throw conflict("You can reply to a task once it's finished a run and is waiting for review.");
+    if ((task.status !== "needs-review" && task.status !== "interrupted") || !task.session) {
+      throw conflict("You can reply to a task once it's waiting for review or was stopped after its session started.");
     }
     const attachments = await this.deps.attachments.resolve(attachmentIds);
     const promptIds = await this.deps.prompts.validate(promptIdsIn);
@@ -950,6 +950,8 @@ export class QueueService {
       case "cancelled": {
         await this.updateTask(task.id, (t) => {
           t.status = "interrupted";
+          // Keep the session (a stopped first run has one once the CLI started it) so you can reply.
+          if (result.sessionId) t.session = { provider: account.provider, account: account.id, sessionId: result.sessionId };
         });
         this.log({
           ...base,

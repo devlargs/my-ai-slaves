@@ -27,6 +27,8 @@ export interface ExitInfo {
 
 /** Turns a CLI's stdout lines into StreamEvents and the final exit into a RunResult. */
 export interface StreamParser {
+  /** The CLI session seen so far (from its init line), so a stopped run can still be continued. */
+  readonly sessionId: string | null;
   onLine(line: string): StreamEvent[];
   finish(exit: ExitInfo, stderrTail: string): RunResult;
 }
@@ -111,7 +113,7 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
   });
 
   const done = exited.then((exit): RunResult => {
-    if (cancelled) return { outcome: "cancelled" };
+    if (cancelled) return { outcome: "cancelled", sessionId: parser.sessionId };
     if (exit.spawnError) {
       return { outcome: "failed", exitCode: null, message: exit.spawnError, stderrTail };
     }

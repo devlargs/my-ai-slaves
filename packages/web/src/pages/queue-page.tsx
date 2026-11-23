@@ -754,7 +754,7 @@ function TaskDetail({ task }: { task: TaskView }) {
         </pre>
         <AttachmentList files={task.attachments} className="mx-3 mt-2" />
       </details>
-      {task.status === "needs-review" && <ReplyBox taskId={task.id} />}
+      {(task.status === "needs-review" || (task.status === "interrupted" && task.session)) && <ReplyBox taskId={task.id} />}
     </div>
   );
 }

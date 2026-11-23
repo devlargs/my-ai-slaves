@@ -220,7 +220,7 @@ export interface CreateTaskRequest {
 /** PUT /api/tasks/order (body ReorderRequest, only pending tasks move) */
 /** POST /api/tasks/:id/cancel — pending: removed from queue; running: stopped → interrupted */
 /** POST /api/tasks/:id/retry — interrupted/needs-review: back to pending, runs again in a new session (the repo is left as it is) */
-/** POST /api/tasks/:id/reply (body ReplyRequest) — needs-review: resumes the CLI session */
+/** POST /api/tasks/:id/reply (body ReplyRequest) — needs-review/interrupted (with a session): resumes the CLI session */
 export interface ReplyRequest {
   message: string;
   attachmentIds?: string[];

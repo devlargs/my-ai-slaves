@@ -21,7 +21,7 @@ export type RunResult =
   | { outcome: "limit"; limit: LimitInfo; sessionId: string | null }
   | { outcome: "logged-out"; message: string }
   | { outcome: "failed"; exitCode: number | null; message: string; stderrTail: string }
-  | { outcome: "cancelled" };
+  | { outcome: "cancelled"; sessionId: string | null };
 
 export interface RunHandle {
   onStream(cb: (event: StreamEvent) => void): () => void;
