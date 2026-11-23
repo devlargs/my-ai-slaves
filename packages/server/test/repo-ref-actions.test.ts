@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Repo } from "@my-ai-slaves/shared";
+import type { Repo, StashEntry } from "@my-ai-slaves/shared";
 import { describe, expect, it } from "vitest";
 import { RepoActions } from "../src/services/repo-actions";
 import { RepoGit } from "../src/services/repo-git";
@@ -191,6 +191,53 @@ describe("RepoActions.refAction (the graph's right-click menu)", () => {
     expect(result.files.map((f) => `${f.status} ${f.path}`).sort()).toEqual(["A m.txt", "M a.txt"]);
     expect(result.patch).toContain("+changed");
     expect(m1).toBeTruthy();
+  });
+
+  it("lists stashes (not drawn in the graph), and applies, pops, renames and drops them", async () => {
+    const { path, repo } = await newRepo();
+    const git = new RepoGit();
+    const actions = new RepoActions();
+    await writeFile(join(path, "a.txt"), "first\n");
+    sh(path, "stash", "push", "-q", "-m", "first change");
+    await writeFile(join(path, "a.txt"), "second\n");
+    sh(path, "stash", "push", "-q");
+
+    const graph = await git.graph(repo, 50);
+    expect(graph.commits.map((c) => c.subject)).toEqual(["init"]);
+    expect(graph.stashes.map((st) => [st.index, st.message])).toEqual([
+      [0, expect.stringMatching(/^WIP on main: [0-9a-f]+ init$/)],
+      [1, "On main: first change"],
+    ]);
+    const [second, first] = graph.stashes as [StashEntry, StashEntry];
+    expect(second.base).toBe(sh(path, "rev-parse", "HEAD"));
+    // The stash's diff, as a commit against the commit it was made on.
+    expect((await git.commit(repo, second.hash)).patch).toContain("+second");
+
+    // A list that changed since it was read is refused.
+    await expect(actions.refAction(repo, { op: "stash-drop", index: 0, stash: first.hash }, identity)).rejects.toThrow(/changed/);
+
+    // Rename: kept (moved to the top), with the new message.
+    await actions.refAction(repo, { op: "stash-rename", index: 1, stash: first.hash, message: "renamed it" }, identity);
+    let list = await git.stashes(repo);
+    expect(list.map((st) => [st.hash, st.message])).toEqual([
+      [first.hash, "renamed it"],
+      [second.hash, second.message],
+    ]);
+
+    // Apply keeps the stash.
+    await actions.refAction(repo, { op: "stash-apply", index: 1, stash: second.hash }, identity);
+    expect(await readFile(join(path, "a.txt"), "utf8")).toBe("second\n");
+    expect(await git.stashes(repo)).toHaveLength(2);
+    sh(path, "checkout", "--", "a.txt");
+
+    // Pop drops it.
+    await actions.refAction(repo, { op: "stash-apply", index: 0, stash: first.hash, pop: true }, identity);
+    expect(await readFile(join(path, "a.txt"), "utf8")).toBe("first\n");
+    list = await git.stashes(repo);
+    expect(list.map((st) => st.hash)).toEqual([second.hash]);
+
+    await actions.refAction(repo, { op: "stash-drop", index: 0, stash: second.hash }, identity);
+    expect(await git.stashes(repo)).toEqual([]);
   });
 
   it("refuses while a task is running in the repo", async () => {

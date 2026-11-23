@@ -10,6 +10,7 @@ import type {
   RemoteBranch,
   Repo,
   RepoGraph,
+  StashEntry,
   Task,
   WipSummary,
   WorkingChanges,
@@ -94,6 +95,8 @@ export class RepoGit {
     const format = ["%H", "%P", "%an", "%ae", "%aI", "%s", "%D"].join("%x1f") + "%x1e";
     const out = await this.git(repo, [
       "log",
+      // Stashes (and their index / untracked commits) are listed in the sidebar, not drawn.
+      "--exclude=refs/stash",
       "--all",
       "--date-order",
       "--no-color",
@@ -121,11 +124,17 @@ export class RepoGit {
       });
     }
     const more = commits.length > limit;
-    const [{ local, remote }, status] = await Promise.all([
+    const [{ local, remote }, status, stashes] = await Promise.all([
       this.branches(repo).catch(() => ({ local: [], remote: [] })),
       this.status(repo).catch(() => ({ staged: [], unstaged: [] })),
+      this.stashes(repo).catch(() => []),
     ]);
-    return { commits: commits.slice(0, limit), head, more, local, remote, wip: summarize(status.staged, status.unstaged) };
+    return { commits: commits.slice(0, limit), head, more, local, remote, wip: summarize(status.staged, status.unstaged), stashes };
+  }
+
+  /** `git stash list`, newest first. Read-only. */
+  async stashes(repo: Repo): Promise<StashEntry[]> {
+    return parseStashList(await this.git(repo, ["stash", "list", "--no-color", `--format=${STASH_FORMAT}`]));
   }
 
   /** Staged and unstaged (incl. untracked) files, from `git status`. Read-only. */
@@ -280,6 +289,28 @@ export class RepoGit {
     await rm(path, { recursive: true, force: true });
     await gitOk(["worktree", "prune"], repo.path);
   }
+}
+
+/** `git stash list --format`: one record per stash, fields split by unit separators. */
+export const STASH_FORMAT = ["%gd", "%H", "%P", "%gs", "%aI", "%an", "%ae"].join("%x1f") + "%x1e";
+export function parseStashList(out: string): StashEntry[] {
+  const list: StashEntry[] = [];
+  for (const record of out.split("\x1e")) {
+    const [selector, hash, parents, message, date, author, email] = record.replace(/^\s+/, "").split("\x1f");
+    const index = /^stash@\{(\d+)\}$/.exec(selector ?? "");
+    if (!index || !hash) continue;
+    list.push({
+      index: Number(index[1]),
+      hash,
+      base: (parents ?? "").split(" ")[0] ?? "",
+      message: message ?? "",
+      date: date ?? "",
+      author: author ?? "",
+      email: email ?? "",
+      avatar: gravatarId(email ?? ""),
+    });
+  }
+  return list;
 }
 
 /** `git log` of the commits `git rebase -i <onto>` lists for the checked-out branch, oldest first. */

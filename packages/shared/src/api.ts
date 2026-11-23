@@ -157,6 +157,26 @@ export interface RepoGraph {
   history: GitHistory;
   /** Uncommitted changes in the checkout (the graph's "// WIP" row); null when the tree is clean. */
   wip: WipSummary | null;
+  /** `git stash list`, newest first (stash@{0} first). Stashes aren't drawn in the graph itself. */
+  stashes: StashEntry[];
+}
+
+/** One stash (`stash@{index}`). */
+export interface StashEntry {
+  /** 0 = stash@{0}, the newest. */
+  index: number;
+  /** The stash commit. */
+  hash: string;
+  /** The commit it was made on (its first parent). */
+  base: string;
+  /** "WIP on main: 59bf2b5 Merge …" or "On main: <your message>". */
+  message: string;
+  /** When it was made, ISO 8601. */
+  date: string;
+  author: string;
+  email: string;
+  /** Gravatar id of the author's email (as GraphCommit.avatar). */
+  avatar: string;
 }
 
 /** Counts of the checkout's uncommitted files (staged, unstaged and untracked), each path counted once. */
@@ -256,7 +276,15 @@ export type GitRefAction =
   /** Delete a local branch (even when unmerged), or a remote one (`git push <remote> --delete`). */
   | { op: "delete-branch"; ref: string; remote?: boolean }
   /** A lightweight tag, or an annotated one when `message` is given. */
-  | { op: "tag"; name: string; commit: string; message?: string };
+  | { op: "tag"; name: string; commit: string; message?: string }
+  /**
+   * The sidebar's Stashes menu. `stash` = the stash commit's hash (checked against `index`, so a list
+   * that changed meanwhile is refused). Apply keeps the stash, Pop drops it once it applied cleanly.
+   */
+  | { op: "stash-apply"; index: number; stash: string; pop?: boolean }
+  | { op: "stash-drop"; index: number; stash: string }
+  /** New message for a stash (it moves to the top of the list, stash@{0}). */
+  | { op: "stash-rename"; index: number; stash: string; message: string };
 
 export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop";
 /** One line of an interactive rebase, in the order the commits are replayed (oldest first). */

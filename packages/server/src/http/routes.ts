@@ -173,6 +173,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // The graph's right-click menu on a branch / commit (GitKraken's), again only on a click.
   const Ref = z.string().min(1).max(250);
   const Sha = z.string().regex(/^[0-9a-f]{40,64}$/i);
+  const StashIndex = z.number().int().min(0).max(100_000);
   const RefActionBody = z.discriminatedUnion("op", [
     z.object({ op: z.literal("pull"), branch: Ref }),
     z.object({ op: z.literal("push"), branch: Ref, remote: Ref.optional() }),
@@ -201,6 +202,9 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     z.object({ op: z.literal("rename-branch"), branch: Ref, name: Ref }),
     z.object({ op: z.literal("delete-branch"), ref: Ref, remote: z.boolean().optional() }),
     z.object({ op: z.literal("tag"), name: Ref, commit: Sha, message: z.string().max(100_000).optional() }),
+    z.object({ op: z.literal("stash-apply"), index: StashIndex, stash: Sha, pop: z.boolean().optional() }),
+    z.object({ op: z.literal("stash-drop"), index: StashIndex, stash: Sha }),
+    z.object({ op: z.literal("stash-rename"), index: StashIndex, stash: Sha, message: z.string().min(1).max(100_000) }),
   ]);
   app.post("/api/repos/:id/git/ref", async (req) => {
     const body = parseBody(RefActionBody, req.body);

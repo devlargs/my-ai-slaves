@@ -12,6 +12,7 @@ import type {
   RebaseStep,
   RemoteBranch,
   RepoGraph,
+  StashEntry,
   WipSummary,
   WorkingChanges,
 } from "@my-ai-slaves/shared";
@@ -34,6 +35,7 @@ import {
   GitBranchIcon,
   GitBranchPlusIcon,
   GitCommitHorizontalIcon,
+  InboxIcon,
   LaptopIcon,
   ListIcon,
   PinIcon,
@@ -694,6 +696,8 @@ function BranchSidebar({
   view,
   onPick,
   onMenu,
+  onPickStash,
+  onStashMenu,
   onShowAll,
 }: {
   graph: RepoGraph;
@@ -702,6 +706,8 @@ function BranchSidebar({
   view: GraphView;
   onPick: (hash: string) => void;
   onMenu: (e: React.MouseEvent, target: MenuTarget) => void;
+  onPickStash: (stash: StashEntry) => void;
+  onStashMenu: (e: React.MouseEvent, stash: StashEntry) => void;
   onShowAll: () => void;
 }) {
   const isHidden = (key: string) => (view.solo.length > 0 ? !view.solo.includes(key) : view.hidden.includes(key));
@@ -722,8 +728,10 @@ function BranchSidebar({
     for (const b of remote) by.set(b.remote, [...(by.get(b.remote) ?? []), b]);
     return [...by].map(([name, list]) => ({ name, tree: buildTree(list, (b) => b.name) }));
   }, [remote]);
+  const stashes = useMemo(() => graph.stashes.filter((s) => !q || s.message.toLowerCase().includes(q)), [graph.stashes, q]);
   const localOpen = !closed.has("section:local");
   const remoteOpen = !closed.has("section:remote");
+  const stashesOpen = !closed.has("section:stashes");
 
   const renderLocal = (b: LocalBranch, name: string, depth: number) => (
     <BranchRow
@@ -778,7 +786,7 @@ function BranchSidebar({
           <Input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter branches"
+            placeholder="Filter branches and stashes"
             className="h-7 pr-7 text-xs"
           />
           <SearchIcon className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -821,8 +829,120 @@ function BranchSidebar({
               );
             })
           ))}
+        <div className="my-1 border-t border-rule" />
+        <SectionHeader
+          open={stashesOpen}
+          onToggle={() => toggle("section:stashes")}
+          icon={<InboxIcon className="size-3.5" />}
+          label="Stashes"
+          count={stashes.length}
+        />
+        {stashesOpen &&
+          (stashes.length === 0 ? (
+            <p className="px-3 py-1 text-xs text-muted-foreground">{q ? "No match." : "No stashes."}</p>
+          ) : (
+            stashes.map((st) => (
+              <button
+                key={st.hash}
+                type="button"
+                onClick={() => onPickStash(st)}
+                onContextMenu={(e) => onStashMenu(e, st)}
+                title={`stash@{${st.index}}: ${st.message}`}
+                className={cn(
+                  "flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs text-ink-2 hover:bg-paper-2 hover:text-ink",
+                  selected === st.hash && "bg-signal-soft text-signal-ink hover:bg-signal-soft",
+                )}
+                style={{ paddingLeft: 8 + 14 }}
+              >
+                <InboxIcon className="size-3.5 shrink-0 opacity-70" />
+                <span className="min-w-0 flex-1 truncate">{stashLabel(st)}</span>
+              </button>
+            ))
+          ))}
       </div>
     </aside>
+  );
+}
+
+/** "WIP on main: 59bf2b5 Merge …" → "59bf2b5 Merge …", "On main: my message" → "my message" (as GitKraken lists them). */
+function stashLabel(st: StashEntry): string {
+  return st.message.replace(/^(?:WIP on|On) [^:]*: /, "") || st.message;
+}
+
+/** A stash as a commit row, for the details pane. */
+function stashCommit(st: StashEntry): GraphCommit {
+  return {
+    hash: st.hash,
+    parents: st.base ? [st.base] : [],
+    author: st.author,
+    email: st.email,
+    avatar: st.avatar,
+    date: st.date,
+    subject: st.message,
+    refs: [],
+  };
+}
+
+/** Right-click on a stash: GitKraken's items (Share as Cloud Patch and Hide left out). */
+function StashMenu({
+  menu,
+  onClose,
+  onRun,
+  onAsk,
+}: {
+  menu: { x: number; y: number; stash: StashEntry } | null;
+  onClose: () => void;
+  onRun: (action: GitRefAction, fromDialog?: boolean) => Promise<void>;
+  onAsk: (spec: ActionSpec) => void;
+}) {
+  if (!menu) return null;
+  const st = menu.stash;
+  const ref = { index: st.index, stash: st.hash };
+  const name = `stash@{${st.index}}`;
+  return (
+    <DropdownMenu key={`${menu.x},${menu.y}`} open modal={false} onOpenChange={(o) => !o && onClose()}>
+      <DropdownMenuTrigger asChild>
+        <span aria-hidden className="pointer-events-none fixed size-0" style={{ left: menu.x, top: menu.y }} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="bottom" className="max-w-[min(640px,90vw)]">
+        <DropdownMenuItem onSelect={() => void onRun({ op: "stash-apply", ...ref })}>Apply Stash</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => void onRun({ op: "stash-apply", ...ref, pop: true })}>Pop Stash</DropdownMenuItem>
+        <DropdownMenuItem
+          destructive
+          onSelect={() =>
+            onAsk({
+              title: `Delete ${name}`,
+              description: (
+                <>
+                  Drops <span className="font-mono">{stashLabel(st)}</span>. Its changes are gone from the stash list.
+                </>
+              ),
+              confirmLabel: "Delete Stash",
+              destructive: true,
+              run: async () => onRun({ op: "stash-drop", ...ref }, true),
+            })
+          }
+        >
+          Delete Stash
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onSelect={() =>
+            onAsk({
+              title: `Edit message of ${name}`,
+              description: "The stash moves to the top of the list.",
+              fields: [{ key: "message", label: "Message", initial: stashLabel(st) }],
+              confirmLabel: "Save",
+              run: async (v) => onRun({ op: "stash-rename", ...ref, message: v.message! }, true),
+            })
+          }
+        >
+          Edit stash message
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => void navigator.clipboard?.writeText(st.hash)}>Copy stash sha</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1258,6 +1378,7 @@ function WipPanel({
 
 function CommitPanel({
   commit,
+  kind = "Commit",
   detail,
   error,
   openFile,
@@ -1265,6 +1386,7 @@ function CommitPanel({
   onJump,
 }: {
   commit: GraphCommit;
+  kind?: string;
   detail: CommitDetail | null;
   error: string | null;
   openFile: string | null;
@@ -1276,7 +1398,7 @@ function CommitPanel({
   return (
     <aside className="scroll-quiet flex w-80 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-rule bg-surface p-3 text-sm">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span className="label-mono">Commit</span>
+        <span className="label-mono">{kind}</span>
         <button
           type="button"
           className="flex cursor-pointer items-center gap-1 font-mono text-ink-2 hover:text-ink"
@@ -2100,6 +2222,7 @@ export function GitGraphDialog({
   /** The inline branch-name field: at the checked-out commit (Branch button) or a right-clicked one. */
   const [naming, setNaming] = useState<{ at: string | null } | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; target: MenuTarget } | null>(null);
+  const [stashMenu, setStashMenu] = useState<{ x: number; y: number; stash: StashEntry } | null>(null);
   const [ask, setAsk] = useState<ActionSpec | null>(null);
   const [rebaseOnto, setRebaseOnto] = useState<string | null>(null);
   const [view, setViewState] = useState<GraphView>(() => storedView(repoId));
@@ -2140,6 +2263,7 @@ export function GitGraphDialog({
       setScrollTop(0);
       setNaming(null);
       setMenu(null);
+      setStashMenu(null);
       setCompare(null);
       setCompareFile(null);
       details.current.clear();
@@ -2220,7 +2344,8 @@ export function GitGraphDialog({
   const index = useMemo(() => new Map(rows.map((r, i) => [r.commit.hash, i])), [rows]);
   const loaded = useMemo(() => new Set(index.keys()), [index]);
   const remoteRefs = useMemo(() => new Map((graph?.remote ?? []).map((r) => [r.ref, r])), [graph]);
-  const current = selected ? rows[index.get(selected) ?? -1]?.commit : undefined;
+  const selectedStash = selected ? graph?.stashes.find((st) => st.hash === selected) : undefined;
+  const current = selected ? (rows[index.get(selected) ?? -1]?.commit ?? (selectedStash && stashCommit(selectedStash))) : undefined;
 
   const first = Math.max(0, Math.floor(scrollTop / ROW) - OVERSCAN);
   const last = Math.min(rows.length, Math.ceil((scrollTop + viewport) / ROW) + OVERSCAN);
@@ -2285,6 +2410,22 @@ export function GitGraphDialog({
     e.stopPropagation();
     if (acting !== null) return;
     setMenu({ x: e.clientX, y: e.clientY, target });
+  };
+
+  const openStashMenu = (e: React.MouseEvent, stash: StashEntry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (acting !== null) return;
+    setStashMenu({ x: e.clientX, y: e.clientY, stash });
+  };
+
+  /** A stash's files and diff in the details pane (stashes aren't rows in the graph). */
+  const pickStash = (stash: StashEntry) => {
+    setSelected(stash.hash);
+    setOpenFile(null);
+    setWipFile(null);
+    setCompare(null);
+    setCompareFile(null);
   };
 
   const compareWith = async (commit: string) => {
@@ -2426,6 +2567,8 @@ export function GitGraphDialog({
               view={view}
               onPick={jump}
               onMenu={openMenu}
+              onPickStash={pickStash}
+              onStashMenu={openStashMenu}
               onShowAll={() => setView({ ...view, hidden: [], solo: [] })}
             />
             {compare && compareFile ? (
@@ -2614,6 +2757,7 @@ export function GitGraphDialog({
             {!compare && current && selected !== WIP && (
               <CommitPanel
                 commit={current}
+                kind={selectedStash ? "Stash" : "Commit"}
                 detail={detail}
                 error={detailError}
                 openFile={openFile}
@@ -2637,6 +2781,7 @@ export function GitGraphDialog({
             onCompare={(c) => void compareWith(c)}
           />
         )}
+        <StashMenu menu={stashMenu} onClose={() => setStashMenu(null)} onRun={runRef} onAsk={setAsk} />
         <ActionDialog spec={ask} onClose={() => setAsk(null)} />
         <RebaseDialog
           repoId={repoId}

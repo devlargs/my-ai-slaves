@@ -4,10 +4,11 @@ import type { GitHistory, GitRefAction, PullMode, RebaseStep, Repo } from "@my-a
 import { type GitIdentity, gitIdentityEnv } from "../providers/types";
 import { runOn } from "../remote/machine";
 import { badRequest, conflict } from "./common";
-import { parseRebasePlan, rebasePlanArgs } from "./repo-git";
+import { parseRebasePlan, parseStashList, rebasePlanArgs, STASH_FORMAT } from "./repo-git";
 
 /**
- * The graph toolbar (Undo, Redo, Pull, Branch) and the WIP panel (stage, unstage, commit). These are
+ * The graph toolbar (Undo, Redo, Pull, Branch), the WIP panel (stage, unstage, commit), the right-click
+ * menus and the Stashes group (apply, pop, delete, edit message). These are
  * the only places the app changes a repo, and only when you click them (tasks never do). Undo/Redo work like GitKraken's:
  *
  * - Actions done here (pull, new branch) go on an undo stack.
@@ -338,6 +339,13 @@ export class RepoActions {
     return out.stdout.trim() === "yes";
   }
 
+  /** `stash@{n}`, once it's checked that it still is the stash that was clicked. */
+  private async stashRef(repo: Repo, index: number, hash: string): Promise<string> {
+    const list = parseStashList(await this.git(repo, ["stash", "list", "--no-color", `--format=${STASH_FORMAT}`]));
+    if (list.find((s) => s.index === index)?.hash !== hash) throw conflict("The stash list changed. Refresh and try again.");
+    return `stash@{${index}}`;
+  }
+
   /** The branch's upstream: remote name and the branch's ref there, or null. */
   private async upstreamOf(repo: Repo, branch: string): Promise<{ remote: string; ref: string } | null> {
     const out = await this.git(repo, [
@@ -527,6 +535,27 @@ export class RepoActions {
             if ((await this.currentRef(repo)) === branch) throw conflict(`${branch} is checked out. Check out another branch first.`);
             await this.git(repo, ["branch", "-D", branch]);
           }
+          return this.view(await this.sync(repo));
+        }
+        case "stash-apply": {
+          const ref = await this.stashRef(repo, action.index, action.stash);
+          await this.notMidOperation(repo);
+          // On a conflict git leaves the conflicted files for you to resolve, and Pop keeps the stash.
+          await this.git(repo, ["stash", action.pop ? "pop" : "apply", ref], { env, ...slow });
+          return this.view(await this.sync(repo));
+        }
+        case "stash-drop": {
+          await this.git(repo, ["stash", "drop", await this.stashRef(repo, action.index, action.stash)]);
+          return this.view(await this.sync(repo));
+        }
+        case "stash-rename": {
+          await this.stashRef(repo, action.index, action.stash);
+          const message = action.message.trim();
+          if (!message) throw badRequest("The stash needs a message.");
+          // git can't reword a stash: store it again with the new message first, so it's never lost,
+          // then drop the old entry (now one further down).
+          await this.git(repo, ["stash", "store", "-m", message, action.stash]);
+          await this.git(repo, ["stash", "drop", `stash@{${action.index + 1}}`]);
           return this.view(await this.sync(repo));
         }
         case "tag": {
