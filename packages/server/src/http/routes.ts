@@ -131,6 +131,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.get("/api/remote/hosts", () => listRemoteHosts());
   // One colour per label, shared by every repo that has it. App only; never sent to a CLI.
   // ── repo scripts (package.json) ───────────────────────────────────────────
+  app.get("/api/scripts/running", () => ({ repoIds: scripts.runningRepoIds() }));
   app.get("/api/repos/:id/scripts", async (req) => scripts.list(await repos.get(params(req).id)));
   const ScriptBody = z.object({ script: z.string().min(1) });
   app.post("/api/repos/:id/scripts/run", async (req) => {

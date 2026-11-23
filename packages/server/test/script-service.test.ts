@@ -99,8 +99,10 @@ describe("repo scripts", () => {
     await expect(scripts.run(repo(dir), "nope")).rejects.toThrow(/No script/);
     await scripts.run(repo(dir), "serve");
     await expect(scripts.run(repo(dir), "serve")).rejects.toThrow(/already running/);
+    expect(scripts.runningRepoIds()).toEqual(["demo"]);
     await scripts.stop("demo", "serve");
     expect(await ended("serve")).toMatchObject({ status: "stopped" });
+    expect(scripts.runningRepoIds()).toEqual([]);
   }, 30_000);
 
   it.skipIf(process.platform === "win32")("runs and stops scripts on an SSH host", async () => {

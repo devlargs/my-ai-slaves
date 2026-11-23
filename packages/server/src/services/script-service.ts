@@ -111,6 +111,11 @@ export class ScriptService {
     return [...(this.runs.get(repoId)?.values() ?? [])].map((r) => ({ ...r.info, output: r.output + r.pending }));
   }
 
+  /** Ids of the repos that have a script running right now. */
+  runningRepoIds(): string[] {
+    return [...this.runs].filter(([, byScript]) => [...byScript.values()].some((r) => r.info.status === "running")).map(([id]) => id);
+  }
+
   async run(repo: Repo, script: string): Promise<ScriptRunInfo> {
     const { scripts, packageManager, found } = await this.list(repo);
     if (!found) throw badRequest(`${repo.name} has no package.json.`);

@@ -40,8 +40,17 @@ storageRemove("slaves.expandedRepos");
 
 export function ReposPage() {
   const { data: repos, setData, reload } = useApi<RepoView[]>(() => api.getRepos(), [], "repos");
-  // Every repo starts collapsed each time the page opens.
+  // Every repo starts collapsed each time the page opens, except the ones with a script running.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, when the page opens
+  useEffect(() => {
+    void api
+      .getRunningScriptRepos()
+      .then(({ repoIds }) => {
+        if (repoIds.length > 0) updateExpanded((set) => repoIds.forEach((id) => set.add(id)));
+      })
+      .catch(() => {});
+  }, []);
 
   const sorted = useMemo(
     () => [...(repos ?? [])].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })),
