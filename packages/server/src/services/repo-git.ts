@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import type { CommitDetail, CommitFile, GraphCommit, LocalBranch, RemoteBranch, Repo, RepoGraph, Task } from "@my-ai-slaves/shared";
 import { type GitIdentity, gitIdentityEnv } from "../providers/types";
@@ -100,6 +101,7 @@ export class RepoGit {
         parents: parents.split(" ").filter(Boolean),
         author,
         email,
+        avatar: createHash("sha256").update(email.trim().toLowerCase()).digest("hex"),
         date,
         subject,
         refs: refs.split(", ").map((r) => r.trim()).filter(Boolean),

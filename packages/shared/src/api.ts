@@ -135,6 +135,8 @@ export interface GraphCommit {
   parents: string[];
   author: string;
   email: string;
+  /** SHA-256 of the trimmed, lowercased author email: the Gravatar id for the author's avatar. */
+  avatar: string;
   /** Author date, ISO 8601. */
   date: string;
   subject: string;

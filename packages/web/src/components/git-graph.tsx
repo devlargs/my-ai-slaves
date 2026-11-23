@@ -32,9 +32,10 @@ import { cn, formatTime } from "@/lib/utils";
 
 const PAGE = 300;
 const ROW = 28;
-const LANE = 14;
-const PAD = 10;
-const DOT = 4.5;
+const LANE = 22;
+const PAD = 12;
+/** Radius of the author's avatar that marks each commit on its lane. */
+const DOT = 9;
 const OVERSCAN = 12;
 /** Branch lines cycle through these hues (same lightness/chroma as the label dots). */
 const HUES = [36, 250, 152, 300, 72, 200, 0, 110, 330, 180];
@@ -117,6 +118,64 @@ function layout(commits: GraphCommit[]): { rows: Row[]; width: number } {
 }
 
 const x = (lane: number) => PAD + lane * LANE;
+
+const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";
+/** Gravatar by SHA-256 email hash; authors without one get a generated identicon. */
+const gravatarUrl = (hash: string, size: number) => `https://gravatar.com/avatar/${hash}?s=${size}&d=identicon`;
+
+/**
+ * The commit's mark on its lane: the author's Gravatar in a ring of the lane's colour. Under it sits the
+ * author's initial, which shows while the image loads or when offline. Merges get a dashed ring.
+ */
+function CommitAvatar({ commit, cx, color }: { commit: GraphCommit; cx: number; color: string }) {
+  const cy = ROW / 2;
+  const r = DOT - 1;
+  const clip = `avatar-${commit.hash}`;
+  const [failed, setFailed] = useState(false);
+  return (
+    <g>
+      <clipPath id={clip}>
+        <circle cx={cx} cy={cy} r={r} />
+      </clipPath>
+      <circle cx={cx} cy={cy} r={r} fill="var(--color-surface)" />
+      <text
+        x={cx}
+        y={cy}
+        dy="0.35em"
+        textAnchor="middle"
+        fontSize={9}
+        fontWeight={600}
+        fill={color}
+        style={{ userSelect: "none" }}
+      >
+        {initial(commit.author)}
+      </text>
+      {!failed && (
+        <image
+          href={gravatarUrl(commit.avatar, 40)}
+          x={cx - r}
+          y={cy - r}
+          width={r * 2}
+          height={r * 2}
+          clipPath={`url(#${clip})`}
+          preserveAspectRatio="xMidYMid slice"
+          onError={() => setFailed(true)}
+        >
+          <title>{commit.author}</title>
+        </image>
+      )}
+      <circle
+        cx={cx}
+        cy={cy}
+        r={r}
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        strokeDasharray={commit.parents.length > 1 ? "3 2" : undefined}
+      />
+    </g>
+  );
+}
 
 function edgePath(e: Edge): string {
   const mid = ROW / 2;
@@ -659,8 +718,15 @@ function CommitPanel({
         {detail?.body && <p className="mt-2 text-xs leading-relaxed whitespace-pre-wrap text-ink-2">{detail.body}</p>}
       </div>
       <div className="flex items-start gap-2.5">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-signal-soft text-sm font-medium text-signal-ink">
-          {commit.author.trim().charAt(0).toUpperCase() || "?"}
+        <span className="relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-signal-soft text-sm font-medium text-signal-ink">
+          {initial(commit.author)}
+          <img
+            src={gravatarUrl(commit.avatar, 64)}
+            alt=""
+            loading="lazy"
+            className="absolute inset-0 size-full"
+            onError={(e) => (e.currentTarget.style.display = "none")}
+          />
         </span>
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-ink" title={commit.email}>
@@ -955,14 +1021,7 @@ export function GitGraphDialog({
                             {row.edges.map((e, k) => (
                               <path key={k} d={edgePath(e)} stroke={e.color} strokeWidth={2} fill="none" />
                             ))}
-                            <circle
-                              cx={x(row.lane)}
-                              cy={ROW / 2}
-                              r={c.parents.length > 1 ? DOT - 1.5 : DOT}
-                              fill={c.parents.length > 1 ? "var(--color-surface)" : row.color}
-                              stroke={row.color}
-                              strokeWidth={2}
-                            />
+                            <CommitAvatar commit={c} cx={x(row.lane)} color={row.color} />
                           </svg>
                           <span className={cn("min-w-0 flex-1 truncate px-2", c.parents.length > 1 ? "text-muted-foreground" : "text-ink")}>
                             {c.subject}

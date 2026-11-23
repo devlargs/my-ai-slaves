@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Repo } from "@my-ai-slaves/shared";
@@ -41,6 +42,8 @@ describe("RepoGit.graph", () => {
     expect(feature!.refs).toEqual(["feature"]);
     expect(init!.parents).toEqual([]);
     expect(merge!.author).toBeTruthy();
+    // Gravatar id: SHA-256 of the trimmed, lowercased email.
+    expect(merge!.avatar).toBe(createHash("sha256").update(merge!.email.trim().toLowerCase()).digest("hex"));
 
     const limited = await new RepoGit().graph(repo, 2);
     expect(limited.commits).toHaveLength(2);
