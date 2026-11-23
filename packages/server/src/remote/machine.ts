@@ -1,5 +1,7 @@
 import { execFile, spawn } from "node:child_process";
-import { createReadStream } from "node:fs";
+import { createReadStream, lstatSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { CommandError } from "../services/git";
 
 /**
@@ -22,6 +24,44 @@ export const SSH_OPTIONS = [
   "-o",
   "ServerAliveCountMax=3",
 ];
+
+/** Unix socket paths are limited to ~104 bytes; `%C` expands to 40 hex characters. */
+const SOCKET_PATH_MAX = 100;
+
+/**
+ * Reuse one ssh connection per host for a minute (ControlMaster), so the many short git commands
+ * of a graph or diff view don't each pay a full handshake. Not on Windows: its OpenSSH can't
+ * multiplex. Empty when the socket folder can't be used (then every command connects on its own).
+ */
+export function multiplexOptions(platform: NodeJS.Platform, controlDir: string | null): string[] {
+  if (platform === "win32" || !controlDir) return [];
+  if (controlDir.length + 1 + 40 > SOCKET_PATH_MAX) return [];
+  return ["-o", "ControlMaster=auto", "-o", `ControlPath=${controlDir}/%C`, "-o", "ControlPersist=60"];
+}
+
+let controlDir: string | null | undefined;
+
+/** `~/.ssh/my-ai-slaves` (0700, this user's), created on first use; null if that isn't possible. */
+function sshControlDir(): string | null {
+  if (controlDir !== undefined) return controlDir;
+  controlDir = null;
+  try {
+    const dir = join(homedir(), ".ssh", "my-ai-slaves");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const st = lstatSync(dir);
+    const uid = process.getuid?.();
+    if (st.isDirectory() && (uid === undefined || st.uid === uid) && (st.mode & 0o077) === 0) controlDir = dir;
+  } catch {
+    // No multiplexing; every command opens its own connection.
+  }
+  return controlDir;
+}
+
+/** Every ssh option: the fixed ones plus connection reuse (not with the tests' fake ssh). */
+function sshOptions(): string[] {
+  if (process.platform === "win32" || process.env.SLAVES_SSH_BIN) return SSH_OPTIONS;
+  return [...SSH_OPTIONS, ...multiplexOptions(process.platform, sshControlDir())];
+}
 
 /** Marker the remote wrapper prints first so a run can be stopped on the server. */
 export const REMOTE_PID_MARKER = "__SLAVES_PID__";
@@ -78,7 +118,7 @@ export function localInvocation(
   if (!host) return { command: cmd.command, args: cmd.args };
   return {
     command: sshBin(),
-    args: [...SSH_OPTIONS, opts.tty ? "-tt" : "-T", assertHost(host), remoteCommand(cmd)],
+    args: [...sshOptions(), opts.tty ? "-tt" : "-T", assertHost(host), remoteCommand(cmd)],
   };
 }
 
@@ -127,20 +167,45 @@ export function scriptOn(host: string | null, script: string, timeoutMs = 30_000
 }
 
 /** Stream a local file to `<remoteDir>/<name>` on the host over ssh (no scp needed). */
-export function sendFile(host: string, localPath: string, remoteDir: string, name: string): Promise<void> {
+export function sendFile(
+  host: string,
+  localPath: string,
+  remoteDir: string,
+  name: string,
+  timeoutMs = 300_000,
+): Promise<void> {
   const inv = localInvocation(host, {
     command: "sh",
     args: ["-c", 'mkdir -p "$1" && chmod 700 "$1" && cat > "$1/$2" && chmod 600 "$1/$2"', "sh", remoteDir, name],
   });
   return new Promise((resolve, reject) => {
     const child = spawn(inv.command, inv.args, { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) {
+        // Never leave an `ssh … cat` waiting for input that won't come.
+        child.stdin.destroy();
+        if (child.exitCode === null && child.signalCode === null) child.kill();
+        reject(error);
+      } else resolve();
+    };
+    const timer = setTimeout(
+      () => finish(new CommandError(`copy to ${host}`, `Timed out after ${Math.round(timeoutMs / 1000)}s`, null)),
+      timeoutMs,
+    );
     let stderr = "";
     child.stderr.on("data", (d) => (stderr += d));
-    child.on("error", reject);
+    child.on("error", (e) => finish(e));
+    child.stdin.on("error", () => {}); // a closed pipe shows up as the exit code below
     child.on("close", (code) =>
-      code === 0 ? resolve() : reject(new CommandError(`copy to ${host}`, stderr || `exit ${code}`, code)),
+      code === 0 ? finish() : finish(new CommandError(`copy to ${host}`, stderr || `exit ${code}`, code)),
     );
-    createReadStream(localPath).on("error", reject).pipe(child.stdin);
+    createReadStream(localPath)
+      .on("error", (e) => finish(e))
+      .pipe(child.stdin);
   });
 }
 

@@ -70,11 +70,13 @@ export class AttachmentStore {
     return readFile(this.pathOf(a));
   }
 
-  private readonly remoteHomes = new Map<string, string>();
+  private readonly remoteHomes = new Map<string, Promise<string>>();
+  /** `<host>\0<attachment id>` → its copy on that host (attachments never change, so one copy is enough). */
+  private readonly sent = new Map<string, Promise<void>>();
 
   /**
    * Where each file is on the machine that runs the task: this Mac → in place; an SSH host →
-   * copied to `~/.my-ai-slaves/attachments/<id>/<name>` there (once per host).
+   * copied to `~/.my-ai-slaves/attachments/<id>/<name>` there (once per host while the app runs).
    */
   async locate(host: string | null, files: Attachment[]): Promise<Map<string, { path: string; dir: string }>> {
     const result = new Map<string, { path: string; dir: string }>();
@@ -83,14 +85,24 @@ export class AttachmentStore {
       return result;
     }
     if (files.length === 0) return result;
-    let home = this.remoteHomes.get(host);
-    if (!home) {
-      home = (await scriptOn(host, 'printf %s "$HOME"')).stdout.trim();
-      this.remoteHomes.set(host, home);
+    let homeP = this.remoteHomes.get(host);
+    if (!homeP) {
+      homeP = scriptOn(host, 'printf %s "$HOME"').then((r) => r.stdout.trim());
+      this.remoteHomes.set(host, homeP);
+      homeP.catch(() => this.remoteHomes.delete(host));
     }
+    const home = await homeP;
     for (const a of files) {
       const dir = `${home}/.my-ai-slaves/attachments/${a.id}`;
-      await sendFile(host, this.pathOf(a), dir, a.name);
+      const key = `${host}\0${a.id}`;
+      let copy = this.sent.get(key);
+      if (!copy) {
+        copy = sendFile(host, this.pathOf(a), dir, a.name);
+        this.sent.set(key, copy);
+        // A failed copy is tried again next time.
+        copy.catch(() => this.sent.delete(key));
+      }
+      await copy;
       result.set(a.id, { path: `${dir}/${a.name}`, dir });
     }
     return result;

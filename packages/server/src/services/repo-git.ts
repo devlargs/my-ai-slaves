@@ -37,6 +37,35 @@ export class RepoGit {
     return (await runOn(repo.host, "git", args, repo.path, { okExitCodes })).stdout;
   }
 
+  /**
+   * New untracked files (up to UNTRACKED_LIMIT) as one "new file" patch. On an SSH host that's a
+   * single remote command (a shell loop) instead of one connection per file; on this machine (which
+   * may be Windows, without `sh`) the per-file diffs run a few at a time.
+   */
+  private async untrackedPatch(repo: Repo): Promise<string> {
+    const files = (await this.git(repo, ["ls-files", "--others", "--exclude-standard", "-z"]))
+      .split("\0")
+      .filter(Boolean)
+      .slice(0, UNTRACKED_LIMIT);
+    if (files.length === 0) return "";
+    const diffArgs = ["diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null"];
+    if (repo.host) {
+      // Exit code 1 = "the files differ", the normal answer here; anything above it is a real failure.
+      const script = `for f do git ${diffArgs.join(" ")} "$f"; s=$?; [ "$s" -le 1 ] || exit "$s"; done; exit 0`;
+      return (await runOn(repo.host, "sh", ["-c", script, "sh", ...files], repo.path)).stdout;
+    }
+    const patches = new Array<string>(files.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < files.length) {
+        const i = next++;
+        patches[i] = await this.git(repo, [...diffArgs, files[i]!], [1]);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, files.length) }, worker));
+    return patches.join("");
+  }
+
   /** The checked-out branch name, or the commit when HEAD is detached. */
   async currentRef(repo: Repo): Promise<string> {
     try {
@@ -73,16 +102,8 @@ export class RepoGit {
       if (fork.trim()) from = fork.trim();
     }
     const tracked = await this.git(repo, ["diff", "--no-color", "--no-ext-diff", from, "--"]);
-    const untracked = (await this.git(repo, ["ls-files", "--others", "--exclude-standard", "-z"]))
-      .split("\0")
-      .filter(Boolean)
-      .slice(0, UNTRACKED_LIMIT);
-    const added: string[] = [];
-    for (const file of untracked) {
-      // Exit code 1 = "the files differ", the normal answer here.
-      added.push(await this.git(repo, ["diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file], [1]));
-    }
-    return { patch: [tracked, ...added].filter((p) => p.trim()).join(""), ref, from };
+    const added = await this.untrackedPatch(repo);
+    return { patch: [tracked, added].filter((p) => p.trim()).join(""), ref, from };
   }
 
   /**
@@ -152,21 +173,13 @@ export class RepoGit {
       this.git(repo, ["diff", "--cached", ...diffArgs, "--"]),
       this.git(repo, ["diff", ...diffArgs, "--"]),
     ]);
-    const untracked = (await this.git(repo, ["ls-files", "--others", "--exclude-standard", "-z"]))
-      .split("\0")
-      .filter(Boolean)
-      .slice(0, UNTRACKED_LIMIT);
-    const added: string[] = [];
-    for (const file of untracked) {
-      // Exit code 1 = "the files differ", the normal answer here.
-      added.push(await this.git(repo, ["diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file], [1]));
-    }
+    const added = await this.untrackedPatch(repo);
     return {
       head,
       staged,
       unstaged,
       stagedPatch,
-      unstagedPatch: [trackedPatch, ...added].filter((p) => p.trim()).join(""),
+      unstagedPatch: [trackedPatch, added].filter((p) => p.trim()).join(""),
     };
   }
 

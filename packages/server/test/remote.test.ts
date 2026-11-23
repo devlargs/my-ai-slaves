@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createAdapters } from "../src/providers";
 import { listRemoteHosts } from "../src/remote/hosts";
-import { assertHost, runOn, shq } from "../src/remote/machine";
+import { assertHost, multiplexOptions, runOn, sendFile, shq } from "../src/remote/machine";
 import { AccountService } from "../src/services/account-service";
 import { RepoGit } from "../src/services/repo-git";
 import { nullBroadcaster } from "../src/services/common";
@@ -108,6 +108,21 @@ describe("remote machine plumbing", () => {
     expect(assertHost("dev-server.tinselcrm.com")).toBe("dev-server.tinselcrm.com");
   });
 
+  it("reuses one ssh connection per host, except on Windows or when the socket path would be too long", () => {
+    expect(multiplexOptions("darwin", "/Users/me/.ssh/my-ai-slaves")).toEqual([
+      "-o", "ControlMaster=auto", "-o", "ControlPath=/Users/me/.ssh/my-ai-slaves/%C", "-o", "ControlPersist=60",
+    ]);
+    expect(multiplexOptions("win32", "C:/Users/me/.ssh/my-ai-slaves")).toEqual([]);
+    expect(multiplexOptions("linux", null)).toEqual([]);
+    expect(multiplexOptions("linux", `/home/${"x".repeat(80)}`)).toEqual([]);
+  });
+
+  it("fails a file copy whose local file can't be read, without hanging", async () => {
+    await chmod(FAKE_SSH, 0o755);
+    const dir = await tempDir();
+    await expect(sendFile("testhost", join(dir, "missing.png"), join(dir, "out"), "x.png")).rejects.toThrow();
+  });
+
   it("lists hosts like Remote Explorer: ssh config (no wildcards, Include followed) + editor history", async () => {
     const dir = await tempDir();
     await writeFile(join(dir, "extra"), "Host staging\n  HostName 10.0.0.5\n");
@@ -167,6 +182,29 @@ describe("repos on an SSH host", () => {
     const [call] = await received();
     expect(call?.prompt).toContain(`Attached files:\n- ${remoteFile}`);
     expect(call?.args).toEqual(expect.arrayContaining(["--add-dir", join(process.env.FAKE_REMOTE_HOME!, ".my-ai-slaves", "attachments", file.id)]));
+  });
+
+  it("diffs every new file of a remote repo in one command, odd names included", async () => {
+    const { repos, repoPath } = await setup();
+    const repo = await repos.register(repoPath, "testhost");
+    const names = ["a.txt", "with space.txt", "it's.txt", "$(whoami).txt"];
+    for (const n of names) await writeFile(join(repoPath, n), `${n}\n`);
+    const git = new RepoGit();
+    const start = (await git.where(repo))!;
+    const { patch } = await git.changesSince(repo, start);
+    for (const n of names) expect(patch).toContain(`+${n}`);
+    expect((await git.workingChanges(repo)).unstagedPatch).toContain("+with space.txt");
+  });
+
+  it("copies an attachment to a host only once", async () => {
+    const { attachments } = await setup();
+    const file = await attachments.save(Buffer.from("hello"), "notes.txt", "text/plain");
+    const first = (await attachments.locate("testhost", [file])).get(file.id)!;
+    expect(await readFile(first.path, "utf8")).toBe("hello");
+    await rm(first.dir, { recursive: true });
+    const second = (await attachments.locate("testhost", [file])).get(file.id)!;
+    expect(second).toEqual(first);
+    await expect(readFile(second.path)).rejects.toThrow();
   });
 
   it("stops a running task on the server itself", async () => {
