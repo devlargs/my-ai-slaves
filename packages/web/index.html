@@ -6,6 +6,15 @@
     <title>My AI Slaves</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#fbf9f7" />
+    <script>
+      // Light / dark before the first paint, so a dark pick never flashes white (kept in sync by src/lib/theme.ts).
+      (function () {
+        var t = null;
+        try { t = localStorage.getItem("slaves.theme"); } catch (e) {}
+        var dark = t === "dark" || (t !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

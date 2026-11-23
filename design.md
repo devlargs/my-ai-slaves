@@ -19,7 +19,7 @@ modern-minimal: a calm developer tool. An instrument panel, not a marketing page
     then hairline panels stacked 24px apart.
 - No marketing or content pages. If one is added, it uses this theme with a left-aligned title.
 
-## Theme: Coral (light + dark, follows the OS)
+## Theme: Coral (light + dark: follows the OS, or the System / Light / Dark switch in the sidebar footer)
 
 | token | light | dark | use |
 | --- | --- | --- | --- |

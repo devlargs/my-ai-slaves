@@ -11,6 +11,7 @@ import { useDeferredValue, useEffect, useState } from "react";
 import { UpdateControl } from "@/components/desktop-update";
 import { ResizeHandle, useResizableWidth } from "@/components/resize-handle";
 import { LiveDot } from "@/components/status";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
@@ -160,6 +161,7 @@ function Sidebar({ route }: { route: Route }) {
       <div className="mt-auto flex flex-col gap-2 p-3">
         <NotificationPrompt />
         <UpdateControl />
+        <ThemeToggle />
       </div>
     </nav>
   );

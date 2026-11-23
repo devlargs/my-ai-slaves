@@ -3,7 +3,7 @@
 @import "tw-animate-css";
 @import "./tokens.css";
 
-@custom-variant dark (@media (prefers-color-scheme: dark));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* shadcn-style names used by the components, pointed at the Coral tokens */
 :root {
