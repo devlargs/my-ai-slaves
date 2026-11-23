@@ -128,6 +128,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const limit = Math.min(Math.max(Number.parseInt(q.limit ?? "", 10) || 300, 1), 5000);
     return git.graph(await repos.get(params(req).id), limit);
   });
+  // One commit's message, files and diff (read-only), for the graph view's details pane.
+  app.get("/api/repos/:id/commits/:hash", async (req) => {
+    const { id, hash } = params(req) as { id: string; hash: string };
+    if (!/^[0-9a-f]{4,64}$/i.test(hash)) throw badRequest("Not a commit hash");
+    return git.commit(await repos.get(id), hash);
+  });
   app.get("/api/remote/hosts", () => listRemoteHosts());
   // One colour per label, shared by every repo that has it. App only; never sent to a CLI.
   // ── repo scripts (package.json) ───────────────────────────────────────────

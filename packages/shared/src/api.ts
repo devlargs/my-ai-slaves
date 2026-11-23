@@ -147,6 +147,51 @@ export interface RepoGraph {
   head: string | null;
   /** True when there are older commits past the limit. */
   more: boolean;
+  /** Local branches (`refs/heads`), sorted by name. */
+  local: LocalBranch[];
+  /** Remote-tracking branches (`refs/remotes`, without `<remote>/HEAD`), sorted by remote then name. */
+  remote: RemoteBranch[];
+}
+export interface LocalBranch {
+  /** "main", "fix/announce-notice-banner". */
+  name: string;
+  commit: string;
+  /** The checked-out branch. */
+  current: boolean;
+  /** Upstream as git shortens it ("origin/main"), null when none. */
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  /** The upstream branch is gone from the remote. */
+  gone: boolean;
+}
+export interface RemoteBranch {
+  /** "origin". */
+  remote: string;
+  /** Branch name on the remote: "main". */
+  name: string;
+  /** "origin/main", as it appears in commit refs. */
+  ref: string;
+  commit: string;
+}
+
+/** GET /api/repos/:id/commits/:hash → CommitDetail (read-only `git show`, compared to the first parent) */
+export interface CommitFile {
+  /** A = added, M = modified, D = deleted, R = renamed, C = copied, T = type changed. */
+  status: "A" | "M" | "D" | "R" | "C" | "T";
+  path: string;
+  /** The old path of a rename or copy. */
+  oldPath: string | null;
+}
+export interface CommitDetail extends GraphCommit {
+  /** The message after the subject line (may be empty). */
+  body: string;
+  committer: string;
+  /** Committer date, ISO 8601. */
+  committerDate: string;
+  files: CommitFile[];
+  /** Unified diff against the first parent (or against nothing, for a root commit). */
+  patch: string;
 }
 
 /** GET /api/fs/browse?path=<abs>&host=<ssh host> (defaults to home; host omitted = this Mac) */

@@ -57,3 +57,46 @@ describe("RepoGit.graph", () => {
     expect(graph.commits).toEqual([]);
   });
 });
+
+describe("RepoGit branches and commit details", () => {
+  it("lists local and remote branches with ahead counts, and shows one commit's files and diff", async () => {
+    const origin = await tempDir();
+    sh(origin, "init", "-q", "-b", "main");
+    sh(origin, "config", "user.email", "test@example.com");
+    sh(origin, "config", "user.name", "Test");
+    await commit(origin, "a.txt", "init");
+    const path = await tempDir();
+    sh(path, "clone", "-q", origin, ".");
+    sh(path, "config", "user.email", "test@example.com");
+    sh(path, "config", "user.name", "Test");
+    await commit(path, "b.txt", "local work");
+    sh(path, "checkout", "-q", "-b", "fix/thing");
+    await writeFile(join(path, "a.txt"), "changed\n");
+    sh(path, "mv", "b.txt", "renamed.txt");
+    sh(path, "commit", "-q", "-am", "fix: change a\n\nlonger body");
+    sh(path, "checkout", "-q", "main");
+
+    const repo = { path, host: null, defaultBranch: "main" } as unknown as Repo;
+    const graph = await new RepoGit().graph(repo, 10);
+    expect(graph.local.map((b) => b.name)).toEqual(["fix/thing", "main"]);
+    const main = graph.local.find((b) => b.name === "main")!;
+    expect(main).toMatchObject({ current: true, upstream: "origin/main", ahead: 1, behind: 0 });
+    expect(graph.remote.map((b) => [b.remote, b.name, b.ref])).toEqual([["origin", "main", "origin/main"]]);
+
+    const fix = await new RepoGit().commit(repo, graph.local[0]!.commit);
+    expect(fix.subject).toBe("fix: change a");
+    expect(fix.body).toBe("longer body");
+    expect(fix.files).toEqual([
+      { status: "M", path: "a.txt", oldPath: null },
+      { status: "R", path: "renamed.txt", oldPath: "b.txt" },
+    ]);
+    expect(fix.patch).toContain("+changed");
+
+    const root = await new RepoGit().commit(repo, graph.commits.at(-1)!.hash.slice(0, 8));
+    expect(root.subject).toBe("init");
+    expect(root.files).toEqual([{ status: "A", path: "a.txt", oldPath: null }]);
+    expect(root.patch.startsWith("diff --git")).toBe(true);
+
+    await expect(new RepoGit().commit(repo, "--output=x")).rejects.toThrow(/Not a commit hash/);
+  });
+});

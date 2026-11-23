@@ -1,5 +1,6 @@
 import type {
   RepoGraph,
+  CommitDetail,
   RepoScripts,
   ScriptRunInfo,
   AccountView,
@@ -93,6 +94,7 @@ export const api = {
   registerRepo: (body: RegisterRepoRequest) => request<RepoView>("POST", "/repos", body),
   checkRepo: (id: string) => request<RepoView>("POST", `/repos/${enc(id)}/check`),
   getRepoGraph: (id: string, limit: number) => request<RepoGraph>("GET", `/repos/${enc(id)}/graph?limit=${limit}`),
+  getCommit: (id: string, hash: string) => request<CommitDetail>("GET", `/repos/${enc(id)}/commits/${enc(hash)}`),
   getRunningScriptRepos: () => request<{ repoIds: string[] }>("GET", "/scripts/running"),
   getRepoScripts: (id: string) => request<RepoScripts>("GET", `/repos/${enc(id)}/scripts`),
   runRepoScript: (id: string, script: string) => request<ScriptRunInfo>("POST", `/repos/${enc(id)}/scripts/run`, { script }),

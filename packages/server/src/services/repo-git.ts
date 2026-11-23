@@ -1,5 +1,5 @@
 import { rm } from "node:fs/promises";
-import type { GraphCommit, Repo, RepoGraph, Task } from "@my-ai-slaves/shared";
+import type { CommitDetail, CommitFile, GraphCommit, LocalBranch, RemoteBranch, Repo, RepoGraph, Task } from "@my-ai-slaves/shared";
 import { type GitIdentity, gitIdentityEnv } from "../providers/types";
 import { runOn } from "../remote/machine";
 import { git, gitOk, run } from "./git";
@@ -9,6 +9,8 @@ export type LegacyTaskBranch = NonNullable<Task["branch"]>;
 
 /** At most this many untracked files are shown in a task's diff. */
 const UNTRACKED_LIMIT = 200;
+/** Full or abbreviated commit hash: the only thing `commit()` accepts, so it can never be read as an option. */
+const HASH = /^[0-9a-f]{4,64}$/i;
 
 /**
  * Tasks run in the repository exactly as it's checked out. The app never creates, switches, resets,
@@ -104,7 +106,84 @@ export class RepoGit {
       });
     }
     const more = commits.length > limit;
-    return { commits: commits.slice(0, limit), head, more };
+    const { local, remote } = await this.branches(repo).catch(() => ({ local: [], remote: [] }));
+    return { commits: commits.slice(0, limit), head, more, local, remote };
+  }
+
+  /** Local and remote-tracking branches, with how far each local one is ahead of / behind its upstream. Read-only. */
+  async branches(repo: Repo): Promise<{ local: LocalBranch[]; remote: RemoteBranch[] }> {
+    const format = ["%(refname)", "%(objectname)", "%(HEAD)", "%(upstream:short)", "%(upstream:track,nobracket)", "%(symref)"].join("%1f");
+    const [refs, remotesOut] = await Promise.all([
+      this.git(repo, ["for-each-ref", `--format=${format}`, "refs/heads", "refs/remotes"]),
+      this.git(repo, ["remote"]).catch(() => ""),
+    ]);
+    // Longest first, so a remote named "a/b" wins over "a".
+    const remotes = remotesOut.split(/\r?\n/).map((r) => r.trim()).filter(Boolean).sort((a, b) => b.length - a.length);
+    const local: LocalBranch[] = [];
+    const remote: RemoteBranch[] = [];
+    for (const line of refs.split(/\r?\n/)) {
+      const [refname, commit, head, upstream, track, symref] = line.split("\x1f");
+      if (!refname || !commit) continue;
+      if (refname.startsWith("refs/heads/")) {
+        const ahead = /ahead (\d+)/.exec(track ?? "");
+        const behind = /behind (\d+)/.exec(track ?? "");
+        local.push({
+          name: refname.slice("refs/heads/".length),
+          commit,
+          current: head === "*",
+          upstream: upstream || null,
+          ahead: ahead ? Number(ahead[1]) : 0,
+          behind: behind ? Number(behind[1]) : 0,
+          gone: track === "gone",
+        });
+      } else if (refname.startsWith("refs/remotes/")) {
+        // `origin/HEAD` only points at another remote branch.
+        if (symref) continue;
+        const ref = refname.slice("refs/remotes/".length);
+        const name = remotes.find((r) => ref.startsWith(`${r}/`)) ?? ref.split("/")[0]!;
+        remote.push({ remote: name, name: ref.slice(name.length + 1), ref, commit });
+      }
+    }
+    const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+    local.sort(byName);
+    remote.sort((a, b) => a.remote.localeCompare(b.remote) || byName(a, b));
+    return { local, remote };
+  }
+
+  /**
+   * One commit: its full message, the files it touched and its diff against the first parent
+   * (a merge shows what it brought into the branch). Read-only.
+   */
+  async commit(repo: Repo, hash: string): Promise<CommitDetail> {
+    if (!HASH.test(hash)) throw new Error(`Not a commit hash: ${hash}`);
+    const format = ["%H", "%P", "%an", "%ae", "%aI", "%s", "%D", "%cn", "%cI", "%b"].join("%x1f");
+    const info = await this.git(repo, ["show", "-s", "--no-color", `--format=${format}`, hash, "--"]);
+    const [full, parents, author, email, date, subject, refs, committer, committerDate, body] = info.split("\x1f");
+    if (!full) throw new Error(`Commit not found: ${hash}`);
+    const parentList = (parents ?? "").split(" ").filter(Boolean);
+    const first = parentList[0];
+    // Against the first parent, or the empty tree for a root commit.
+    const base = first ? [first, full] : ["--root", full];
+    const diffArgs = ["--no-color", "--no-ext-diff", "-M"];
+    const [names, patch] = await Promise.all([
+      this.git(repo, first ? ["diff", ...diffArgs, "--name-status", "-z", ...base, "--"] : ["diff-tree", "-r", ...diffArgs, "--name-status", "-z", ...base, "--"]),
+      this.git(repo, first ? ["diff", ...diffArgs, ...base, "--"] : ["diff-tree", "-r", "-p", ...diffArgs, ...base, "--"]),
+    ]);
+    return {
+      hash: full,
+      parents: parentList,
+      author: author ?? "",
+      email: email ?? "",
+      date: date ?? "",
+      subject: subject ?? "",
+      refs: (refs ?? "").split(", ").map((r) => r.trim()).filter(Boolean),
+      committer: committer ?? "",
+      committerDate: committerDate ?? "",
+      body: (body ?? "").trim(),
+      files: parseNameStatus(names, full),
+      // diff-tree prints the commit hash first; the patch starts at the first "diff --git".
+      patch: first ? patch : patch.slice(Math.max(0, patch.indexOf("diff --git"))),
+    };
   }
 
   /** Read-only diff of a branch made by an older version of the app (`ai/<task-id>`), for tasks still queued. */
@@ -129,4 +208,22 @@ export class RepoGit {
     await rm(path, { recursive: true, force: true });
     await gitOk(["worktree", "prune"], repo.path);
   }
+}
+
+/** `git diff --name-status -z` output → files. `diff-tree` (root commits) prints the commit hash first. */
+function parseNameStatus(out: string, hash: string): CommitFile[] {
+  const parts = out.split("\0").filter(Boolean);
+  if (parts[0] === hash) parts.shift();
+  const files: CommitFile[] = [];
+  for (let i = 0; i < parts.length; ) {
+    const code = parts[i++]!;
+    const status = code[0] as CommitFile["status"];
+    if (status === "R" || status === "C") {
+      const oldPath = parts[i++] ?? "";
+      files.push({ status, oldPath, path: parts[i++] ?? "" });
+    } else {
+      files.push({ status: "MADT".includes(status) ? status : "M", oldPath: null, path: parts[i++] ?? "" });
+    }
+  }
+  return files;
 }

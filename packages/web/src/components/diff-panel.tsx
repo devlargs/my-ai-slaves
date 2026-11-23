@@ -8,11 +8,11 @@ import { api, attempt } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 
-function filePath(file: FileData): string {
+export function filePath(file: FileData): string {
   return file.type === "delete" ? file.oldPath : file.newPath;
 }
 
-function fileStats(file: FileData) {
+export function fileStats(file: FileData) {
   let add = 0;
   let del = 0;
   for (const hunk of file.hunks) {
@@ -37,7 +37,7 @@ const ROW_PX = 20;
  * are only built once it comes near the view (`eager` ones at once); until then it holds its place
  * with an empty box of about the right height. Built rows stay, so scrolling back is instant.
  */
-const FileDiff = memo(function FileDiff({
+export const FileDiff = memo(function FileDiff({
   file,
   eager,
   scroller,
