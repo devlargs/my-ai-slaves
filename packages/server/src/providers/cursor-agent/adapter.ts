@@ -33,7 +33,13 @@ const MODE_FLAGS: Record<SettingsFile["providers"]["cursor-agent"]["permissionMo
 export class CursorAgentAdapter implements ProviderAdapter {
   readonly provider = "cursor-agent" as const;
 
-  buildArgs(input: Pick<RunInput, "cwd" | "prompt" | "resume" | "addDirs">, settings: SettingsFile): string[] {
+  /**
+   * The prompt is not an argument: it goes in on stdin (like Claude's), so a long prompt never hits
+   * Windows' ~32K command-line cap or a remote host's per-argument cap (the whole ssh command is one
+   * argument there), and it doesn't show in the process list. The docs don't mention stdin; checked
+   * by hand on CLI 2026.11.13 for both a fresh `-p` run and `-p --resume <chatId>`.
+   */
+  buildArgs(input: Pick<RunInput, "cwd" | "resume" | "addDirs">, settings: SettingsFile): string[] {
     const s = settings.providers["cursor-agent"];
     const args = [
       "-p",
@@ -48,8 +54,6 @@ export class CursorAgentAdapter implements ProviderAdapter {
     if (s.model) args.push("--model", s.model);
     if (input.resume) args.push("--resume", input.resume.sessionId);
     for (const dir of input.addDirs ?? []) args.push("--add-dir", dir);
-    // `--` so a prompt starting with "-" is never read as a flag.
-    args.push("--", input.prompt);
     return args;
   }
 
@@ -84,7 +88,7 @@ export class CursorAgentAdapter implements ProviderAdapter {
         cwd: input.cwd,
         host: input.account.host,
       },
-      null,
+      input.prompt,
       new CursorStreamParser(s.limitPatterns),
     );
   }

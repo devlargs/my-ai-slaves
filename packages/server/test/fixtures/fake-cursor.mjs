@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Fake Cursor `agent` CLI for tests. Prompt is the argument after `--`.
+// Fake Cursor `agent` CLI for tests. Prompt comes in on stdin (an argument after `--` fails the run).
 //   LIMIT:<label> → exits 1 with a usage-limit message on stderr
 //   otherwise     → writes out-<label>.txt in --workspace and succeeds
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 const args = process.argv.slice(2);
@@ -19,7 +19,11 @@ if (args[0] === "login") {
   setTimeout(() => process.exit(0), 300);
 } else {
 
-const prompt = args[args.indexOf("--") + 1] ?? "";
+if (args.includes("--")) {
+  process.stderr.write("fake-cursor: prompt must come on stdin, not as an argument\n");
+  process.exit(2);
+}
+const prompt = readFileSync(0, "utf8");
 const cwd = args[args.indexOf("--workspace") + 1] ?? process.cwd();
 const session = "cursor-chat-1";
 if (process.env.FAKE_PROMPT_LOG) {

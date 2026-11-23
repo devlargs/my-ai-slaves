@@ -399,6 +399,8 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     const calls = await received();
     expect(calls.map((c) => `${c.cli}:${c.label}`)).toEqual(["claude:work_1-claude", "cursor:work_2-cursor"]);
     expect(calls.every((c) => c.prompt === FULL("LIMIT:work_1-claude please"))).toBe(true);
+    // Cursor gets it on stdin, never as an argument (command-line size caps, process list).
+    expect(calls[1]!.args.some((a) => a.includes("LIMIT:work_1-claude"))).toBe(false);
 
     // Nothing was reset between accounts; no branch was made.
     expect(sh(repo.path, "status", "--porcelain")).toContain("out-work_2-cursor.txt");
