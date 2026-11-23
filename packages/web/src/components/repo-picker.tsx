@@ -2,6 +2,7 @@ import type { RepoView } from "@my-ai-slaves/shared";
 import { CheckIcon, ChevronDownIcon, TagIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { LabelColorsButton, labelColorAttr } from "@/components/label-badge";
+import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useLabelColor } from "@/lib/hooks";
 import { cn, storageGet, storageSet } from "@/lib/utils";
@@ -210,6 +211,20 @@ export function RepoPicker({
             );
           })}
         </ul>
+        <div className="flex items-center justify-between border-t border-rule py-1.5 pr-1.5 pl-3">
+          <span className="num text-[11px] text-muted-foreground">
+            {main ? `${1 + extras.length} selected` : "None selected"}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            disabled={!main}
+            onClick={() => onChange({ main: undefined, extras: [] })}
+          >
+            Clear
+          </Button>
+        </div>
         <p className="border-t border-rule px-3 py-2 text-[11px] leading-snug text-muted-foreground">
           Tick several to work across repos. The task runs in the <span className="font-medium text-ink-2">main</span>{" "}
           repo. The others are opened as they are: the app doesn&apos;t create, switch or commit anything there. Their ticked

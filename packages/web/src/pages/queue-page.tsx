@@ -348,9 +348,12 @@ function Composer({
   const [repo, setRepo] = useState<string | undefined>(() => storageGet(REPO_KEY) ?? undefined);
   // Cross-repo work: other repos (same machine) opened alongside the main one.
   const [extras, setExtras] = useState<string[]>(storedExtras);
+  // Set by the picker's Clear button: no repo ticked until one is picked again (no fallback to the first).
+  const [cleared, setCleared] = useState(false);
   const selectRepos = ({ main, extras: next }: RepoSelection) => {
     setRepo(main);
     setExtras(next);
+    setCleared(!main);
     if (main) storageSet(REPO_KEY, main);
     storageSet(EXTRA_REPOS_KEY, JSON.stringify(next));
   };
@@ -376,7 +379,7 @@ function Composer({
 
   // Fall back to the first repo when the remembered one is gone; drop other repos that can't go with it.
   useEffect(() => {
-    if (!repos) return;
+    if (!repos || cleared) return;
     const main = repos.find((r) => r.id === repo) ?? repos[0];
     if (main?.id !== repo) setRepo(main?.id);
     const valid = extras.filter((id) => {
@@ -384,7 +387,7 @@ function Composer({
       return r && r.id !== main?.id && (r.host ?? null) === (main?.host ?? null);
     });
     if (valid.length !== extras.length) setExtras(valid);
-  }, [repos, repo, extras]);
+  }, [repos, repo, extras, cleared]);
 
   const currentRepo = repos?.find((r) => r.id === repo);
   const downRepo = repos?.find((r) => (r.id === repo || extras.includes(r.id)) && r.availability.state === "unreachable");
