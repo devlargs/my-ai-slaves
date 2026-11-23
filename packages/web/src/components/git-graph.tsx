@@ -32,10 +32,10 @@ import { cn, formatTime } from "@/lib/utils";
 
 const PAGE = 300;
 const ROW = 28;
-const LANE = 22;
-const PAD = 12;
+const LANE = 28;
+const PAD = 14;
 /** Radius of the author's avatar that marks each commit on its lane. */
-const DOT = 9;
+const DOT = 12;
 const OVERSCAN = 12;
 /** Branch lines cycle through these hues (same lightness/chroma as the label dots). */
 const HUES = [36, 250, 152, 300, 72, 200, 0, 110, 330, 180];
@@ -143,7 +143,7 @@ function CommitAvatar({ commit, cx, color }: { commit: GraphCommit; cx: number; 
         y={cy}
         dy="0.35em"
         textAnchor="middle"
-        fontSize={9}
+        fontSize={11}
         fontWeight={600}
         fill={color}
         style={{ userSelect: "none" }}
@@ -152,7 +152,7 @@ function CommitAvatar({ commit, cx, color }: { commit: GraphCommit; cx: number; 
       </text>
       {!failed && (
         <image
-          href={gravatarUrl(commit.avatar, 40)}
+          href={gravatarUrl(commit.avatar, 48)}
           x={cx - r}
           y={cy - r}
           width={r * 2}
