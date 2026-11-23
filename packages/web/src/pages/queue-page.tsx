@@ -52,6 +52,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, attempt } from "@/lib/api";
 import { useApi, useDebounced, useRepoName, useTaskSubscription } from "@/lib/hooks";
 import { getState, setTasks, useStore } from "@/lib/store";
+import { addPaste, clearPastes, expandPastes, loadPastes, shouldCollapse } from "@/lib/pasted-text";
 import { cn, formatTime, storageGet, storageRemove, storageSet } from "@/lib/utils";
 
 const CHAIN = "__chain__";
@@ -61,6 +62,10 @@ const EXTRA_REPOS_KEY = "slaves.lastExtraRepos";
 const draftKey = (box: string) => `slaves.draft.${box}`;
 const COMPOSER_DRAFT = "composer";
 const replyDraft = (taskId: string) => `reply.${taskId}`;
+/** The box's text with every collapsed paste marker put back to the full pasted text. */
+const fullText = (text: string, box: string) => expandPastes(text, loadPastes(draftKey(box)));
+const readMessage = (input: React.RefObject<HTMLTextAreaElement | null>, box: string) =>
+  fullText(input.current?.value ?? "", box);
 
 const promptCount = (task: TaskView) =>
   task.promptIds.length + (task.repoPromptIds?.length ?? 0) + task.extraRepos.reduce((n, x) => n + x.promptIds.length, 0);
@@ -398,6 +403,7 @@ function Composer({
 
   const setMessage = (text: string) => {
     if (input.current) input.current.value = text;
+    clearPastes(draftKey(COMPOSER_DRAFT));
     if (text) storageSet(draftKey(COMPOSER_DRAFT), text);
     else storageRemove(draftKey(COMPOSER_DRAFT));
     setHasText(text.trim().length > 0);
@@ -427,7 +433,7 @@ function Composer({
   }, [editingDraft?.id]);
 
   const submit = async (asDraft = false) => {
-    const message = input.current?.value ?? "";
+    const message = readMessage(input, COMPOSER_DRAFT);
     if (!repo || !canSend || (!message.trim() && files.ids.length === 0)) return;
     setBusy(true);
     const task = await attempt(
@@ -510,7 +516,7 @@ function Composer({
             draft={COMPOSER_DRAFT}
             aria-label="Task message"
             onHasText={setHasText}
-            onText={preview ? setPreviewText : undefined}
+            onText={preview ? (text) => setPreviewText(fullText(text, COMPOSER_DRAFT)) : undefined}
             onPaste={files.onPaste}
             onSubmit={() => void submit()}
             placeholder="Describe the task. Paste or drop screenshots and files."
@@ -532,7 +538,7 @@ function Composer({
                 checked={preview}
                 onCheckedChange={(on) => {
                   setPreview(on);
-                  if (on) setPreviewText(input.current?.value ?? "");
+                  if (on) setPreviewText(readMessage(input, COMPOSER_DRAFT));
                 }}
               />
               Preview prompt
@@ -774,7 +780,7 @@ function ReplyBox({ taskId }: { taskId: string }) {
   const bound = useBoundPrompts();
   const canSend = (hasText || files.files.length > 0) && !busy && !files.uploading && !files.failed;
   const send = async () => {
-    const message = input.current?.value ?? "";
+    const message = readMessage(input, replyDraft(taskId));
     if (!canSend || (!message.trim() && files.ids.length === 0)) return;
     setBusy(true);
     const ok = await attempt(api.replyTask(taskId, message, files.ids, bound.ids));
@@ -782,6 +788,7 @@ function ReplyBox({ taskId }: { taskId: string }) {
     if (ok !== undefined) {
       if (input.current) input.current.value = "";
       storageRemove(draftKey(replyDraft(taskId)));
+      clearPastes(draftKey(replyDraft(taskId)));
       setHasText(false);
       files.clear();
       bound.setIds([]);
@@ -867,11 +874,22 @@ function MessageInput({
       onInput={(e) => {
         const text = e.currentTarget.value;
         if (text) storageSet(draftKey(draft), text);
-        else storageRemove(draftKey(draft));
+        else {
+          storageRemove(draftKey(draft));
+          clearPastes(draftKey(draft));
+        }
         onHasText(text.trim().length > 0);
         onText?.(text);
       }}
-      onPaste={onPaste}
+      onPaste={(e) => {
+        onPaste(e);
+        if (e.defaultPrevented) return;
+        // Long text shows as "[Pasted text #1 +204 lines]"; the full text is sent in its place.
+        const text = e.clipboardData.getData("text/plain");
+        if (!shouldCollapse(text)) return;
+        e.preventDefault();
+        insertText(e.currentTarget, addPaste(draftKey(draft), text));
+      }}
       onKeyDown={(e) => {
         // Shift+Enter sends (⌘/Ctrl+Enter too); plain Enter adds a new line. Skip while an IME is composing.
         if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
@@ -885,6 +903,14 @@ function MessageInput({
       )}
     />
   );
+}
+
+/** Type `text` at the cursor: keeps undo working and fires the box's input handler. */
+function insertText(box: HTMLTextAreaElement, text: string) {
+  box.focus();
+  if (document.execCommand("insertText", false, text)) return;
+  box.setRangeText(text, box.selectionStart, box.selectionEnd, "end");
+  box.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 /** Remove a task in any state, after confirming what is lost. Running tasks are stopped first. */
