@@ -203,6 +203,30 @@ describe("RepoActions", () => {
     expect(sh(path, "log", "-1", "--format=%s")).toBe("add b");
   });
 
+  it("reports an action as in flight from the click until it ends, then calls onIdle", async () => {
+    const { path, repo } = await newRepo();
+    await commit(path, "b.txt", "add b");
+    const actions = new RepoActions();
+    const idle: string[] = [];
+    actions.onIdle((id) => idle.push(id));
+    const undo = actions.undo(repo);
+    const redo = actions.redo(repo);
+    expect(actions.inFlight(repo.id)).toBe(true);
+    await undo;
+    expect(actions.inFlight(repo.id)).toBe(true); // redo is still queued behind it
+    expect(idle).toEqual([]);
+    await redo;
+    expect(actions.inFlight(repo.id)).toBe(false);
+    expect(idle).toEqual([repo.id]);
+
+    // A refused action counts too, and ends.
+    const refused = new RepoActions(() => true);
+    const attempt = refused.stage(repo, null);
+    expect(refused.inFlight(repo.id)).toBe(true);
+    await expect(attempt).rejects.toThrow(/task is running/);
+    expect(refused.inFlight(repo.id)).toBe(false);
+  });
+
   it("refuses to stage or commit while a task runs in the repo", async () => {
     const { path, repo } = await newRepo();
     await writeFile(join(path, "b.txt"), "b\n");

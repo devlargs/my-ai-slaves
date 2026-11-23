@@ -77,8 +77,21 @@ export interface CommitInput {
 export class RepoActions {
   private readonly histories = new Map<string, History>();
   private readonly locks = new Map<string, Promise<unknown>>();
+  /** Actions clicked and not finished yet, per repo (queued behind another one or running). */
+  private readonly pending = new Map<string, number>();
+  private readonly idleListeners: Array<(repoId: string) => void> = [];
 
   constructor(private readonly busy: (repoId: string) => boolean = () => false) {}
+
+  /** Whether an action is queued or running in the repo: the scheduler waits for it before starting a task there. */
+  inFlight(repoId: string): boolean {
+    return (this.pending.get(repoId) ?? 0) > 0;
+  }
+
+  /** Called when a repo's last action ends, so tasks waiting on it can start. */
+  onIdle(listener: (repoId: string) => void): void {
+    this.idleListeners.push(listener);
+  }
 
   private async git(repo: Repo, args: string[], opts: { env?: Record<string, string>; ok?: number[]; timeoutMs?: number } = {}) {
     const extraEnv = { GIT_TERMINAL_PROMPT: "0", ...opts.env };
@@ -92,11 +105,25 @@ export class RepoActions {
 
   /** One action at a time per repo (a double click must not undo twice). */
   private exclusive<T>(repo: Repo, work: () => Promise<T>): Promise<T> {
+    // Counted from the click (synchronously), so a task can't start in the repo while it waits or runs.
+    this.pending.set(repo.id, (this.pending.get(repo.id) ?? 0) + 1);
     const prev = this.locks.get(repo.id) ?? Promise.resolve();
-    const next = prev.catch(() => {}).then(() => {
-      if (this.busy(repo.id)) throw conflict("A task is running in this repo. Wait for it to finish first.");
-      return work();
-    });
+    const next = prev
+      .catch(() => {})
+      .then(() => {
+        if (this.busy(repo.id)) throw conflict("A task is running in this repo. Wait for it to finish first.");
+        return work();
+      })
+      .finally(() => {
+        const left = (this.pending.get(repo.id) ?? 1) - 1;
+        if (left > 0) {
+          this.pending.set(repo.id, left);
+          return;
+        }
+        this.pending.delete(repo.id);
+        if (this.locks.get(repo.id) === next) this.locks.delete(repo.id);
+        for (const listener of this.idleListeners) listener(repo.id);
+      });
     this.locks.set(repo.id, next);
     return next;
   }

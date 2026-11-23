@@ -61,6 +61,9 @@ const assembler = new PromptAssembler({
 });
 const queue = new QueueService({ stores, accounts, repos, git, assembler, adapters, broadcaster: hub, attachments, prompts });
 const actions = new RepoActions((repoId) => queue.busyRepoIds().has(repoId));
+// Tasks wait for a graph action (pull, rebase…) in their repo, and start once it's done.
+queue.useRepoActionLock((repoId) => actions.inFlight(repoId));
+actions.onIdle(() => void queue.tick());
 const logins = new LoginService(stores, accounts, adapters, {
   loginUpdated: (state) => hub.loginUpdated(state),
   onLoggedIn: () => void queue.tick(),

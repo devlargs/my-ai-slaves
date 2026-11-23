@@ -444,6 +444,61 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect((await received()).map((c) => c.prompt)).toEqual([FULL("SLOW first"), "SLOW keep going", "follow-up"]);
   });
 
+  it("two quick replies: only the first is queued, the second is refused", async () => {
+    const { queue, repo, received } = await setup();
+    const created = await queue.create({ repo: repo.id, message: "first" });
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+    const results = await Promise.allSettled([queue.reply(created.id, "reply one"), queue.reply(created.id, "reply two")]);
+    expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const done = await waitFor(async () => {
+      const t = (await queue.list()).find((x) => x.id === created.id);
+      return t?.status === "needs-review" && t.pendingReply === null && t.replies.length > 0 ? t : null;
+    });
+    expect(done.replies).toHaveLength(1);
+    expect((await received()).map((c) => c.prompt)).toEqual([FULL("first"), done.replies[0]!.message]);
+  });
+
+  it("a starting task holds its repo, and is never spawned if it's discarded before its process attaches", async () => {
+    const { queue, stores, repo, received } = await setup();
+    const adapter = (queue as any).deps.adapters["claude-code"];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const prepare = adapter.prepare?.bind(adapter);
+    adapter.prepare = async (...args: unknown[]) => {
+      await gate;
+      return prepare?.(...args);
+    };
+    const created = await queue.create({ repo: repo.id, message: "slow start" });
+    await waitFor(taskWith(queue, created.id, "running"));
+    // Marked running, no process yet: graph actions must already see the repo as busy.
+    expect(queue.busyRepoIds().has(repo.id)).toBe(true);
+
+    // Gone from the queue while starting (discard gives up waiting after 15 s).
+    await stores.queue.update((q) => {
+      q.tasks = q.tasks.filter((t) => t.id !== created.id);
+    });
+    release();
+    await waitFor(async () => !queue.busyRepoIds().has(repo.id));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await received()).toEqual([]);
+    expect((queue as any).live.size).toBe(0);
+  });
+
+  it("waits for a commit-graph action in the repo before starting a task there", async () => {
+    const { queue, repo, received } = await setup();
+    let acting = true;
+    queue.useRepoActionLock((id) => acting && id === repo.id);
+    const created = await queue.create({ repo: repo.id, message: "after the pull" });
+    const waiting = await waitFor(async () => (await queue.list()).find((t) => t.id === created.id && t.waitingNote));
+    expect(waiting.status).toBe("pending");
+    expect(waiting.waitingNote).toMatch(/git action/);
+    expect(await received()).toEqual([]);
+
+    acting = false;
+    await queue.tick();
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+  });
+
   it("replies continue the same session, without re-sending base prompts", async () => {
     const { queue, repo, received } = await setup();
     const created = await queue.create({ repo: repo.id, message: "first" });

@@ -103,6 +103,10 @@ export function pushRawCapped(buffer: OutputBuffer, line: RawLine, maxLines = LI
  */
 export class QueueService {
   private readonly live = new Map<string, LiveRun>();
+  /** Tasks marked running whose process isn't attached yet (git, attachments, CLI setup): their repos are held too. */
+  private readonly starting = new Map<string, string[]>();
+  /** Whether a commit-graph action is queued or running in a repo (set by the app; none in tests). */
+  private repoActionInFlight: (repoId: string) => boolean = () => false;
   private readonly buffers = new Map<string, OutputBuffer>();
   private waitingNotes = new Map<string, string>();
   private ticking = false;
@@ -230,11 +234,16 @@ export class QueueService {
     await this.stores.activity.close().catch(() => {});
   }
 
+  /** Lets the scheduler wait for a commit-graph action (pull, rebase…) in a repo before starting a task there. */
+  useRepoActionLock(inFlight: (repoId: string) => boolean): void {
+    this.repoActionInFlight = inFlight;
+  }
+
   // ── reads ────────────────────────────────────────────────────────────────
 
-  /** Repos (main and extra) in a running task right now. */
+  /** Repos (main and extra) in a running or starting task right now. */
   busyRepoIds(): Set<string> {
-    return new Set([...this.live.values()].flatMap((r) => r.repos));
+    return new Set([...[...this.live.values()].flatMap((r) => r.repos), ...[...this.starting.values()].flat()]);
   }
 
   async list(): Promise<TaskView[]> {
@@ -408,11 +417,11 @@ export class QueueService {
 
   /** Run the original message again in a new session. The repo is left as it is. */
   async retry(id: string): Promise<void> {
-    const task = await this.getTask(id);
-    if (task.status !== "interrupted" && task.status !== "needs-review") {
-      throw conflict(`Only interrupted or needs-review tasks can be retried (this one is ${task.status}).`);
-    }
-    await this.updateTask(id, (t) => {
+    // Checked inside the update, so two quick clicks can't both pass.
+    const task = await this.updateTask(id, (t) => {
+      if (t.status !== "interrupted" && t.status !== "needs-review") {
+        throw conflict(`Only interrupted or needs-review tasks can be retried (this one is ${t.status}).`);
+      }
       t.status = "pending";
       t.session = null;
       t.pendingReply = null;
@@ -427,13 +436,15 @@ export class QueueService {
 
   async reply(id: string, message: string, attachmentIds: string[] = [], promptIdsIn: string[] = []): Promise<void> {
     if (!message.trim() && attachmentIds.length === 0) throw badRequest("The reply is empty. Type a message or attach a file.");
-    const task = await this.getTask(id);
-    if ((task.status !== "needs-review" && task.status !== "interrupted") || !task.session) {
-      throw conflict("You can reply to a task once it's waiting for review or was stopped after its session started.");
-    }
+    const canReply = (t: Task) => (t.status === "needs-review" || t.status === "interrupted") && !!t.session;
+    const refused = () => conflict("You can reply to a task once it's waiting for review or was stopped after its session started.");
+    if (!canReply(await this.getTask(id))) throw refused();
     const attachments = await this.deps.attachments.resolve(attachmentIds);
     const promptIds = await this.deps.prompts.validate(promptIdsIn);
-    await this.updateTask(id, (t) => {
+    // Checked again inside the update: a second quick reply finds the task pending and is refused
+    // instead of overwriting the first.
+    const task = await this.updateTask(id, (t) => {
+      if (!canReply(t)) throw refused();
       t.replies.push({ at: this.stamp(), message, attachments, promptIds });
       t.pendingReply = message;
       t.status = "pending";
@@ -462,11 +473,18 @@ export class QueueService {
 
   /** You're done with it: off the queue, into History as done. Nothing in the repo is touched. */
   async markFinished(id: string): Promise<void> {
-    const task = await this.getTask(id);
-    if (task.status !== "needs-review" && task.status !== "interrupted") {
-      throw conflict(`This task is ${task.status}; only a task waiting for review or interrupted can be marked finished.`);
-    }
-    await this.removeTask(id);
+    let task: Task | undefined;
+    await this.stores.queue.update((q) => {
+      task = q.tasks.find((t) => t.id === id);
+      if (!task) throw notFound(`Task "${id}" is not in the queue.`);
+      if (task.status !== "needs-review" && task.status !== "interrupted") {
+        throw conflict(`This task is ${task.status}; only a task waiting for review or interrupted can be marked finished.`);
+      }
+      q.tasks = q.tasks.filter((t) => t.id !== id);
+    });
+    this.buffers.delete(id);
+    this.waitingNotes.delete(id);
+    if (!task) return;
     this.log({ taskId: id, repo: task.repo, account: task.currentAccount, event: "marked-finished", detail: "Marked finished." });
     this.deps.broadcaster.taskStatus(id, "done", "Marked finished");
     await this.publish();
@@ -484,6 +502,12 @@ export class QueueService {
     const wasRunning = task.status === "running";
     if (wasRunning) task = await this.stopForDiscard(id);
     await this.removeTask(id);
+    // A run that attached while the task was being removed: stop it (finishRun finds no task and lets it go).
+    const late = this.live.get(id);
+    if (late) {
+      late.cancelRequested = true;
+      await late.handle.cancel().catch(() => {});
+    }
     this.log({
       taskId: id,
       repo: task.repo,
@@ -596,8 +620,8 @@ export class QueueService {
     const repos = await this.deps.repos.list();
     const now = this.now();
 
-    let running = this.live.size;
-    const busyRepos = new Set([...this.live.values()].flatMap((r) => r.repos));
+    let running = this.live.size + [...this.starting.keys()].filter((id) => !this.live.has(id)).length;
+    const busyRepos = this.busyRepoIds();
     const notes = new Map<string, string>();
     let wakeAt: number | null = null;
 
@@ -630,6 +654,13 @@ export class QueueService {
         notes.set(task.id, `Unable to load ${repo.name} at this time (${availability.message ?? "unreachable"}). Retrying automatically.`);
         continue;
       }
+      // A pull, rebase… clicked in the commit graph: the task starts once it's done (RepoActions calls tick).
+      // Nothing awaits between this check and startRun holding the repos, so a click can't slip in.
+      const acting = taskRepos.find((id) => this.repoActionInFlight(id));
+      if (acting) {
+        notes.set(task.id, acting === task.repo ? "Waiting for a git action on this repo to finish." : `Waiting for a git action on ${acting} to finish.`);
+        continue;
+      }
       const isReply = task.pendingReply !== null && task.session !== null;
       const pick = pickAccount({
         candidates: [task.accountOverride, ...repo.accountChain].filter((a): a is string => !!a),
@@ -648,7 +679,7 @@ export class QueueService {
       }
       running += 1;
       for (const id of taskRepos) busyRepos.add(id);
-      await this.startRun(task, repo, pick.account, isReply);
+      await this.startRun(task, repo, pick.account, isReply, taskRepos);
     }
 
     const changed =
@@ -680,7 +711,17 @@ export class QueueService {
 
   // ── running ──────────────────────────────────────────────────────────────
 
-  private async startRun(task: Task, repo: Repo, account: Account, isReply: boolean): Promise<void> {
+  private async startRun(task: Task, repo: Repo, account: Account, isReply: boolean, taskRepos: string[]): Promise<void> {
+    // Held before the first await: a graph action clicked while the task starts is refused.
+    this.starting.set(task.id, taskRepos);
+    try {
+      await this.launch(task, repo, account, isReply);
+    } finally {
+      this.starting.delete(task.id);
+    }
+  }
+
+  private async launch(task: Task, repo: Repo, account: Account, isReply: boolean): Promise<void> {
     const settings = await this.stores.settings.read();
     const buffer: OutputBuffer = isReply ? (this.buffers.get(task.id) ?? newBuffer()) : newBuffer();
     this.buffers.set(task.id, buffer);
@@ -764,6 +805,12 @@ export class QueueService {
 
       const adapter = this.deps.adapters[account.provider];
       await adapter.prepare?.(this.deps.accounts.context(account), settings);
+      // Discarded (or otherwise taken off running) while it was starting: don't spawn a run nobody can see.
+      const still = (await this.stores.queue.read()).tasks.find((t) => t.id === task.id);
+      if (still?.status !== "running") {
+        void this.tick(); // its repos are free again
+        return;
+      }
       const handle = adapter.run(
         {
           ...this.deps.accounts.context(account),
@@ -844,7 +891,10 @@ export class QueueService {
   private async finishRun(run: LiveRun, result: RunResult): Promise<void> {
     this.live.delete(run.taskId);
     const task = (await this.stores.queue.read()).tasks.find((t) => t.id === run.taskId);
-    if (!task) return;
+    if (!task) {
+      void this.tick(); // discarded while it ran: its repos are free again
+      return;
+    }
     const account = run.account;
     const base = { taskId: task.id, repo: task.repo, account: account.id };
     const repo = (await this.deps.repos.list()).find((r) => r.id === task.repo);
