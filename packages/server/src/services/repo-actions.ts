@@ -4,8 +4,8 @@ import { runOn } from "../remote/machine";
 import { badRequest, conflict } from "./common";
 
 /**
- * The graph toolbar: Undo, Redo, Pull and Branch. These are the only places the app changes a
- * repo's branches, and only when you click them (tasks never do). Undo/Redo work like GitKraken's:
+ * The graph toolbar (Undo, Redo, Pull, Branch) and the WIP panel (stage, unstage, commit). These are
+ * the only places the app changes a repo, and only when you click them (tasks never do). Undo/Redo work like GitKraken's:
  *
  * - Actions done here (pull, new branch) go on an undo stack.
  * - Anything done outside (an agent's or your own commit, checkout, pull, merge, reset) is read
@@ -52,6 +52,23 @@ const PULL_ARGS: Record<Exclude<PullMode, "fetch">, string[]> = {
 
 /** A branch or commit name read from the reflog; never something git could take for an option. */
 const safeRef = (ref: string) => !!ref && !ref.startsWith("-") && !/[\s\0]/.test(ref);
+
+/** Paths per git call when staging / unstaging, so a long list never hits Windows' command-line limit. */
+const PATH_BATCH = 100;
+const chunks = <T>(items: T[], size: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+};
+
+export interface CommitInput {
+  summary: string;
+  description?: string;
+  /** Replace the last commit (`--amend`) instead of adding one. */
+  amend?: boolean;
+  /** Skip the repo's pre-commit / commit-msg hooks (`--no-verify`). */
+  noVerify?: boolean;
+}
 
 export class RepoActions {
   private readonly histories = new Map<string, History>();
@@ -213,6 +230,63 @@ export class RepoActions {
     });
   }
 
+  /**
+   * Stage files (`git add -A`, so deletions and untracked files count), or every change when `paths`
+   * is null. Paths are taken literally (no globs), relative to the repo root.
+   */
+  stage(repo: Repo, paths: string[] | null): Promise<void> {
+    return this.exclusive(repo, async () => {
+      if (paths === null) {
+        await this.git(repo, ["add", "-A"]);
+        return;
+      }
+      for (const batch of chunks(checkPaths(paths), PATH_BATCH)) {
+        await this.git(repo, ["--literal-pathspecs", "add", "-A", "--", ...batch]);
+      }
+    });
+  }
+
+  /** Unstage files (back to the working tree, nothing is lost), or everything when `paths` is null. */
+  unstage(repo: Repo, paths: string[] | null): Promise<void> {
+    return this.exclusive(repo, async () => {
+      const born = await this.exists(repo, "HEAD");
+      const list = paths === null ? null : checkPaths(paths);
+      if (!born) {
+        // No commit yet: nothing to reset to, so take the files out of the index instead.
+        if (list === null) await this.git(repo, ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", "."]);
+        else for (const batch of chunks(list, PATH_BATCH)) await this.git(repo, ["--literal-pathspecs", "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ...batch]);
+        return;
+      }
+      if (list === null) await this.git(repo, ["reset", "-q", "HEAD", "--"]);
+      else for (const batch of chunks(list, PATH_BATCH)) await this.git(repo, ["--literal-pathspecs", "reset", "-q", "HEAD", "--", ...batch]);
+    });
+  }
+
+  /**
+   * Commit what's staged, with the repo's committer. The summary is the first line, the description
+   * the body. Undo (from the reflog) takes it back as a soft reset.
+   */
+  commit(repo: Repo, input: CommitInput, identity: GitIdentity | null): Promise<GitHistory> {
+    return this.exclusive(repo, async () => {
+      const summary = input.summary.trim();
+      const description = (input.description ?? "").trim();
+      if (!summary) throw badRequest("Write a commit summary first.");
+      if (/[\r\n]/.test(summary)) throw badRequest("The commit summary is a single line.");
+      if (input.amend && !(await this.exists(repo, "HEAD"))) throw conflict("There's no commit to amend yet.");
+      if (!input.amend) {
+        const staged = await this.git(repo, ["diff", "--cached", "--name-only", "-z", "--"]);
+        if (!staged) throw conflict("Nothing is staged. Stage the files to commit first.");
+      }
+      const args = ["commit", "-m", summary];
+      if (description) args.push("-m", description);
+      if (input.amend) args.push("--amend");
+      if (input.noVerify) args.push("--no-verify");
+      // Hooks (lint-staged and the like) can take a while.
+      await this.git(repo, args, { env: { ...gitIdentityEnv(identity), GIT_EDITOR: "true" }, timeoutMs: 300_000 });
+      return this.view(await this.sync(repo));
+    });
+  }
+
   /** A new branch at HEAD, checked out (like `git checkout -b`). */
   createBranch(repo: Repo, name: string): Promise<GitHistory> {
     return this.exclusive(repo, async () => {
@@ -231,6 +305,18 @@ export class RepoActions {
       return this.view(h);
     });
   }
+}
+
+/** File paths from the WIP panel: relative, non-empty, never something git could take for an option. */
+function checkPaths(paths: string[]): string[] {
+  const list = [...new Set(paths)];
+  if (list.length === 0) throw badRequest("No files given.");
+  for (const p of list) {
+    if (!p || p.includes("\0") || p.startsWith("-") || p.startsWith("/") || /^[a-z]:/i.test(p)) {
+      throw badRequest(`Not a file in this repo: ${p}`);
+    }
+  }
+  return list;
 }
 
 /** The undo step for one HEAD reflog entry (`before` = where HEAD was), or null to stop there. */

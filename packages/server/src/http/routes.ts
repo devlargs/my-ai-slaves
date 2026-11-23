@@ -145,6 +145,31 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const { name } = parseBody(z.object({ name: z.string().min(1).max(250) }), req.body);
     return { history: await actions.createBranch(await repos.get(params(req).id), name) };
   });
+  // The WIP panel: stage / unstage files and commit them, only when you click it.
+  const PathsBody = z.object({ paths: z.array(z.string().min(1).max(4096)).min(1).max(20_000).nullable() });
+  app.post("/api/repos/:id/git/stage", async (req) => {
+    const { paths } = parseBody(PathsBody, req.body);
+    await actions.stage(await repos.get(params(req).id), paths);
+    return { ok: true };
+  });
+  app.post("/api/repos/:id/git/unstage", async (req) => {
+    const { paths } = parseBody(PathsBody, req.body);
+    await actions.unstage(await repos.get(params(req).id), paths);
+    return { ok: true };
+  });
+  app.post("/api/repos/:id/git/commit", async (req) => {
+    const body = parseBody(
+      z.object({
+        summary: z.string().min(1).max(1000),
+        description: z.string().max(100_000).optional(),
+        amend: z.boolean().optional(),
+        noVerify: z.boolean().optional(),
+      }),
+      req.body,
+    );
+    const repo = await repos.get(params(req).id);
+    return { history: await actions.commit(repo, body, identityOf(repo, await stores.settings.read())) };
+  });
   // Uncommitted changes (read-only git status + diff), for the graph view's WIP row.
   app.get("/api/repos/:id/wip", async (req) => git.workingChanges(await repos.get(params(req).id)));
   // One commit's message, files and diff (read-only), for the graph view's details pane.

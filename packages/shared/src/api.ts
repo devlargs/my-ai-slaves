@@ -199,6 +199,25 @@ export interface GitActionRequest {
   mode?: PullMode;
   name?: string;
 }
+/**
+ * The WIP panel's actions, also only run on a click (refused with 409 while a task runs there).
+ * POST /api/repos/:id/git/stage | /git/unstage { paths: string[] | null } → { ok: true }
+ *   (null = every change; paths are relative to the repo root, taken literally)
+ * POST /api/repos/:id/git/commit GitCommitRequest → GitActionResult (commits what's staged)
+ */
+export interface GitPathsRequest {
+  paths: string[] | null;
+}
+export interface GitCommitRequest {
+  /** First line of the message. */
+  summary: string;
+  /** The message body, after a blank line. */
+  description?: string;
+  /** Replace the last commit instead of adding one. */
+  amend?: boolean;
+  /** Skip the repo's commit hooks. */
+  noVerify?: boolean;
+}
 export interface GitActionResult {
   history: GitHistory;
 }

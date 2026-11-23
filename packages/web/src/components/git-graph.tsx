@@ -1,6 +1,7 @@
 import type {
   CommitDetail,
   CommitFile,
+  GitCommitRequest,
   GitHistory,
   GraphCommit,
   LocalBranch,
@@ -26,6 +27,7 @@ import {
   FolderTreeIcon,
   GitBranchIcon,
   GitBranchPlusIcon,
+  GitCommitHorizontalIcon,
   LaptopIcon,
   ListIcon,
   Loader2Icon,
@@ -773,33 +775,56 @@ function FileStatusIcon({ status }: { status: CommitFile["status"] }) {
   return <Icon className={cn("size-3.5 shrink-0", className)} aria-label={word} />;
 }
 
+/** A button on a file row, shown on hover (e.g. "Stage File"). */
+interface FileAction {
+  label: string;
+  onClick: (file: CommitFile) => void;
+  disabled?: boolean;
+}
+
 function FileRow({
   file,
   label,
   depth,
   active,
   onOpen,
+  action,
 }: {
   file: CommitFile;
   label: React.ReactNode;
   depth: number;
   active: boolean;
   onOpen: (path: string) => void;
+  action?: FileAction;
 }) {
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(file.path)}
-      title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+    <div
       className={cn(
-        "flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs text-ink-2 hover:bg-paper-2 hover:text-ink",
+        "group flex w-full items-center rounded-md text-xs text-ink-2 hover:bg-paper-2 hover:text-ink",
         active && "bg-signal-soft text-ink hover:bg-signal-soft",
       )}
-      style={{ paddingLeft: 8 + depth * 14 }}
     >
-      <FileStatusIcon status={file.status} />
-      <span className="flex min-w-0 flex-1 font-mono">{label}</span>
-    </button>
+      <button
+        type="button"
+        onClick={() => onOpen(file.path)}
+        title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 pr-2 text-left"
+        style={{ paddingLeft: 8 + depth * 14 }}
+      >
+        <FileStatusIcon status={file.status} />
+        <span className="flex min-w-0 flex-1 font-mono">{label}</span>
+      </button>
+      {action && (
+        <button
+          type="button"
+          disabled={action.disabled}
+          onClick={() => action.onClick(file)}
+          className="mr-1 hidden shrink-0 cursor-pointer rounded border border-rule bg-surface px-1.5 py-0.5 text-[11px] text-ink-2 group-hover:block hover:text-ink focus-visible:block disabled:cursor-default disabled:opacity-50"
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -832,11 +857,13 @@ function FileList({
   view,
   openFile,
   onOpen,
+  action,
 }: {
   files: CommitFile[];
   view: FileView;
   openFile: string | null;
   onOpen: (path: string) => void;
+  action?: FileAction;
 }) {
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const tree = useMemo(() => buildTree(files, (f) => f.path), [files]);
@@ -852,6 +879,7 @@ function FileList({
             depth={depth}
             active={openFile === node.item.path}
             onOpen={onOpen}
+            action={action}
           />
         );
       }
@@ -887,6 +915,7 @@ function FileList({
                 depth={0}
                 active={openFile === f.path}
                 onOpen={onOpen}
+                action={action}
                 label={
                   // A long folder path gives way first, so the file name stays readable.
                   <>
@@ -938,39 +967,103 @@ function CommitFiles({
 /** Which list of the WIP panel a file was opened from. */
 type WipSection = "unstaged" | "staged";
 
-/** The WIP row's details: the checkout's unstaged and staged files, like GitKraken's. Read-only. */
+/** The summary line's soft limit; the counter goes negative past it, like GitKraken's. */
+const SUMMARY_LIMIT = 72;
+
+/**
+ * The WIP row's details, like GitKraken's: the checkout's unstaged and staged files (stage / unstage
+ * one file or all of them), and a commit box that commits what's staged. Nothing changes until you click.
+ */
 function WipPanel({
+  repoId,
+  headCommit,
   changes,
   error,
+  busy,
   openFile,
   onOpenFile,
+  onStage,
+  onUnstage,
+  onCommit,
 }: {
+  repoId: string;
+  /** The checked-out commit: what "Amend previous commit" replaces. */
+  headCommit: string | null;
   changes: WorkingChanges | null;
   error: string | null;
+  busy: boolean;
   openFile: { section: WipSection; path: string } | null;
   onOpenFile: (section: WipSection, path: string) => void;
+  onStage: (files: CommitFile[] | null) => void;
+  onUnstage: (files: CommitFile[] | null) => void;
+  onCommit: (input: GitCommitRequest) => Promise<boolean>;
 }) {
   const [view, setView] = useState<FileView>("path");
   const [closed, setClosed] = useState<Set<WipSection>>(new Set());
+  const [summary, setSummary] = useState("");
+  const [description, setDescription] = useState("");
+  const [amend, setAmend] = useState(false);
+  const [options, setOptions] = useState(false);
+  const [noVerify, setNoVerify] = useState(false);
   const total = changes ? new Set([...changes.staged, ...changes.unstaged].map((f) => f.path)).size : 0;
+  const staged = changes?.staged.length ?? 0;
+
+  // Amending starts from the last commit's message (only when nothing's written yet).
+  const toggleAmend = (on: boolean) => {
+    setAmend(on);
+    if (!on || !headCommit || summary.trim() || description.trim()) return;
+    api.getCommit(repoId, headCommit).then(
+      (c) => {
+        setSummary((s) => s || c.subject);
+        setDescription((d) => d || c.body);
+      },
+      () => {},
+    );
+  };
+
+  const canCommit = !busy && !!summary.trim() && (staged > 0 || amend);
+  const commit = async () => {
+    if (!canCommit) return;
+    const ok = await onCommit({ summary: summary.trim(), description: description.trim() || undefined, amend, noVerify });
+    if (ok) {
+      setSummary("");
+      setDescription("");
+      setAmend(false);
+    }
+  };
+
   const section = (key: WipSection, label: string, files: CommitFile[]) => {
     const open = !closed.has(key);
+    const all = key === "unstaged" ? "Stage All Changes" : "Unstage All Changes";
     return (
       <div className="flex flex-col">
-        <button
-          type="button"
-          onClick={() =>
-            setClosed((prev) => {
-              const next = new Set(prev);
-              if (!next.delete(key)) next.add(key);
-              return next;
-            })
-          }
-          className="flex w-full cursor-pointer items-center gap-1.5 py-1 text-left text-xs font-medium text-ink-2 hover:text-ink"
-        >
-          {open ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
-          {label} <span className="num text-muted-foreground">({files.length})</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setClosed((prev) => {
+                const next = new Set(prev);
+                if (!next.delete(key)) next.add(key);
+                return next;
+              })
+            }
+            className="flex flex-1 cursor-pointer items-center gap-1.5 py-1 text-left text-xs font-medium text-ink-2 hover:text-ink"
+          >
+            {open ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
+            {label} <span className="num text-muted-foreground">({files.length})</span>
+          </button>
+          {files.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[11px]"
+              disabled={busy}
+              onClick={() => (key === "unstaged" ? onStage(null) : onUnstage(null))}
+            >
+              {all}
+            </Button>
+          )}
+        </div>
         {open &&
           (files.length === 0 ? (
             <p className="px-2 py-1 text-xs text-muted-foreground">None.</p>
@@ -980,42 +1073,118 @@ function WipPanel({
               view={view}
               openFile={openFile?.section === key ? openFile.path : null}
               onOpen={(path) => onOpenFile(key, path)}
+              action={{
+                label: key === "unstaged" ? "Stage File" : "Unstage File",
+                disabled: busy,
+                onClick: (f) => (key === "unstaged" ? onStage([f]) : onUnstage([f])),
+              }}
             />
           ))}
       </div>
     );
   };
+
+  const left = SUMMARY_LIMIT - summary.length;
   return (
-    <aside className="scroll-quiet flex w-80 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-rule bg-surface p-3 text-sm">
-      <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-2">
-        <span className="label-mono text-muted-foreground">Work in progress</span>
-        {changes && (
-          <span>
-            <span className="num font-medium text-ink">{total}</span> {total === 1 ? "file change" : "file changes"}
-            {changes.head && (
-              <>
-                {" "}
-                on{" "}
-                <span className="font-mono text-signal-ink">{changes.head.length === 40 ? changes.head.slice(0, 10) : changes.head}</span>
-              </>
-            )}
-          </span>
+    <aside className="flex w-96 shrink-0 flex-col overflow-hidden rounded-lg border border-rule bg-surface text-sm">
+      <div className="scroll-quiet flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-2">
+          <span className="label-mono text-muted-foreground">Work in progress</span>
+          {changes && (
+            <span>
+              <span className="num font-medium text-ink">{total}</span> {total === 1 ? "file change" : "file changes"}
+              {changes.head && (
+                <>
+                  {" "}
+                  on{" "}
+                  <span className="font-mono text-signal-ink">{changes.head.length === 40 ? changes.head.slice(0, 10) : changes.head}</span>
+                </>
+              )}
+            </span>
+          )}
+          {busy && <Loader2Icon className="size-3.5 animate-spin text-muted-foreground" />}
+        </div>
+        {error && <p className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs whitespace-pre-wrap text-danger-ink">{error}</p>}
+        {!changes ? (
+          !error && (
+            <div className="flex justify-center py-4 text-muted-foreground">
+              <Loader2Icon className="size-4 animate-spin" />
+            </div>
+          )
+        ) : (
+          <>
+            {total > 0 && <ViewToggle view={view} onView={setView} />}
+            {total === 0 && <p className="text-xs text-muted-foreground">No uncommitted changes.</p>}
+            {section("unstaged", "Unstaged files", changes.unstaged)}
+            {section("staged", "Staged files", changes.staged)}
+          </>
         )}
       </div>
-      {error ? (
-        <p className="rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger-ink">{error}</p>
-      ) : !changes ? (
-        <div className="flex justify-center py-4 text-muted-foreground">
-          <Loader2Icon className="size-4 animate-spin" />
+      <div className="flex shrink-0 flex-col gap-2 border-t border-rule p-3">
+        <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-2">
+          <input
+            type="checkbox"
+            className="accent-signal"
+            checked={amend}
+            disabled={!headCommit}
+            onChange={(e) => toggleAmend(e.target.checked)}
+          />
+          Amend previous commit
+        </label>
+        <div className="flex flex-col rounded-md border border-rule bg-paper focus-within:border-signal">
+          <div className="flex items-center gap-2 px-3">
+            <input
+              value={summary}
+              onChange={(e) => setSummary(e.target.value.replace(/[\r\n]+/g, " "))}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void commit();
+              }}
+              placeholder="Commit summary"
+              aria-label="Commit summary"
+              className="min-w-0 flex-1 bg-transparent py-2 text-sm text-ink outline-none placeholder:text-muted-foreground"
+            />
+            <span className={cn("num text-xs", left < 0 ? "text-danger-ink" : "text-muted-foreground")}>{left}</span>
+          </div>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void commit();
+            }}
+            placeholder="Description"
+            aria-label="Commit description"
+            rows={4}
+            className="scroll-quiet min-h-16 resize-y bg-transparent px-3 pb-2 text-xs leading-relaxed text-ink outline-none placeholder:text-muted-foreground"
+          />
         </div>
-      ) : (
-        <>
-          {total > 0 && <ViewToggle view={view} onView={setView} />}
-          {total === 0 && <p className="text-xs text-muted-foreground">No uncommitted changes.</p>}
-          {section("unstaged", "Unstaged files", changes.unstaged)}
-          {section("staged", "Staged files", changes.staged)}
-        </>
-      )}
+        <button
+          type="button"
+          onClick={() => setOptions((o) => !o)}
+          className="flex w-fit cursor-pointer items-center gap-1 text-xs text-muted-foreground hover:text-ink"
+        >
+          {options ? <ChevronDownIcon className="size-3.5" /> : <ChevronRightIcon className="size-3.5" />}
+          Commit options
+        </button>
+        {options && (
+          <label className="flex w-fit cursor-pointer items-center gap-2 pl-4 text-xs text-ink-2">
+            <input
+              type="checkbox"
+              className="accent-signal"
+              checked={noVerify}
+              onChange={(e) => setNoVerify(e.target.checked)}
+            />
+            Skip Git hooks (--no-verify)
+          </label>
+        )}
+        <Button variant="signal" disabled={!canCommit} onClick={() => void commit()} title="⌘/Ctrl + Enter">
+          {busy ? <Loader2Icon className="animate-spin" /> : <GitCommitHorizontalIcon />}
+          {staged === 0 && !amend
+            ? "Stage Changes to Commit"
+            : amend
+              ? "Amend Previous Commit"
+              : `Commit Changes to ${staged} ${staged === 1 ? "File" : "Files"}`}
+        </Button>
+      </div>
     </aside>
   );
 }
@@ -1109,6 +1278,7 @@ function CommitFileView({
   patch,
   path,
   label,
+  action,
   onBack,
   onOpen,
 }: {
@@ -1117,6 +1287,8 @@ function CommitFileView({
   path: string;
   /** Shown before the path, e.g. "Unstaged". */
   label?: string;
+  /** "Stage File" / "Unstage File" for a WIP file. */
+  action?: FileAction;
   onBack: () => void;
   onOpen: (path: string) => void;
 }) {
@@ -1145,6 +1317,11 @@ function CommitFileView({
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-2" title={path}>
           {path}
         </span>
+        {action && files[index] && (
+          <Button size="sm" variant="outline" disabled={action.disabled} onClick={() => action.onClick(files[index]!)}>
+            {action.label}
+          </Button>
+        )}
         <span className="num text-[11px] text-muted-foreground">
           {index + 1} / {files.length}
         </span>
@@ -1223,6 +1400,10 @@ export function GitGraphDialog({
   const [wip, setWip] = useState<WorkingChanges | null>(null);
   const [wipError, setWipError] = useState<string | null>(null);
   const [wipFile, setWipFile] = useState<{ section: WipSection; path: string } | null>(null);
+  /** Bumped to read the WIP files again after staging / unstaging. */
+  const [wipTick, setWipTick] = useState(0);
+  const [wipBusy, setWipBusy] = useState(false);
+  const [wipActionError, setWipActionError] = useState<string | null>(null);
   const details = useRef(new Map<string, CommitDetail>());
   const scroller = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -1231,13 +1412,16 @@ export function GitGraphDialog({
   const [pullMode, setPullMode] = useState<PullMode>(storedPullMode);
   const [naming, setNaming] = useState(false);
 
-  const load = async (n: number) => {
+  const load = async (n: number): Promise<RepoGraph | null> => {
     setLoading(true);
     setError(null);
     try {
-      setGraph(await api.getRepoGraph(repoId, n));
+      const g = await api.getRepoGraph(repoId, n);
+      setGraph(g);
+      return g;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return null;
     } finally {
       setLoading(false);
     }
@@ -1265,18 +1449,28 @@ export function GitGraphDialog({
     if (selected !== WIP) {
       setWip(null);
       setWipFile(null);
+      setWipActionError(null);
       return;
     }
     setWipError(null);
     let live = true;
     api.getWorkingChanges(repoId).then(
-      (w) => live && setWip(w),
+      (w) => {
+        if (!live) return;
+        setWip(w);
+        // An open diff follows its file when it's staged / unstaged, and closes when the file is gone.
+        setWipFile((f) => {
+          if (!f || w[f.section].some((x) => x.path === f.path)) return f;
+          const other: WipSection = f.section === "staged" ? "unstaged" : "staged";
+          return w[other].some((x) => x.path === f.path) ? { section: other, path: f.path } : null;
+        });
+      },
       (e: unknown) => live && setWipError(e instanceof Error ? e.message : String(e)),
     );
     return () => {
       live = false;
     };
-  }, [selected, repoId, graph]);
+  }, [selected, repoId, graph, wipTick]);
 
   // The selected commit's files and diff (kept per commit: a commit never changes).
   useEffect(() => {
@@ -1353,6 +1547,44 @@ export function GitGraphDialog({
       setActing(null);
       await load(limit);
     }
+  };
+
+  /** Stage / unstage files (null = all), then read the WIP files again. */
+  const stageFiles = async (stage: boolean, files: CommitFile[] | null) => {
+    setWipBusy(true);
+    setWipActionError(null);
+    try {
+      // Unstaging a rename takes both sides of it out of the index.
+      const paths = files && [...new Set(files.flatMap((f) => (stage || !f.oldPath ? [f.path] : [f.path, f.oldPath])))];
+      if (stage) await api.gitStage(repoId, paths);
+      else await api.gitUnstage(repoId, paths);
+    } catch (e) {
+      setWipActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWipBusy(false);
+      setWipTick((t) => t + 1);
+    }
+  };
+
+  const commitStaged = async (input: GitCommitRequest): Promise<boolean> => {
+    setWipBusy(true);
+    setWipActionError(null);
+    try {
+      await api.gitCommit(repoId, input);
+    } catch (e) {
+      setWipActionError(e instanceof Error ? e.message : String(e));
+      setWipBusy(false);
+      return false;
+    }
+    setWipBusy(false);
+    setWipFile(null);
+    const g = await load(limit);
+    // Nothing left to commit: show the new commit, as GitKraken does.
+    if (g && !g.wip) {
+      const head = g.commits.find((c) => c.refs.some((ref) => ref === "HEAD" || ref.startsWith("HEAD -> ")));
+      setSelected(head?.hash ?? null);
+    }
+    return true;
   };
 
   const jump = (hash: string) => {
@@ -1435,6 +1667,11 @@ export function GitGraphDialog({
                 patch={wipFile.section === "staged" ? wip.stagedPatch : wip.unstagedPatch}
                 path={wipFile.path}
                 label={wipFile.section === "staged" ? "Staged" : "Unstaged"}
+                action={{
+                  label: wipFile.section === "staged" ? "Unstage File" : "Stage File",
+                  disabled: wipBusy,
+                  onClick: (f) => void stageFiles(wipFile.section === "unstaged", [f]),
+                }}
                 onBack={() => jump(WIP)}
                 onOpen={(path) => setWipFile({ section: wipFile.section, path })}
               />
@@ -1555,10 +1792,16 @@ export function GitGraphDialog({
             )}
             {current && selected === WIP && (
               <WipPanel
+                repoId={repoId}
+                headCommit={current.parents[0] ?? null}
                 changes={wip}
-                error={wipError}
+                error={wipActionError ?? wipError}
+                busy={wipBusy}
                 openFile={wipFile}
                 onOpenFile={(section, path) => setWipFile({ section, path })}
+                onStage={(files) => void stageFiles(true, files)}
+                onUnstage={(files) => void stageFiles(false, files)}
+                onCommit={commitStaged}
               />
             )}
             {current && selected !== WIP && (

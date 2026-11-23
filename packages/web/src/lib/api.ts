@@ -1,6 +1,7 @@
 import type {
   RepoGraph,
   GitActionResult,
+  GitCommitRequest,
   PullMode,
   CommitDetail,
   WorkingChanges,
@@ -102,6 +103,9 @@ export const api = {
   gitRedo: (id: string) => request<GitActionResult>("POST", `/repos/${enc(id)}/git/redo`),
   gitPull: (id: string, mode: PullMode) => request<GitActionResult>("POST", `/repos/${enc(id)}/git/pull`, { mode }),
   gitBranch: (id: string, name: string) => request<GitActionResult>("POST", `/repos/${enc(id)}/git/branch`, { name }),
+  gitStage: (id: string, paths: string[] | null) => request<Ok>("POST", `/repos/${enc(id)}/git/stage`, { paths }),
+  gitUnstage: (id: string, paths: string[] | null) => request<Ok>("POST", `/repos/${enc(id)}/git/unstage`, { paths }),
+  gitCommit: (id: string, body: GitCommitRequest) => request<GitActionResult>("POST", `/repos/${enc(id)}/git/commit`, body),
   getWorkingChanges: (id: string) => request<WorkingChanges>("GET", `/repos/${enc(id)}/wip`),
   getCommit: (id: string, hash: string) => request<CommitDetail>("GET", `/repos/${enc(id)}/commits/${enc(hash)}`),
   getRunningScriptRepos: () => request<{ repoIds: string[] }>("GET", "/scripts/running"),

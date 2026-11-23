@@ -96,8 +96,10 @@ desktop app also uses 3005 and refuses to start if it's taken).
   decide how changes are handled. The only git the app runs on a task is read-only (where the checkout
   is, and the diff since the task started), plus the one-time legacy worktree migration. Claude runs with
   `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and Cursor never gets `-w`.
-  The one exception is the Repos commit graph's toolbar (`src/services/repo-actions.ts`): Undo, Redo,
-  Pull and Branch change the repo **only when you click them**, and are refused while a task runs there.
+  The one exception is the Repos commit graph (`src/services/repo-actions.ts`): the toolbar's Undo, Redo,
+  Pull and Branch, and the WIP panel's Stage / Unstage file (or all) and Commit (summary + description,
+  amend, skip hooks; uses the repo's committer) change the repo **only when you click them**, and are
+  refused while a task runs there.
   Undo/Redo read HEAD's reflog (their own commands are tagged `my-ai-slaves` via GIT_REFLOG_ACTION).
 - **Cross-repo tasks:** a task can tick several repos (`extraRepos`, same machine as the main `repo`).
   The CLI runs in the main repo and gets the others via `--add-dir` + the "Other repositories:" list.
