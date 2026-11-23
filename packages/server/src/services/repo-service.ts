@@ -316,10 +316,15 @@ export class RepoService {
     });
   }
 
-  async remove(id: string): Promise<void> {
+  /** Throws (404 / 409) unless the repo exists and no queued task uses it. Check before stopping its scripts. */
+  async assertRemovable(id: string): Promise<void> {
     await this.get(id);
     const tasks = (await this.stores.queue.read()).tasks.filter((t) => t.repo === id || t.extraRepos.some((x) => x.repo === id));
     if (tasks.length) throw conflict(`"${id}" still has ${tasks.length} task(s) in the queue. Finish or discard them first.`);
+  }
+
+  async remove(id: string): Promise<void> {
+    await this.assertRemovable(id);
     await this.stores.repos.update((file) => {
       file.repos = file.repos.filter((r) => r.id !== id);
     });

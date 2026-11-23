@@ -240,6 +240,8 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return repo;
   });
   app.delete("/api/repos/:id", async (req) => {
+    // Check first: a repo that can't be removed (queued tasks) keeps its running scripts.
+    await repos.assertRemovable(params(req).id);
     await scripts.stopAll(params(req).id);
     await repos.remove(params(req).id);
     return { ok: true };

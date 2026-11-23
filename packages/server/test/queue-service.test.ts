@@ -713,6 +713,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     await waitFor(() => queue.list().then((ts) => ts.find((t) => t.id === waiting.id && t.waitingNote?.includes("other task on this repo"))));
     // A repo in a task's list can't be removed while the task is queued.
     await expect(repos.remove(other.id)).rejects.toThrow("still has 2 task");
+    await expect(repos.assertRemovable(other.id)).rejects.toThrow("still has 2 task");
     await queue.discard(slow.id);
     await waitFor(taskWith(queue, waiting.id, "needs-review"));
   });
