@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { access, readdir, realpath, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
+import { basename, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import {
   type FsBrowseResponse,
   formatLocalIso,
@@ -154,8 +154,11 @@ export class RepoService {
   }
 
   private async resolveLocal(inputPath: string): Promise<{ top: string; name: string }> {
-    const trimmed = inputPath.trim().replace(/^~(?=$|\/)/, homedir());
-    if (!isAbsolute(trimmed)) throw badRequest("Paste an absolute path (e.g. /Users/you/code/my-repo).");
+    const trimmed = expandHome(inputPath.trim());
+    if (!isAbsolute(trimmed)) {
+      const example = process.platform === "win32" ? "C:\\Users\\you\\code\\my-repo" : "/Users/you/code/my-repo";
+      throw badRequest(`Paste an absolute path (e.g. ${example}).`);
+    }
     let path: string;
     try {
       path = await realpath(trimmed);
@@ -337,7 +340,11 @@ export class RepoService {
   }
 
   private async browseLocal(inputPath?: string): Promise<FsBrowseResponse> {
-    const path = resolve(inputPath?.trim() || homedir());
+    const wanted = expandHome(inputPath?.trim() ?? "");
+    if (process.platform === "win32" && wanted === THIS_PC) {
+      return { path: THIS_PC, parent: null, isGitRepo: false, dirs: await windowsDrives() };
+    }
+    const path = resolve(wanted || homedir());
     let entries: Dirent[];
     try {
       entries = await readdir(path, { withFileTypes: true });
@@ -350,7 +357,7 @@ export class RepoService {
       .sort((a, b) => a.localeCompare(b));
     return {
       path,
-      parent: path === "/" ? null : dirname(path),
+      parent: localParent(path),
       isGitRepo: await exists(join(path, ".git")),
       dirs: await Promise.all(
         dirs.map(async (name) => ({ name, path: join(path, name), isGitRepo: await exists(join(path, name, ".git")) })),
@@ -405,4 +412,27 @@ export function normalizeLabels(labels: string[]): string[] {
     out.push(label);
   }
   return out;
+}
+
+/** The folder browser's top level on Windows, above the drive roots. */
+export const THIS_PC = "This PC";
+
+/** `~`, `~/…` and `~\…` → the home folder. */
+export function expandHome(path: string): string {
+  return path.replace(/^~(?=$|[\\/])/, homedir());
+}
+
+/** The folder above `path`; at a root: none on macOS/Linux, the drive list on Windows. */
+export function localParent(path: string, platform: NodeJS.Platform = process.platform): string | null {
+  const api = platform === "win32" ? win32 : posix;
+  const parent = api.dirname(path);
+  if (parent !== path) return parent;
+  return platform === "win32" ? THIS_PC : null;
+}
+
+/** The drives that exist (C:\, D:\, …; A: and B: skipped). */
+async function windowsDrives(): Promise<FsBrowseResponse["dirs"]> {
+  const letters = "CDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+  const found = await Promise.all(letters.map(async (l) => ((await exists(`${l}:\\`)) ? l : null)));
+  return found.filter((l): l is string => l !== null).map((l) => ({ name: `${l}:`, path: `${l}:\\`, isGitRepo: false }));
 }

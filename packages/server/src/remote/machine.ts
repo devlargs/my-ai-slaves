@@ -105,6 +105,7 @@ export function runOn(
         env: localEnv(host, options.extraEnv),
         timeout: options.timeoutMs ?? 120_000,
         maxBuffer: 64 * 1024 * 1024,
+        windowsHide: true,
       },
       (error, stdout, stderr) => {
         const code = error && typeof error.code === "number" ? error.code : null;
@@ -132,7 +133,7 @@ export function sendFile(host: string, localPath: string, remoteDir: string, nam
     args: ["-c", 'mkdir -p "$1" && chmod 700 "$1" && cat > "$1/$2" && chmod 600 "$1/$2"', "sh", remoteDir, name],
   });
   return new Promise((resolve, reject) => {
-    const child = spawn(inv.command, inv.args, { stdio: ["pipe", "ignore", "pipe"] });
+    const child = spawn(inv.command, inv.args, { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
     let stderr = "";
     child.stderr.on("data", (d) => (stderr += d));
     child.on("error", reject);

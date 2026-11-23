@@ -112,14 +112,19 @@ export class AttachmentStore {
   }
 }
 
-function safeName(name: string): string {
+/** Names Windows refuses as files, whatever the extension (`nul.txt` too). */
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i;
+
+export function safeName(name: string): string {
   const base = name.split(/[\\/]/).at(-1) ?? "";
   const cleaned = base
     .replace(/[^\w.\- ]+/g, "_")
     .replace(/^\.+/, "")
-    .trim()
-    .slice(-120);
-  return cleaned && cleaned !== META ? cleaned : "file";
+    .slice(-120)
+    .replace(/[. ]+$/, "") // Windows drops trailing dots and spaces
+    .trim();
+  if (!cleaned || cleaned === META) return "file";
+  return WINDOWS_RESERVED.test(cleaned) ? `_${cleaned}` : cleaned;
 }
 
 function sniffImage(b: Buffer): string | null {

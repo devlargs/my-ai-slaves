@@ -28,8 +28,15 @@ export async function listRemoteHosts(
   return [...hosts.values()];
 }
 
+/** Where VS Code / Cursor keep their user data: Application Support on macOS, %APPDATA% on Windows. */
+export function editorDataDir(platform: NodeJS.Platform = process.platform, env = process.env): string {
+  if (platform === "darwin") return join(homedir(), "Library", "Application Support");
+  if (platform === "win32") return env.APPDATA || join(homedir(), "AppData", "Roaming");
+  return env.XDG_CONFIG_HOME || join(homedir(), ".config");
+}
+
 function defaultStorageDirs(): string[] {
-  const base = join(homedir(), "Library", "Application Support");
+  const base = editorDataDir();
   return ["Code", "Code - Insiders", "Cursor"].map((app) => join(base, app, "User", "globalStorage"));
 }
 
@@ -74,9 +81,9 @@ async function parseSshConfig(file: string, depth = 0): Promise<{ host: string; 
 
 /** `Include` paths: relative to ~/.ssh, `~` expanded, simple `*` globs in the file name. */
 async function expandInclude(pattern: string): Promise<string[]> {
-  let path = pattern.replace(/^~(?=\/)/, homedir());
+  let path = pattern.replace(/^~(?=[\\/])/, homedir());
   if (!isAbsolute(path)) path = join(homedir(), ".ssh", path);
-  const name = path.split("/").pop() ?? "";
+  const name = path.split(/[\\/]/).pop() ?? "";
   if (!name.includes("*")) return [path];
   const dir = dirname(path);
   const re = new RegExp(`^${name.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`);
@@ -131,7 +138,7 @@ function sqliteValue(db: string, key: string): Promise<string> {
     execFile(
       "sqlite3",
       ["-readonly", db, `select value from ItemTable where key = '${key.replace(/'/g, "''")}'`],
-      { timeout: 5000, maxBuffer: 8 * 1024 * 1024 },
+      { timeout: 5000, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
       (error, stdout) => resolve(error ? "" : String(stdout)),
     );
   });

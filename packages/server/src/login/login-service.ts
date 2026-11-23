@@ -5,7 +5,7 @@ import { type IPty, spawn } from "node-pty";
 import type { AdapterRegistry } from "../providers";
 import { resolveSpawn } from "../providers/spawn";
 import type { AccountService } from "../services/account-service";
-import { conflict, notFound } from "../services/common";
+import { badRequest, conflict, notFound } from "../services/common";
 import type { DataStores } from "../storage/data-stores";
 
 // biome-ignore-start lint/suspicious/noControlCharactersInRegex: matching terminal escapes on purpose
@@ -75,8 +75,14 @@ export class LoginService {
     const settings = await this.stores.settings.read();
     const spec = this.adapters[account.provider].loginCommand(this.accounts.context(account), settings);
     // Remote accounts log in on the server through `ssh -tt`, so the CLI still sees a terminal.
-    const launch = resolveSpawn(spec, { tty: true });
-    const pty = spawn(launch.command, launch.args, {
+    let launch: ReturnType<typeof resolveSpawn>;
+    try {
+      launch = resolveSpawn(spec, { tty: true });
+    } catch (error) {
+      throw badRequest((error as Error).message);
+    }
+    // node-pty takes a Windows cmd.exe route's pre-quoted args as one command-line string.
+    const pty = spawn(launch.command, launch.windowsVerbatimArguments ? launch.args.join(" ") : launch.args, {
       name: "xterm-256color",
       cols: 500, // wide, so long sign-in links are never wrapped
       rows: 50,

@@ -21,7 +21,13 @@ export function run(
     execFile(
       command,
       args,
-      { cwd, env: options.env ?? process.env, timeout: options.timeoutMs ?? 120000, maxBuffer: 64 * 1024 * 1024 },
+      {
+        cwd,
+        env: options.env ?? process.env,
+        timeout: options.timeoutMs ?? 120000,
+        maxBuffer: 64 * 1024 * 1024,
+        windowsHide: true,
+      },
       (error, stdout, stderr) => {
         if (error) {
           const code = typeof error.code === "number" ? error.code : null;

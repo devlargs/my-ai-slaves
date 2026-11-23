@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import type { RawLine, StreamEvent, TokenUsage } from "@my-ai-slaves/shared";
 import { localInvocation, REMOTE_PID_MARKER, runOn } from "../remote/machine";
 import type { RunHandle, RunResult, SpawnSpec } from "./types";
+import { killWindowsTree, resolveWindowsLaunch } from "./windows-command";
 
 /**
  * Credentials that would silently override an account's own login
@@ -37,17 +38,32 @@ export interface StreamParser {
 
 const STDERR_TAIL_BYTES = 4096;
 
+export interface Launch {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string | undefined;
+  /** Windows cmd.exe route: `args` are already one quoted command line. */
+  windowsVerbatimArguments?: boolean;
+}
+
 /**
- * What to actually start for a spec: the command itself on this Mac (with a scrubbed copy of our
- * env plus the spec's extras), or ssh carrying the quoted command for a remote host (the remote
- * side only gets the spec's extras: the server's own env and logins apply there).
+ * What to actually start for a spec: the command itself on this machine (with a scrubbed copy of our
+ * env plus the spec's extras; on Windows an npm `.cmd` shim is resolved to what it runs), or ssh
+ * carrying the quoted command for a remote host (the remote side only gets the spec's extras: the
+ * server's own env and logins apply there). Throws if a Windows batch file can't carry the args.
  */
 export function resolveSpawn(
   spec: SpawnSpec,
-  opts: { announcePid?: boolean; tty?: boolean } = {},
-): { command: string; args: string[]; env: Record<string, string>; cwd: string | undefined } {
+  opts: { announcePid?: boolean; tty?: boolean; platform?: NodeJS.Platform } = {},
+): Launch {
   if (!spec.host) {
-    return { command: spec.command, args: spec.args, env: childEnv(spec.extraEnv), cwd: spec.cwd ?? undefined };
+    const env = childEnv(spec.extraEnv);
+    const cwd = spec.cwd ?? undefined;
+    if ((opts.platform ?? process.platform) === "win32") {
+      return { ...resolveWindowsLaunch(spec.command, spec.args, env), env, cwd };
+    }
+    return { command: spec.command, args: spec.args, env, cwd };
   }
   const inv = localInvocation(
     spec.host,
@@ -67,11 +83,18 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
   /** On a remote host: the CLI's pid there, announced by the wrapper before it execs. */
   let remotePid: string | null = null;
 
-  const launch = resolveSpawn(spec, { announcePid: remote });
+  let launch: Launch;
+  try {
+    launch = resolveSpawn(spec, { announcePid: remote });
+  } catch (error) {
+    return failedHandle((error as Error).message);
+  }
   const child = spawn(launch.command, launch.args, {
     cwd: launch.cwd,
     env: launch.env,
     shell: false,
+    windowsHide: true,
+    windowsVerbatimArguments: launch.windowsVerbatimArguments,
     stdio: [stdinText === null ? "ignore" : "pipe", "pipe", "pipe"],
   });
 
@@ -140,6 +163,10 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
       const signal = (sig: "INT" | "TERM" | "KILL") => {
         if (remote && remotePid && spec.host) {
           void runOn(spec.host, "kill", [`-${sig}`, remotePid], null, { timeoutMs: 15_000 }).catch(() => {});
+        } else if (process.platform === "win32" && child.pid) {
+          // No signals there (child.kill ends only the top process, at once): ask the whole tree to
+          // close first, then force it.
+          killWindowsTree(child.pid, sig !== "INT");
         } else {
           child.kill(`SIG${sig}`);
         }
@@ -147,7 +174,10 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
       signal("INT");
       const term = setTimeout(() => signal("TERM"), 5000);
       const kill = setTimeout(() => signal("KILL"), 10000);
-      const local = setTimeout(() => child.kill("SIGKILL"), 15000);
+      const local = setTimeout(() => {
+        if (process.platform === "win32" && child.pid && !remote) killWindowsTree(child.pid, true);
+        else child.kill("SIGKILL");
+      }, 15000);
       await exited;
       clearTimeout(term);
       clearTimeout(kill);
@@ -156,17 +186,39 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
   };
 }
 
+/** A run that never started (nothing to stream, cancel is a no-op). */
+function failedHandle(message: string): RunHandle {
+  return {
+    onStream: () => () => {},
+    onRaw: () => () => {},
+    done: Promise.resolve({ outcome: "failed", exitCode: null, message, stderrTail: "" }),
+    async cancel() {},
+  };
+}
+
 /** Run a short command to completion (status checks, logout). Never throws. */
 export function runToCompletion(
   spec: SpawnSpec,
   timeoutMs = 20000,
 ): Promise<{ code: number | null; stdout: string; stderr: string; error: string | null }> {
-  const launch = resolveSpawn(spec);
+  let launch: Launch;
+  try {
+    launch = resolveSpawn(spec);
+  } catch (error) {
+    return Promise.resolve({ code: null, stdout: "", stderr: "", error: (error as Error).message });
+  }
   return new Promise((resolve) => {
     execFile(
       launch.command,
       launch.args,
-      { cwd: launch.cwd, env: launch.env, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+      {
+        cwd: launch.cwd,
+        env: launch.env,
+        timeout: timeoutMs,
+        maxBuffer: 4 * 1024 * 1024,
+        windowsHide: true,
+        windowsVerbatimArguments: launch.windowsVerbatimArguments,
+      },
       (error, stdout, stderr) => {
         const code = error ? (typeof error.code === "number" ? error.code : null) : 0;
         resolve({ code, stdout: String(stdout), stderr: String(stderr), error: error ? error.message : null });
