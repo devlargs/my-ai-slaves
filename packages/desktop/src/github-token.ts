@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 
-// The repo is private, so reading its releases needs a GitHub token. Rather than asking for one,
-// reuse the GitHub CLI's login on this computer (`gh auth token`), or GH_TOKEN / GITHUB_TOKEN when
-// set. The token is only ever sent to api.github.com (see updater/release.ts) and never stored.
+// The repo is public, so its releases are read without a token. Only when GitHub rate-limits the
+// unauthenticated request does the updater ask for one: GH_TOKEN / GITHUB_TOKEN when set, else the
+// GitHub CLI's login on this computer (`gh auth token`). The token is only ever sent to
+// api.github.com (see updater/release.ts) and never stored.
 
 export function createTokenSource(env: () => NodeJS.ProcessEnv): () => Promise<string | null> {
   let cached: string | null = null;

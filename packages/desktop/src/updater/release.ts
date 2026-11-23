@@ -12,7 +12,7 @@ export const REPO = "devlargs/my-ai-slaves";
  * draft to published), which left "Check for updates" saying "up to date".
  */
 export const RECENT_RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=20`;
-/** Asset downloads go through the API (works for a private repo with a token, and a public one without). */
+/** Asset downloads go through the API, which serves a public repo's assets without a token. */
 const ASSET_API_PREFIX = `https://api.github.com/repos/${REPO}/releases/assets/`;
 
 export interface ReleaseAsset {
@@ -78,6 +78,14 @@ export function isAllowedUpdateUrl(rawUrl: string): boolean {
 }
 
 /** Only the GitHub API ever gets the token, never the storage host a download redirects to. */
+/**
+ * GitHub's answer when unauthenticated requests are rate-limited (60 an hour per IP). Only then
+ * does the updater retry with the user's token: the repo is public, so it is otherwise not sent.
+ */
+export function isRateLimited(status: number | undefined): boolean {
+  return status === 403 || status === 429;
+}
+
 export function sendsToken(rawUrl: string): boolean {
   try {
     const parsed = new URL(rawUrl);

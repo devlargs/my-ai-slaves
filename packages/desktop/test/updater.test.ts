@@ -4,6 +4,7 @@ import { installerFileName, staleUpdateEntries, UPDATE_DIR_PREFIX } from "../src
 import {
   isAllowedUpdateUrl,
   isIntelBuildOnAppleSilicon,
+  isRateLimited,
   machineArch,
   parseSha256Digest,
   pickUpdateAsset,
@@ -170,6 +171,12 @@ describe("download rules", () => {
     expect(sendsToken("https://objects.githubusercontent.com/x")).toBe(false);
     expect(sendsToken("https://release-assets.githubusercontent.com/x")).toBe(false);
     expect(sendsToken("http://api.github.com/x")).toBe(false);
+  });
+
+  it("treats only 403 and 429 as rate-limited (the only time the token is sent)", () => {
+    expect(isRateLimited(403)).toBe(true);
+    expect(isRateLimited(429)).toBe(true);
+    for (const status of [200, 401, 404, 500, undefined]) expect(isRateLimited(status)).toBe(false);
   });
 
   it("follows redirects and reads sizes", () => {

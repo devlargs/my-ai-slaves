@@ -50,7 +50,26 @@ The installer isn't code-signed, so SmartScreen may block it. Click **More info 
 ## Updates
 
 The app checks GitHub Releases and can update itself (each download is sha256-verified). Use
-**Check for updates** in the sidebar.
+**Check for updates** in the sidebar. Releases are read without a GitHub token; only when GitHub
+rate-limits the request does the app retry with your `GH_TOKEN` / `GITHUB_TOKEN` or GitHub CLI login.
+
+## Security model
+
+My AI Slaves runs coding agents on your machine with your permissions. Know what that means:
+
+- **Agents work in your real checkout.** Tasks run directly in the repo as it's checked out (no copy,
+  no sandbox, no worktree), with the permission mode set on the Settings page (Claude Code defaults to
+  `auto`, Cursor to `auto-review`; `bypassPermissions` / `force` let them run any command without
+  asking). An agent can edit or delete files, run commands, and commit or push wherever your
+  credentials allow, as your repo prompts tell it to. Review what changed before marking a task finished.
+- **The local API has no login.** The server listens on `127.0.0.1:3005` only and refuses requests
+  from other websites (Host, Origin and Sec-Fetch-Site checks), but any program running on your
+  computer can call it, and through it queue tasks or run a repo's scripts. Don't run it on a
+  machine you share with people or software you don't trust.
+- **Remote repos** run git and the CLIs on the server over `ssh`, using your `~/.ssh/config` and that
+  server's own CLI logins.
+- **Your data stays local.** Settings, queue, prompts and the CLI logins live in the data folder you
+  picked (`.data/`). It can contain your API tokens: don't share or commit it.
 
 ## Development
 
@@ -64,5 +83,9 @@ npm run desktop        # build and open the Electron app
 npm run desktop:dist   # package an installer into packages/desktop/release
 ```
 
-See [CLAUDE.md](CLAUDE.md) for the architecture and the rules the app follows, and
-[docs/DESIGN.md](docs/DESIGN.md) for the design proposal.
+See [CLAUDE.md](CLAUDE.md) for the architecture and the rules the app follows.
+[docs/history/DESIGN.md](docs/history/DESIGN.md) is the original design proposal, kept as history.
+
+## License
+
+[MIT](LICENSE)

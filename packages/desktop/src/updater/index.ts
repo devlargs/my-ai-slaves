@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import { app } from "electron";
 import type { DesktopUpdateState } from "@my-ai-slaves/shared";
-import { fetchGitHubJson, downloadVerified } from "./download";
+import { fetchGitHubJson, downloadVerified, HttpStatusError } from "./download";
 import { createUpdateDir, installUpdate, installerPathIn, removeStaleUpdates } from "./install";
 
 export { isQuittingForUpdate } from "./install";
 import {
   isIntelBuildOnAppleSilicon,
+  isRateLimited,
   LATEST_RELEASE_PAGE_URL,
   machineArch,
   type PendingUpdate,
@@ -37,7 +38,10 @@ const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 const STALE_CLEANUP_DELAY_MS = 15_000;
 
 export interface UpdaterDeps {
-  /** A GitHub token, or null. The repo is private, so checks need one (`gh auth token`). */
+  /**
+   * A GitHub token, or null (`gh auth token`). The repo is public, so it is only asked for, and
+   * sent, when GitHub rate-limits the unauthenticated request.
+   */
   getToken(): Promise<string | null>;
   /** Called on every state change. */
   onChange(state: DesktopUpdateState): void;
@@ -80,26 +84,20 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   const checkFlight = singleFlight(async (): Promise<DesktopUpdateState> => {
     set({ status: "checking", error: null });
     try {
-      let token = await deps.getToken();
-      let { status, body } = await fetchGitHubJson(RECENT_RELEASES_URL, token);
-      // A stale or revoked token: the repo is public, so ask again without it.
-      if (status === 401 && token) {
-        token = null;
-        ({ status, body } = await fetchGitHubJson(RECENT_RELEASES_URL, null));
+      let { status, body } = await fetchGitHubJson(RECENT_RELEASES_URL, null);
+      // Rate-limited without a token (shared IP, many checks): retry with the user's own one.
+      if (isRateLimited(status)) {
+        const token = await deps.getToken();
+        if (token) ({ status, body } = await fetchGitHubJson(RECENT_RELEASES_URL, token));
       }
       const checkedAt = new Date().toISOString();
-      if (status === 404) {
-        // A private repo this machine has no token for.
+      if (isRateLimited(status)) {
         pending = null;
-        set(
-          token
-            ? { status: "latest", newVersion: null, releaseUrl: null, checkedAt }
-            : {
-                status: "error",
-                error: "Couldn't read the releases. The repo is private: log in the GitHub CLI (gh auth login) on this computer.",
-                checkedAt,
-              },
-        );
+        set({
+          status: "error",
+          error: "GitHub is rate-limiting update checks from this network. Try again later, or log in the GitHub CLI (gh auth login).",
+          checkedAt,
+        });
         return state;
       }
       if (status !== 200) throw new Error(`GitHub answered HTTP ${status}`);
@@ -134,14 +132,22 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     currentUpdateDir = dir;
     try {
       const filePath = installerPathIn(dir);
-      const token = await deps.getToken();
       let last = -1;
-      await downloadVerified(update.url, update.sha256, filePath, token, (percent) => {
+      const onProgress = (percent: number) => {
         if (percent !== last) {
           last = percent;
           set({ percent });
         }
-      });
+      };
+      try {
+        await downloadVerified(update.url, update.sha256, filePath, null, onProgress);
+      } catch (err) {
+        // Only a rate-limited download is retried, and only with a token to retry with.
+        const token = err instanceof HttpStatusError && isRateLimited(err.status) ? await deps.getToken() : null;
+        if (!token) throw err;
+        last = -1;
+        await downloadVerified(update.url, update.sha256, filePath, token, onProgress);
+      }
       set({ status: "installing", percent: 100 });
       await installUpdate(filePath, update.sha256);
     } catch (err) {

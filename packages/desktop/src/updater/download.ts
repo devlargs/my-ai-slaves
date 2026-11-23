@@ -10,6 +10,13 @@ const MAX_REDIRECTS = 5;
 const IDLE_TIMEOUT_MS = 30_000;
 const USER_AGENT = "My-AI-Slaves-Updater";
 
+/** A download that GitHub answered with something other than 200 (after redirects). */
+export class HttpStatusError extends Error {
+  constructor(readonly status: number | undefined) {
+    super(`Update download failed: HTTP ${status}`);
+  }
+}
+
 /**
  * Downloads `url` (a release asset's API URL) to `destPath`, following GitHub's
  * redirects (each hop must pass the host allowlist; only the API host gets the
@@ -59,7 +66,7 @@ export function downloadVerified(
         }
         if (res.statusCode !== 200) {
           res.resume();
-          fail(new Error(`Update download failed: HTTP ${res.statusCode}`));
+          fail(new HttpStatusError(res.statusCode));
           return;
         }
 

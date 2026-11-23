@@ -59,7 +59,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       "--settings",
       JSON.stringify({ autoContinueAtUsageLimit: false, attribution: false }),
     ];
-    // Tasks work on a branch in the repo itself: take away Claude's own worktree tools and `git worktree`.
+    // Tasks run in the repo as it's checked out (no worktrees): take away Claude's own worktree tools and `git worktree`.
     args.push("--disallowedTools", "EnterWorktree", "ExitWorktree", "Bash(git worktree *)");
     if (s.model) args.push("--model", s.model);
     if (resumeTarget) args.push("--resume", resumeTarget);

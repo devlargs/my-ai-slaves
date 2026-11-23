@@ -38,7 +38,7 @@ packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with t
   src/storage     JsonStore (atomic writes, per-file queue, corrupt-file backup), ActivityLog (5 MB rotation),
                   AttachmentStore. The only code that touches .data/.
   src/providers   ProviderAdapter per CLI: claude-code/, cursor-agent/ (args, stream parser, limit detection)
-  src/services    PromptAssembler, AccountRouter (pure) + AccountService, RepoService, BranchService,
+  src/services    PromptAssembler, AccountRouter (pure) + AccountService, RepoService,
                   QueueService (scheduler, runs, fallback, replies, review actions), RepoActions (graph
                   toolbar: undo/redo/pull/branch), ScriptService
                   (runs a repo's package.json scripts from the Repos page, locally or over ssh; stopped on quit)
@@ -52,7 +52,8 @@ packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder
                   <userData>/desktop.json), forks the bundled server on Electron's Node
                   (ELECTRON_RUN_AS_NODE, SLAVES_DATA_DIR/SLAVES_PORT/SLAVES_WEB_DIR), loads the same UI,
                   pulls the login shell's PATH on macOS (shell-env.ts), and src/updater/ (in-app updates
-                  from GitHub Releases, sha256-verified; token from GH_TOKEN/GITHUB_TOKEN or `gh auth token`;
+                  from GitHub Releases, sha256-verified; no token unless GitHub rate-limits, then GH_TOKEN/GITHUB_TOKEN
+                  or `gh auth token`;
                   downloads are picked for the Mac's real chip, and an Intel build running under Rosetta
                   offers to replace itself with the Apple Silicon one).
                   scripts/build.mjs stages app/ (esbuild + node-pty prebuilds); electron-builder.config.cjs
@@ -60,7 +61,7 @@ packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder
 .github/workflows release.yml: every push to main (except *.md / .github/** only) runs checks.yml
                   (audit, typecheck, test), builds arm64 + x64 DMGs and a Windows NSIS .exe, commits
                   `chore: bump version to vX.Y.Z` and publishes a GitHub Release.
-docs/DESIGN.md    architecture proposal (schemas, API, adapter interface)
+docs/history/DESIGN.md  original architecture proposal (history: its worktree/branch parts are gone)
 design.md         locked visual design system (Hallmark, Coral theme): read before UI changes
 ```
 

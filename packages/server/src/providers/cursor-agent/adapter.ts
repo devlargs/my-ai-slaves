@@ -55,7 +55,7 @@ export class CursorAgentAdapter implements ProviderAdapter {
 
   /**
    * Turn off "Made with Cursor" on commits and PRs (documented cli-config.json keys), for local
-   * accounts. Remote accounts use the server's own config; Keep/Push still strip such lines.
+   * accounts. Remote accounts use the server's own config, which the app leaves as it is.
    */
   async prepare(ctx: AccountContext): Promise<void> {
     if (!ctx.configDir) return;

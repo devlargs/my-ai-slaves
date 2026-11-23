@@ -1,8 +1,10 @@
 # My AI Slaves — Design proposal (step 2)
 
-> **Superseded on worktrees (2026-11-18):** tasks no longer use git worktrees. Each run checks out
-> `ai/<task-id>` from the repo's base branch directly in the repo, commits its work there when it ends,
-> and checks the previous branch out again (`BranchService`). Read the worktree parts below as history.
+> **History, not current.** This is the original design proposal, kept for reference. Much of it no
+> longer holds: tasks never use git worktrees, and the later plan of checking out an `ai/<task-id>`
+> branch per run and committing there (`BranchService`) is gone too. The app now runs each task
+> directly in the repo as it's checked out and never creates, switches, commits or deletes branches.
+> [CLAUDE.md](../../CLAUDE.md) is the source of truth for how the app works.
 
 Status: **proposal, awaiting OK**. Nothing here is built yet.
 
