@@ -1,7 +1,5 @@
 import {
   type Account,
-  type ActivityEntry,
-  type Attachment,
   type CreateTaskRequest,
   type DiffResponse,
   formatLocalIso,
@@ -27,6 +25,7 @@ import type { PromptAssembler } from "./prompt-assembler";
 import type { PromptLibrary } from "./prompt-library";
 import type { RepoService } from "./repo-service";
 import type { RepoGit } from "./repo-git";
+import { planRun, type ResolvedRepoPrompts, type RunInputs, runFiles } from "./run-plan";
 
 const LIVE_BUFFER_LIMIT = 5000;
 // Raw lines can be huge (a tool result carrying a whole file), and every task in the queue keeps
@@ -693,79 +692,35 @@ export class QueueService {
         });
       }
 
-      // Bound saved prompts: their current text, read now (like the base prompts).
+      // The prompts' current text, read now (like the base prompts). A reply's session already has the
+      // repo prompts: they're still read for their attached files, which stay readable.
       const boundIds = isReply ? (task.replies.at(-1)?.promptIds ?? []) : task.promptIds;
-      const bound = await this.deps.prompts.resolve(boundIds);
-      if (bound.missing.length) {
-        this.log({
-          taskId: task.id,
-          repo: repo.id,
-          account: account.id,
-          event: "warning",
-          detail: `Saved prompt(s) no longer in the library, not sent: ${bound.missing.join(", ")}`,
-        });
-      }
-      const boundBodies = bound.prompts.map((p) => p.body);
-      // The repo's prompts ticked for this task, current text (a reply's session already has them, so
-      // they're only read for their attached files, which stay readable).
       const repoPromptList = await this.deps.repos.prompts(repo.id);
-      const repoBound = await repoPromptList.resolve(task.repoPromptIds ?? (await repoPromptList.defaultIds()));
-      if (repoBound.missing.length && !isReply) {
-        this.log({
-          taskId: task.id,
-          repo: repo.id,
-          account: account.id,
-          event: "warning",
-          detail: `Repo prompt(s) no longer in ${repo.id}'s list, not sent: ${repoBound.missing.join(", ")}`,
-        });
-      }
-      // The other repos' ticked prompts (how to handle changes there), after the main repo's.
-      const repoTicked = repoBound.prompts.map((p) => ({ repo: repo.id, id: p.id, name: p.name, body: p.body, attachments: p.attachments }));
+      const repoPrompts: ResolvedRepoPrompts[] = [
+        { repo: repo.id, ...(await repoPromptList.resolve(task.repoPromptIds ?? (await repoPromptList.defaultIds()))) },
+      ];
       for (const x of extras) {
-        const got = await (await this.deps.repos.prompts(x.repo.id)).resolve(x.promptIds);
-        if (got.missing.length && !isReply) {
-          this.log({
-            taskId: task.id,
-            repo: repo.id,
-            account: account.id,
-            event: "warning",
-            detail: `Repo prompt(s) no longer in ${x.repo.id}'s list, not sent: ${got.missing.join(", ")}`,
-          });
-        }
-        repoTicked.push(...got.prompts.map((p) => ({ repo: x.repo.id, id: p.id, name: p.name, body: p.body, attachments: p.attachments })));
+        repoPrompts.push({ repo: x.repo.id, ...(await (await this.deps.repos.prompts(x.repo.id)).resolve(x.promptIds)) });
       }
-      const repoSent = isReply ? [] : repoTicked;
-
+      const inputs: RunInputs = {
+        task,
+        isReply,
+        extras,
+        globalBase: isReply ? "" : await this.deps.assembler.globalBase(),
+        bound: await this.deps.prompts.resolve(boundIds),
+        repoPrompts,
+        earlierBound: isReply
+          ? (await this.deps.prompts.resolve([task.promptIds, ...task.replies.map((r) => r.promptIds)].flat())).prompts
+          : [],
+      };
       // Attached files: on this Mac they're read in place; for a remote repo they're copied to the server.
-      // A prompt's files go with it, before the message's own (the same order as the text).
-      const runFiles = uniqueFiles([
-        ...repoSent.flatMap((p) => p.attachments),
-        ...bound.prompts.flatMap((p) => p.attachments),
-        ...(isReply ? (task.replies.at(-1)?.attachments ?? []) : task.attachments),
-      ]);
-      // The session may refer back to earlier files, so every file of the task (and of the prompts it
-      // was sent) stays readable.
-      const earlierBound = isReply
-        ? await this.deps.prompts.resolve([task.promptIds, ...task.replies.map((r) => r.promptIds)].flat())
-        : { prompts: [] };
-      const allFiles = uniqueFiles([
-        ...runFiles,
-        ...task.attachments,
-        ...task.replies.flatMap((r) => r.attachments),
-        ...repoTicked.flatMap((p) => p.attachments),
-        ...earlierBound.prompts.flatMap((p) => p.attachments),
-      ]);
-      const located = await this.deps.attachments.locate(repo.host ?? null, allFiles);
-      const runPaths = runFiles.map((a) => located.get(a.id)?.path as string);
-      const addDirs = [...extras.map((x) => x.repo.path), ...allFiles.map((a) => located.get(a.id)?.dir as string)];
-      const assembled = isReply
-        ? this.deps.assembler.forReply(task.pendingReply ?? "", runPaths, boundBodies)
-        : await this.deps.assembler.forTask(task.message, {
-            repoPrompts: repoSent.map((p) => p.body),
-            boundPrompts: boundBodies,
-            otherRepos: extras.map((x) => ({ name: x.repo.name, path: x.repo.path })),
-            attachmentPaths: runPaths,
-          });
+      const located = await this.deps.attachments.locate(repo.host ?? null, runFiles(inputs).allFiles);
+      const plan = planRun(inputs, located);
+      for (const detail of plan.warnings) {
+        this.log({ taskId: task.id, repo: repo.id, account: account.id, event: "warning", detail });
+      }
+      const { assembled, repoSent } = plan;
+      const { bound } = inputs;
 
       let resume: { sessionId: string; fromConfigDir: string | null } | null = null;
       if (isReply && task.session) {
@@ -803,7 +758,7 @@ export class QueueService {
           prompt: assembled.prompt,
           cwd: repo.path,
           resume,
-          addDirs: [...new Set(addDirs)],
+          addDirs: plan.addDirs,
           gitIdentity: identityOf(repo, settings),
         },
         settings,
@@ -820,13 +775,7 @@ export class QueueService {
       this.live.set(task.id, run);
 
       // Your side of the conversation, shown in the live output right where this run starts.
-      const sent: StreamEvent = {
-        kind: "user",
-        text: isReply ? (task.pendingReply ?? "") : task.message,
-        reply: isReply,
-        attachments: runFiles.map(({ id, name, mime, size }) => ({ id, name, mime, size })),
-        prompts: [...repoSent.map((p) => p.name), ...bound.prompts.map((p) => p.name)],
-      };
+      const sent = plan.sent;
       pushCapped(buffer.events, sent);
       this.deps.broadcaster.taskEvent(task.id, sent);
       handle.onStream((event) => this.onEvent(run, event, buffer));
@@ -996,7 +945,3 @@ export class QueueService {
 }
 
 /** Files in first-seen order, each once (two prompts may share a screenshot). */
-function uniqueFiles(files: Attachment[]): Attachment[] {
-  const seen = new Set<string>();
-  return files.filter((a) => !seen.has(a.id) && Boolean(seen.add(a.id)));
-}

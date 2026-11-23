@@ -1,5 +1,6 @@
 /**
- * REST contract. All routes are under /api, JSON in and out.
+ * REST contract. All routes are under /api, JSON in and out. Request bodies are zod schemas in
+ * schemas/requests.ts (validated by the server, their types used by the web app).
  * Errors: non-2xx status with body `ApiError`.
  */
 import type { Account, AccountStatus } from "./schemas/accounts";
@@ -38,16 +39,6 @@ export type AccountView = Account & {
 };
 /** GET /api/accounts → AccountView[] (in Settings-page order) */
 /** POST /api/accounts */
-export interface CreateAccountRequest {
-  label: string;
-  provider: ProviderId;
-  /** SSH host for an account that uses that server's own login; omit for this Mac. */
-  host?: string | null;
-}
-/** PUT /api/accounts/order */
-export interface ReorderRequest {
-  ids: string[];
-}
 /**
  * In-app login, same as running the CLI's own login: the CLI opens your browser, you sign in on the
  * provider's site, and its local callback finishes the login by itself.
@@ -78,9 +69,6 @@ export interface LoginState {
   /** The CLI's output as plain text (for a collapsible "details" view). */
   output: string;
 }
-export interface LoginCodeRequest {
-  code: string;
-}
 /** POST /api/accounts/:id/check → AccountView (re-runs the CLI's auth status) */
 /** POST /api/accounts/:id/clear-limit → AccountView */
 /** DELETE /api/accounts/:id → { ok: true } (logs the CLI out for that config dir, deletes the dir, removes it from repo chains) */
@@ -95,11 +83,6 @@ export interface RepoAvailability {
 }
 export type RepoView = Repo & { availability: RepoAvailability };
 /** GET /api/repos → RepoView[] · POST /api/repos → RepoView · POST /api/repos/:id/check → RepoView */
-export interface RegisterRepoRequest {
-  path: string;
-  /** SSH host from ~/.ssh/config; omit for a repo on this Mac. */
-  host?: string | null;
-}
 
 /** GET /api/remote/hosts: what VS Code's Remote Explorer shows (SSH hosts + remembered folders). */
 export interface RemoteHost {
@@ -110,23 +93,8 @@ export interface RemoteHost {
   recentFolders: string[];
 }
 /** PATCH /api/repos/:id → Repo */
-export interface UpdateRepoRequest {
-  /** Display name in the app only (the folder isn't renamed). Empty string = back to the folder name. */
-  name?: string;
-  defaultBranch?: string;
-  accountChain?: string[];
-  /** One of Settings' committers; null = the default committer. */
-  committerId?: string | null;
-  /** Replaces the repo's labels (trimmed, deduped case-insensitively, blanks dropped). */
-  labels?: string[];
-}
 /** GET /api/label-colors → LabelColors · PUT /api/label-colors (body: SetLabelColorRequest) → LabelColors */
 export type LabelColors = Record<string, LabelColor>;
-export interface SetLabelColorRequest {
-  label: string;
-  /** "gray" (or null) = back to the plain pill. */
-  color: LabelColor | null;
-}
 /** DELETE /api/repos/:id → { ok: true } (refused with 409 while it has tasks in the queue) */
 
 /** GET /api/repos/:id/graph?limit=<n> → RepoGraph (read-only `git log --all`, newest first) */
@@ -204,8 +172,8 @@ export interface WorkingChanges {
 /**
  * The graph toolbar's actions. Only run when you click them (tasks never touch branches).
  * POST /api/repos/:id/git/undo | /git/redo → GitActionResult
- * POST /api/repos/:id/git/pull { mode: PullMode } → GitActionResult
- * POST /api/repos/:id/git/branch { name } → GitActionResult (creates it at HEAD and checks it out)
+ * POST /api/repos/:id/git/pull GitPullRequest → GitActionResult
+ * POST /api/repos/:id/git/branch GitBranchRequest → GitActionResult (creates it at HEAD and checks it out)
  * All refused with 409 while a task is running in the repo.
  */
 export interface GitHistory {
@@ -213,87 +181,16 @@ export interface GitHistory {
   undo: string | null;
   redo: string | null;
 }
-/** fetch = `git fetch --all --prune`; pull-ff = merge, fast-forward if possible; pull-ff-only; pull-rebase. */
-export type PullMode = "fetch" | "pull-ff" | "pull-ff-only" | "pull-rebase";
-export interface GitActionRequest {
-  mode?: PullMode;
-  name?: string;
-}
 /**
  * The WIP panel's actions, also only run on a click (refused with 409 while a task runs there).
- * POST /api/repos/:id/git/stage | /git/unstage { paths: string[] | null } → { ok: true }
+ * POST /api/repos/:id/git/stage | /git/unstage GitPathsRequest → { ok: true }
  *   (null = every change; paths are relative to the repo root, taken literally)
  * POST /api/repos/:id/git/commit GitCommitRequest → GitActionResult (commits what's staged)
  */
-export interface GitPathsRequest {
-  paths: string[] | null;
-}
-export interface GitCommitRequest {
-  /** First line of the message. */
-  summary: string;
-  /** The message body, after a blank line. */
-  description?: string;
-  /** Replace the last commit instead of adding one. */
-  amend?: boolean;
-  /** Skip the repo's commit hooks. */
-  noVerify?: boolean;
-}
 export interface GitActionResult {
   history: GitHistory;
 }
 
-/**
- * The graph's right-click menu on a branch or commit (like GitKraken's). Only run on a click, refused
- * with 409 while a task runs in the repo. A merge, rebase, cherry-pick or revert that stops on a
- * conflict is aborted, so the repo is left as it was.
- * POST /api/repos/:id/git/ref GitRefAction → GitActionResult
- *
- * `branch` = a local branch name ("main"); `ref` = a local branch or a remote-tracking ref
- * ("origin/main"); `commit` = a full commit hash.
- */
-export type GitRefAction =
-  /** Fast-forward a local branch to its upstream (the checked-out one is pulled, fast-forward if possible). */
-  | { op: "pull"; branch: string }
-  /** Push a local branch to its upstream, or to the given remote (and set it as upstream) when it has none. */
-  | { op: "push"; branch: string; remote?: string }
-  /** "origin/main": tracks it when it exists, else pushes the branch there and tracks it. */
-  | { op: "set-upstream"; branch: string; upstream: string }
-  /** Merge `ref` into the checked-out branch. */
-  | { op: "merge"; ref: string }
-  /** Rebase the checked-out branch onto `ref`. */
-  | { op: "rebase"; ref: string }
-  /** Rebase the checked-out branch onto `ref`, with the commits reordered / squashed / reworded / dropped. */
-  | { op: "interactive-rebase"; ref: string; steps: RebaseStep[] }
-  /** Check out a local branch; a remote one gets a local tracking branch (or checks out the existing one). */
-  | { op: "checkout"; ref: string }
-  /** A new branch at `commit`, checked out. */
-  | { op: "create-branch"; name: string; commit: string }
-  | { op: "cherry-pick"; commit: string }
-  /** Move the checked-out branch to `commit` (hard = local changes are thrown away). */
-  | { op: "reset"; commit: string; mode: "soft" | "mixed" | "hard" }
-  | { op: "revert"; commit: string }
-  | { op: "rename-branch"; branch: string; name: string }
-  /** Delete a local branch (even when unmerged), or a remote one (`git push <remote> --delete`). */
-  | { op: "delete-branch"; ref: string; remote?: boolean }
-  /** A lightweight tag, or an annotated one when `message` is given. */
-  | { op: "tag"; name: string; commit: string; message?: string }
-  /**
-   * The sidebar's Stashes menu. `stash` = the stash commit's hash (checked against `index`, so a list
-   * that changed meanwhile is refused). Apply keeps the stash, Pop drops it once it applied cleanly.
-   */
-  | { op: "stash-apply"; index: number; stash: string; pop?: boolean }
-  | { op: "stash-drop"; index: number; stash: string }
-  /** New message for a stash (it moves to the top of the list, stash@{0}). */
-  | { op: "stash-rename"; index: number; stash: string; message: string };
-
-export type RebaseAction = "pick" | "reword" | "squash" | "fixup" | "drop";
-/** One line of an interactive rebase, in the order the commits are replayed (oldest first). */
-export interface RebaseStep {
-  hash: string;
-  action: RebaseAction;
-  /** New message for "reword". */
-  message?: string;
-}
 /** GET /api/repos/:id/rebase-plan?onto=<ref> → RebasePlan (read-only: the commits it would replay, oldest first) */
 export interface RebasePlan {
   onto: string;
@@ -359,31 +256,10 @@ export interface FsBrowseResponse {
 /** GET /api/repos/:id/knowledge → KnowledgeFile */
 export type Knowledge = KnowledgeFile;
 /** GET /api/repos/:id/prompts → RepoPrompt[] (send order) · POST (CreateRepoPromptRequest) → RepoPrompt */
-export interface CreateRepoPromptRequest {
-  name: string;
-  body: string;
-  /** Pre-ticked when you queue a task on this repo. */
-  default?: boolean;
-  /** Uploaded attachments (POST /api/attachments) sent with the prompt. */
-  attachmentIds?: string[];
-}
 /** PATCH /api/repos/:id/prompts/:promptId → RepoPrompt · DELETE → { ok } · PUT /api/repos/:id/prompts/order (ReorderRequest) */
-export type UpdateRepoPromptRequest = Partial<CreateRepoPromptRequest>;
 
 // ── Prompt preview ──────────────────────────────────────────────────────────
 /** POST /api/prompt/preview */
-export interface PromptPreviewRequest {
-  repo: string;
-  message: string;
-  attachmentIds?: string[];
-  promptIds?: string[];
-  /** The repo's prompts to send; omitted = the repo's default ones. */
-  repoPromptIds?: string[];
-  /** Other repos opened in the same run. */
-  extraRepos?: string[];
-  /** Per other repo, its prompts to send; a repo left out = its default ones. */
-  extraRepoPromptIds?: Record<string, string[]>;
-}
 export interface PromptPreviewResponse {
   prompt: string;
   layers: { name: "global" | "repo" | "prompts" | "message" | "repos" | "attachments"; included: boolean }[];
@@ -396,34 +272,10 @@ export type TaskView = Task & {
 };
 /** GET /api/tasks → TaskView[] (queue order) */
 /** POST /api/tasks → TaskView */
-export interface CreateTaskRequest {
-  repo: string;
-  message: string;
-  accountOverride?: string | null;
-  /** Ids from POST /api/attachments. */
-  attachmentIds?: string[];
-  /** Saved prompts to bind (ids from GET /api/prompts). */
-  promptIds?: string[];
-  /** The repo's prompts to send (ids from GET /api/repos/:id/prompts); omitted = the repo's default ones. */
-  repoPromptIds?: string[];
-  /** Other repos (same machine as `repo`) opened in the same run, as they are: no branch handling. */
-  extraRepos?: string[];
-  /** Per other repo, its prompts to send (they say how to handle changes there); left out = its defaults. */
-  extraRepoPromptIds?: Record<string, string[]>;
-  /** Save it as a draft: it sits in the queue and never runs until it's loaded back and queued. */
-  draft?: boolean;
-  /** The draft this replaces (it was loaded into the composer): removed in the same step. */
-  replacesDraft?: string;
-}
 /** PUT /api/tasks/order (body ReorderRequest, only pending tasks move) */
 /** POST /api/tasks/:id/cancel — pending: removed from queue; running: stopped → interrupted */
 /** POST /api/tasks/:id/retry — interrupted/needs-review: back to pending, runs again in a new session (the repo is left as it is) */
 /** POST /api/tasks/:id/reply (body ReplyRequest) — needs-review/interrupted (with a session): resumes the CLI session */
-export interface ReplyRequest {
-  message: string;
-  attachmentIds?: string[];
-  promptIds?: string[];
-}
 
 // ── Prompt library ──────────────────────────────────────────────────────────
 /**
@@ -434,18 +286,6 @@ export interface ReplyRequest {
  * DELETE /api/prompts/:id → { ok: true } (tasks that bound it skip it, with a warning in their history)
  */
 export type SavedPromptView = SavedPromptT;
-export interface CreatePromptRequest {
-  name: string;
-  body: string;
-  /** Uploaded attachments (POST /api/attachments) sent with the prompt. */
-  attachmentIds?: string[];
-}
-export interface UpdatePromptRequest {
-  name?: string;
-  body?: string;
-  /** Replaces the prompt's attachments. */
-  attachmentIds?: string[];
-}
 
 // ── Attachments ─────────────────────────────────────────────────────────────
 /**

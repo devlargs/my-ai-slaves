@@ -1,4 +1,29 @@
-import { LabelColor, ProviderId, SettingsFile, formatLocalIso } from "@my-ai-slaves/shared";
+import {
+  ATTACHMENT_LIMITS,
+  CreateAccountRequest,
+  CreatePromptRequest,
+  CreateRepoPromptRequest,
+  CreateTaskRequest,
+  DiscardRequest,
+  formatLocalIso,
+  GitBranchRequest,
+  GitCommitRequest,
+  GitPathsRequest,
+  GitPullRequest,
+  GitRefAction,
+  LoginCodeRequest,
+  PREVIEWABLE_IMAGE_TYPES,
+  PromptPreviewRequest,
+  RegisterRepoRequest,
+  ReorderRequest,
+  ReplyRequest,
+  ScriptRequest,
+  SetLabelColorRequest,
+  SettingsFile,
+  UpdatePromptRequest,
+  UpdateRepoPromptRequest,
+  UpdateRepoRequest,
+} from "@my-ai-slaves/shared";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AdapterRegistry } from "../providers";
@@ -16,7 +41,6 @@ import type { RepoService } from "../services/repo-service";
 import type { ScriptService } from "../services/script-service";
 import { AttachmentError, type AttachmentStore } from "../storage/attachment-store";
 import type { DataStores } from "../storage/data-stores";
-import { ATTACHMENT_LIMITS, PREVIEWABLE_IMAGE_TYPES } from "@my-ai-slaves/shared";
 import type { LoginService } from "../login/login-service";
 
 export interface RouteDeps {
@@ -43,7 +67,6 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
   return result.data;
 }
 
-const Ids = z.object({ ids: z.array(z.string()) });
 const params = (req: { params: unknown }) => req.params as { id: string };
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
@@ -81,14 +104,11 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // ── accounts ──────────────────────────────────────────────────────────────
   app.get("/api/accounts", () => accounts.list());
   app.post("/api/accounts", async (req) => {
-    const body = parseBody(
-      z.object({ label: z.string(), provider: ProviderId, host: z.string().min(1).nullable().optional() }),
-      req.body,
-    );
+    const body = parseBody(CreateAccountRequest, req.body);
     return accounts.create(body.label.trim(), body.provider, body.host ?? null);
   });
   app.put("/api/accounts/order", async (req) => {
-    await accounts.reorder(parseBody(Ids, req.body).ids);
+    await accounts.reorder(parseBody(ReorderRequest, req.body).ids);
     return { ok: true };
   });
   app.delete("/api/accounts/:id", async (req) => {
@@ -99,7 +119,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.post("/api/accounts/:id/login", (req) => logins.start(params(req).id));
   app.get("/api/logins/:id", (req) => logins.get(params(req).id));
   app.post("/api/logins/:id/code", (req) =>
-    logins.submitCode(params(req).id, parseBody(z.object({ code: z.string() }), req.body).code),
+    logins.submitCode(params(req).id, parseBody(LoginCodeRequest, req.body).code),
   );
   app.post("/api/logins/:id/cancel", (req) => logins.cancel(params(req).id));
   app.post("/api/accounts/:id/check", async (req) => {
@@ -116,7 +136,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // ── repos & knowledge ─────────────────────────────────────────────────────
   app.get("/api/repos", () => repos.listViews());
   app.post("/api/repos", async (req) => {
-    const body = parseBody(z.object({ path: z.string(), host: z.string().min(1).nullable().optional() }), req.body);
+    const body = parseBody(RegisterRepoRequest, req.body);
     return repos.register(body.path, body.host ?? null);
   });
   app.post("/api/repos/:id/check", async (req) => {
@@ -137,77 +157,33 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.post("/api/repos/:id/git/undo", async (req) => ({ history: await actions.undo(await repos.get(params(req).id)) }));
   app.post("/api/repos/:id/git/redo", async (req) => ({ history: await actions.redo(await repos.get(params(req).id)) }));
   app.post("/api/repos/:id/git/pull", async (req) => {
-    const { mode } = parseBody(z.object({ mode: z.enum(["fetch", "pull-ff", "pull-ff-only", "pull-rebase"]) }), req.body);
+    const { mode } = parseBody(GitPullRequest, req.body);
     const repo = await repos.get(params(req).id);
     return { history: await actions.pull(repo, mode, identityOf(repo, await stores.settings.read())) };
   });
   app.post("/api/repos/:id/git/branch", async (req) => {
-    const { name } = parseBody(z.object({ name: z.string().min(1).max(250) }), req.body);
+    const { name } = parseBody(GitBranchRequest, req.body);
     return { history: await actions.createBranch(await repos.get(params(req).id), name) };
   });
   // The WIP panel: stage / unstage files and commit them, only when you click it.
-  const PathsBody = z.object({ paths: z.array(z.string().min(1).max(4096)).min(1).max(20_000).nullable() });
   app.post("/api/repos/:id/git/stage", async (req) => {
-    const { paths } = parseBody(PathsBody, req.body);
+    const { paths } = parseBody(GitPathsRequest, req.body);
     await actions.stage(await repos.get(params(req).id), paths);
     return { ok: true };
   });
   app.post("/api/repos/:id/git/unstage", async (req) => {
-    const { paths } = parseBody(PathsBody, req.body);
+    const { paths } = parseBody(GitPathsRequest, req.body);
     await actions.unstage(await repos.get(params(req).id), paths);
     return { ok: true };
   });
   app.post("/api/repos/:id/git/commit", async (req) => {
-    const body = parseBody(
-      z.object({
-        summary: z.string().min(1).max(1000),
-        description: z.string().max(100_000).optional(),
-        amend: z.boolean().optional(),
-        noVerify: z.boolean().optional(),
-      }),
-      req.body,
-    );
+    const body = parseBody(GitCommitRequest, req.body);
     const repo = await repos.get(params(req).id);
     return { history: await actions.commit(repo, body, identityOf(repo, await stores.settings.read())) };
   });
   // The graph's right-click menu on a branch / commit (GitKraken's), again only on a click.
-  const Ref = z.string().min(1).max(250);
-  const Sha = z.string().regex(/^[0-9a-f]{40,64}$/i);
-  const StashIndex = z.number().int().min(0).max(100_000);
-  const RefActionBody = z.discriminatedUnion("op", [
-    z.object({ op: z.literal("pull"), branch: Ref }),
-    z.object({ op: z.literal("push"), branch: Ref, remote: Ref.optional() }),
-    z.object({ op: z.literal("set-upstream"), branch: Ref, upstream: Ref }),
-    z.object({ op: z.literal("merge"), ref: Ref }),
-    z.object({ op: z.literal("rebase"), ref: Ref }),
-    z.object({
-      op: z.literal("interactive-rebase"),
-      ref: Ref,
-      steps: z
-        .array(
-          z.object({
-            hash: Sha,
-            action: z.enum(["pick", "reword", "squash", "fixup", "drop"]),
-            message: z.string().max(100_000).optional(),
-          }),
-        )
-        .min(1)
-        .max(2000),
-    }),
-    z.object({ op: z.literal("checkout"), ref: Ref }),
-    z.object({ op: z.literal("create-branch"), name: Ref, commit: Sha }),
-    z.object({ op: z.literal("cherry-pick"), commit: Sha }),
-    z.object({ op: z.literal("reset"), commit: Sha, mode: z.enum(["soft", "mixed", "hard"]) }),
-    z.object({ op: z.literal("revert"), commit: Sha }),
-    z.object({ op: z.literal("rename-branch"), branch: Ref, name: Ref }),
-    z.object({ op: z.literal("delete-branch"), ref: Ref, remote: z.boolean().optional() }),
-    z.object({ op: z.literal("tag"), name: Ref, commit: Sha, message: z.string().max(100_000).optional() }),
-    z.object({ op: z.literal("stash-apply"), index: StashIndex, stash: Sha, pop: z.boolean().optional() }),
-    z.object({ op: z.literal("stash-drop"), index: StashIndex, stash: Sha }),
-    z.object({ op: z.literal("stash-rename"), index: StashIndex, stash: Sha, message: z.string().min(1).max(100_000) }),
-  ]);
   app.post("/api/repos/:id/git/ref", async (req) => {
-    const body = parseBody(RefActionBody, req.body);
+    const body = parseBody(GitRefAction, req.body);
     const repo = await repos.get(params(req).id);
     return { history: await actions.refAction(repo, body, identityOf(repo, await stores.settings.read())) };
   });
@@ -236,33 +212,23 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   // ── repo scripts (package.json) ───────────────────────────────────────────
   app.get("/api/scripts/running", () => ({ repoIds: scripts.runningRepoIds() }));
   app.get("/api/repos/:id/scripts", async (req) => scripts.list(await repos.get(params(req).id)));
-  const ScriptBody = z.object({ script: z.string().min(1) });
   app.post("/api/repos/:id/scripts/run", async (req) => {
-    const { script } = parseBody(ScriptBody, req.body);
+    const { script } = parseBody(ScriptRequest, req.body);
     return scripts.run(await repos.get(params(req).id), script);
   });
   app.post("/api/repos/:id/scripts/stop", async (req) => {
-    const { script } = parseBody(ScriptBody, req.body);
+    const { script } = parseBody(ScriptRequest, req.body);
     await scripts.stop(params(req).id, script);
     return { ok: true };
   });
 
   app.get("/api/label-colors", () => repos.labelColors());
   app.put("/api/label-colors", async (req) => {
-    const body = parseBody(z.object({ label: z.string().max(40), color: LabelColor.nullable() }), req.body);
+    const body = parseBody(SetLabelColorRequest, req.body);
     return repos.setLabelColor(body.label, body.color);
   });
   app.patch("/api/repos/:id", async (req) => {
-    const body = parseBody(
-      z.object({
-        name: z.string().optional(),
-        defaultBranch: z.string().min(1).optional(),
-        accountChain: z.array(z.string()).optional(),
-        committerId: z.string().max(100).nullable().optional(),
-        labels: z.array(z.string().max(40)).max(20).optional(),
-      }),
-      req.body,
-    );
+    const body = parseBody(UpdateRepoRequest, req.body);
     const repo = await repos.update(params(req).id, body);
     void queue.tick();
     return repo;
@@ -273,29 +239,23 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
   // The repo's prompts: you tick which ones each task sends (default ones come pre-ticked).
-  const RepoPromptBody = z.object({
-    name: z.string().max(120),
-    body: z.string().max(200_000),
-    default: z.boolean().optional(),
-    attachmentIds: z.array(z.string()).optional(),
-  });
   /** A prompt's `attachmentIds` → the stored files (undefined = leave them as they are). */
   const promptFiles = async (ids: string[] | undefined) => (ids === undefined ? undefined : attachments.resolve(ids));
   const promptParams = (req: { params: unknown }) => req.params as { id: string; promptId: string };
   app.get("/api/repos/:id/prompts", async (req) => (await repos.prompts(params(req).id)).list());
   app.post("/api/repos/:id/prompts", async (req, reply) => {
-    const body = parseBody(RepoPromptBody, req.body);
+    const body = parseBody(CreateRepoPromptRequest, req.body);
     const list = await repos.prompts(params(req).id);
     const files = (await promptFiles(body.attachmentIds)) ?? [];
     return reply.code(201).send(await list.create(body.name, body.body, { default: body.default ?? false, attachments: files }));
   });
   app.put("/api/repos/:id/prompts/order", async (req) => {
-    await (await repos.prompts(params(req).id)).reorder(parseBody(Ids, req.body).ids);
+    await (await repos.prompts(params(req).id)).reorder(parseBody(ReorderRequest, req.body).ids);
     return { ok: true };
   });
   app.patch("/api/repos/:id/prompts/:promptId", async (req) => {
     const { id, promptId } = promptParams(req);
-    const { attachmentIds, ...patch } = parseBody(RepoPromptBody.partial(), req.body);
+    const { attachmentIds, ...patch } = parseBody(UpdateRepoPromptRequest, req.body);
     return (await repos.prompts(id)).update(promptId, { ...patch, attachments: await promptFiles(attachmentIds) });
   });
   app.delete("/api/repos/:id/prompts/:promptId", async (req) => {
@@ -310,18 +270,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   // ── prompt preview ────────────────────────────────────────────────────────
   app.post("/api/prompt/preview", async (req) => {
-    const body = parseBody(
-      z.object({
-        repo: z.string(),
-        message: z.string(),
-        attachmentIds: z.array(z.string()).optional(),
-        promptIds: z.array(z.string()).optional(),
-        repoPromptIds: z.array(z.string()).optional(),
-        extraRepos: z.array(z.string()).optional(),
-        extraRepoPromptIds: z.record(z.string(), z.array(z.string())).optional(),
-      }),
-      req.body,
-    );
+    const body = parseBody(PromptPreviewRequest, req.body);
     if (!body.message.trim() && !body.attachmentIds?.length) return { prompt: "", layers: [] };
     const extras = await repos.extras(await repos.get(body.repo), body.extraRepos);
     const files = await attachments.resolve(body.attachmentIds);
@@ -350,27 +299,9 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
 
   // ── tasks ─────────────────────────────────────────────────────────────────
   app.get("/api/tasks", () => queue.list());
-  app.post("/api/tasks", async (req) =>
-    queue.create(
-      parseBody(
-        z.object({
-          repo: z.string(),
-          message: z.string(),
-          accountOverride: z.string().nullable().optional(),
-          attachmentIds: z.array(z.string()).optional(),
-          promptIds: z.array(z.string()).optional(),
-          repoPromptIds: z.array(z.string()).optional(),
-          extraRepos: z.array(z.string()).optional(),
-          extraRepoPromptIds: z.record(z.string(), z.array(z.string())).optional(),
-          draft: z.boolean().optional(),
-          replacesDraft: z.string().optional(),
-        }),
-        req.body,
-      ),
-    ),
-  );
+  app.post("/api/tasks", async (req) => queue.create(parseBody(CreateTaskRequest, req.body)));
   app.put("/api/tasks/order", async (req) => {
-    await queue.reorder(parseBody(Ids, req.body).ids);
+    await queue.reorder(parseBody(ReorderRequest, req.body).ids);
     return { ok: true };
   });
   app.post("/api/tasks/:id/cancel", async (req) => {
@@ -382,10 +313,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
   app.post("/api/tasks/:id/reply", async (req) => {
-    const body = parseBody(
-      z.object({ message: z.string(), attachmentIds: z.array(z.string()).optional(), promptIds: z.array(z.string()).optional() }),
-      req.body,
-    );
+    const body = parseBody(ReplyRequest, req.body);
     await queue.reply(params(req).id, body.message, body.attachmentIds, body.promptIds);
     return { ok: true };
   });
@@ -396,7 +324,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
   app.post("/api/tasks/:id/discard", async (req) => {
-    parseBody(z.object({ confirm: z.literal(true) }), req.body);
+    parseBody(DiscardRequest, req.body);
     await queue.discard(params(req).id);
     return { ok: true };
   });
@@ -411,23 +339,18 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   });
 
   // ── prompt library ────────────────────────────────────────────────────────
-  const PromptBody = z.object({
-    name: z.string().max(120),
-    body: z.string().max(200_000),
-    attachmentIds: z.array(z.string()).optional(),
-  });
   app.get("/api/prompts", () => prompts.list());
   app.post("/api/prompts", async (req, reply) => {
-    const body = parseBody(PromptBody, req.body);
+    const body = parseBody(CreatePromptRequest, req.body);
     const files = (await promptFiles(body.attachmentIds)) ?? [];
     return reply.code(201).send(await prompts.create(body.name, body.body, { attachments: files }));
   });
   app.put("/api/prompts/order", async (req) => {
-    await prompts.reorder(parseBody(Ids, req.body).ids);
+    await prompts.reorder(parseBody(ReorderRequest, req.body).ids);
     return { ok: true };
   });
   app.patch("/api/prompts/:id", async (req) => {
-    const { attachmentIds, ...patch } = parseBody(PromptBody.partial(), req.body);
+    const { attachmentIds, ...patch } = parseBody(UpdatePromptRequest, req.body);
     return prompts.update(params(req).id, { ...patch, attachments: await promptFiles(attachmentIds) });
   });
   app.delete("/api/prompts/:id", async (req) => {

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { api, attempt } from "@/lib/api";
 import { useApi, useRepoName } from "@/lib/hooks";
 import { cn, formatTime } from "@/lib/utils";
-import { TaskHistory } from "./queue-page";
+import { TaskHistory } from "./queue/task-detail";
 
 /** How many history items each lazy-loaded page fetches. */
 const PAGE_SIZE = 50;

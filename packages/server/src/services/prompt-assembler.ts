@@ -120,6 +120,11 @@ export interface BasePromptSources {
 export class PromptAssembler {
   constructor(private readonly sources: BasePromptSources) {}
 
+  /** The global base prompt's current text. */
+  globalBase(): Promise<string> {
+    return this.sources.globalBasePrompt();
+  }
+
   /** `repoPrompts` / `boundPrompts`: the current text of the prompts ticked for this task. */
   async forTask(message: string, layers: Omit<PromptLayers, "globalBase" | "message"> = {}): Promise<AssembledPrompt> {
     const globalBase = await this.sources.globalBasePrompt();

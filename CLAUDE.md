@@ -33,13 +33,15 @@ Node 22 (`.nvmrc`). The dev server's Vite HMR uses port `SLAVES_PORT + 1`.
 ## Layout
 
 ```
-packages/shared   zod schemas for every .data file + REST/WS contract types (api.ts, ws.ts, stream.ts)
+packages/shared   zod schemas for every .data file and every REST request body (schemas/requests.ts: the server
+                  validates with them, the web app uses their inferred types) + REST/WS contract types (api.ts, ws.ts, stream.ts)
 packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with tsx)
   src/storage     JsonStore (atomic writes, per-file queue, corrupt-file backup), ActivityLog (5 MB rotation),
                   AttachmentStore. The only code that touches .data/.
   src/providers   ProviderAdapter per CLI: claude-code/, cursor-agent/ (args, stream parser, limit detection)
   src/services    PromptAssembler, AccountRouter (pure) + AccountService, RepoService,
-                  QueueService (scheduler, runs, fallback, replies, review actions), RepoActions (graph
+                  QueueService (scheduler, runs, fallback, replies, review actions; what a run
+                  sends is the pure planRun in run-plan.ts), RepoActions (graph
                   toolbar: undo/redo/pull/branch), ScriptService
                   (runs a repo's package.json scripts from the Repos page, locally or over ssh; stopped on quit)
   src/login       LoginService: drives `claude auth login` / `agent login` in a hidden pty
@@ -48,6 +50,8 @@ packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with t
   src/scripts       data-init, demo-activity, prompt-preview, run-task
 packages/web      React 19 + Vite 8 + Tailwind 4, hand-written shadcn-style components (radix-ui)
                   pages: queue, history, repos, prompts, settings, stats (token usage per account + overall)
+                  components/git-graph/ (layout.ts + view-state.ts are pure; rows, toolbar, sidebar, files,
+                  details, menu, rebase dialog) and pages/queue/ (list, composer, task detail) are split by part
 packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder (remembered in
                   <userData>/desktop.json), forks the bundled server on Electron's Node
                   (ELECTRON_RUN_AS_NODE, SLAVES_DATA_DIR/SLAVES_PORT/SLAVES_WEB_DIR), loads the same UI,
