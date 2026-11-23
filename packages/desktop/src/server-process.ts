@@ -1,5 +1,6 @@
 import { type ChildProcess, fork } from "node:child_process";
 import fs from "node:fs";
+import path from "node:path";
 
 // The same Fastify server `npm start` runs, bundled into server/server.mjs and started as a child
 // process on Electron's own Node (ELECTRON_RUN_AS_NODE), so a crash there can't take the window
@@ -12,6 +13,8 @@ export interface ServerOptions {
   port: number;
   env: NodeJS.ProcessEnv;
   logFile: string;
+  /** server.log is moved to server.previous.log on start once it's this big (default 5 MB). */
+  maxLogBytes?: number;
 }
 
 export type ServerStart =
@@ -36,8 +39,38 @@ export interface ServerHandle {
   onExit(callback: (code: number | null, signal: NodeJS.Signals | null) => void): void;
 }
 
+export const DEFAULT_MAX_LOG_BYTES = 5 * 1024 * 1024;
+
+/** `server.log` → `server.previous.log` (any extension, or none: `.previous` is put before it). */
+export function previousLogPath(logFile: string): string {
+  const ext = path.extname(logFile);
+  return `${logFile.slice(0, logFile.length - ext.length)}.previous${ext}`;
+}
+
+/**
+ * Gets the log ready for another start without losing what's in it: a crash's stack trace has to
+ * survive the restart (and quitting and reopening the app). The log is only appended to; once it
+ * has grown past `maxBytes` it's moved to server.previous.log (replacing the older one) first.
+ */
+export async function prepareLogFile(logFile: string, maxBytes = DEFAULT_MAX_LOG_BYTES): Promise<void> {
+  await fs.promises.mkdir(path.dirname(logFile), { recursive: true });
+  const size = await fs.promises.stat(logFile).then(
+    (s) => s.size,
+    () => 0,
+  );
+  if (size < maxBytes) return;
+  const previous = previousLogPath(logFile);
+  try {
+    await fs.promises.rm(previous, { force: true });
+    await fs.promises.rename(logFile, previous);
+  } catch {
+    // Windows can refuse while something still has the file open; keep appending to it then.
+  }
+}
+
 export async function startServer(opts: ServerOptions): Promise<ServerHandle> {
-  await fs.promises.writeFile(opts.logFile, `--- ${new Date().toISOString()} starting on port ${opts.port}, data: ${opts.dataDir}\n`);
+  await prepareLogFile(opts.logFile, opts.maxLogBytes);
+  await fs.promises.appendFile(opts.logFile, `--- ${new Date().toISOString()} starting on port ${opts.port}, data: ${opts.dataDir}\n`);
   const log = await fs.promises.open(opts.logFile, "a");
   let child: ChildProcess;
   try {

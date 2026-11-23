@@ -84,19 +84,27 @@ async function bootServer(): Promise<boolean> {
 
 async function onServerDied(code: number | null, signal: NodeJS.Signals | null) {
   if (quitting) return;
-  const answer = await dialog.showMessageBox({
-    type: "error",
-    message: "The My AI Slaves server stopped unexpectedly",
-    detail: `Exit code ${code ?? signal}. Running tasks will show as interrupted. The log is at\n${logFile()}`,
-    buttons: ["Restart", "Open Log", "Quit"],
-    defaultId: 0,
-    cancelId: 2,
-  });
-  if (answer.response === 1) void shell.openPath(logFile());
-  if (answer.response === 2) {
-    quitting = true;
-    app.quit();
-    return;
+  // Open Log only opens the log and asks again, so the crash can be read before anything restarts.
+  for (;;) {
+    const answer = await dialog.showMessageBox({
+      type: "error",
+      message: "The My AI Slaves server stopped unexpectedly",
+      detail: `Exit code ${code ?? signal}. Running tasks will show as interrupted. The log is at\n${logFile()}`,
+      buttons: ["Restart", "Open Log", "Quit"],
+      defaultId: 0,
+      cancelId: 2,
+    });
+    if (quitting) return;
+    if (answer.response === 1) {
+      await shell.openPath(logFile());
+      continue;
+    }
+    if (answer.response === 2) {
+      quitting = true;
+      app.quit();
+      return;
+    }
+    break;
   }
   if (await bootServer()) mainWindow?.reload();
 }
