@@ -83,6 +83,10 @@ npm run desktop        # build and open the Electron app
 npm run desktop:dist   # package an installer into packages/desktop/release
 ```
 
+The marketing site lives in [`packages/landing`](packages/landing) (`npm run landing`). Its screenshots and
+infographics are generated from demo data, never from your own: `npm run landing:shots` and `npm run landing:cards`
+(they need Google Chrome).
+
 See [CLAUDE.md](CLAUDE.md) for the architecture and the rules the app follows.
 [docs/history/DESIGN.md](docs/history/DESIGN.md) is the original design proposal, kept as history.
 

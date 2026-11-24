@@ -17,7 +17,13 @@ modern-minimal: a calm developer tool. An instrument panel, not a marketing page
     detail pane with its own title block and underline tabs; or
   - a **single column** (Repos, Settings): `max-w-4xl`, `PageHeader` (title + one line + hairline),
     then hairline panels stacked 24px apart.
-- No marketing or content pages. If one is added, it uses this theme with a left-aligned title.
+- **Landing page** (`packages/landing`, the marketing site): _Landing_. Same tokens (it imports
+  `tokens.css`), Geist, coral budget and CTA voice; left-aligned display titles. It may go bigger
+  than the app: display type up to ~5rem, 20px card radii, one ink band and an ink final CTA card,
+  a faint ruled grid behind the hero. Still no gradients, no glass, no gradient text. Motion: scroll
+  reveals (fade + 18px rise), the hero queue simulation, the screenshot tab timer and the task
+  marquee. Each runs only while on screen and the tab is visible, and reduced motion turns them all
+  into still frames.
 
 ## Theme: Coral (light + dark: follows the OS, or the System / Light / Dark switch in the sidebar footer)
 

@@ -26,6 +26,9 @@ npx vitest run test/<file>.test.ts   # one test file (run inside packages/server
 npm run desktop        # build web, stage packages/desktop/app, open it in Electron
 npm run desktop:dist   # same, then electron-builder → packages/desktop/release (this Mac's CPU only)
 npm run data:init | data:demo-activity | prompt:preview   # server scripts (src/scripts/)
+npm run landing        # marketing site (packages/landing) at http://localhost:5175; landing:build → packages/landing/dist
+npm run landing:shots  # real app screenshots from demo data → packages/landing/public/shots (needs Chrome)
+npm run landing:cards  # marketing infographics (PNG, light + dark) → packages/landing/public/cards
 ```
 
 There is no watch mode for the server: restart `npm run dev` after server changes. Web changes hot-reload.
@@ -65,6 +68,12 @@ packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder
                   offers to replace itself with the Apple Silicon one).
                   scripts/build.mjs stages app/ (esbuild + node-pty prebuilds); electron-builder.config.cjs
                   packages it unsigned (macOS ad-hoc signed in scripts/after-pack.cjs, asar off).
+packages/landing  the marketing site: static Vite + React page (no Tailwind; styles.css on the app's tokens.css), base "./"
+                  so dist/ can be hosted anywhere. src/components/queue-sim.tsx is the hero's live fallback simulation;
+                  src/cards.tsx renders the exportable infographics at #cards/<name>. scripts/shots.mjs seeds a scratch
+                  data folder + demo git repos in /tmp (never .data), runs a second server on 3115 with scripts/demo-cli.mjs
+                  standing in for claude/agent (no AI is called), queues real tasks through the API and screenshots
+                  every page with headless Chrome (scripts/chrome.mjs, DevTools protocol, no extra dependency).
 .github/workflows checks.yml (audit, typecheck, lint on Linux; tests on Linux, macOS and Windows,
                   Windows not yet blocking) runs on pull requests and other branches, and from release.yml:
                   every push to main (except *.md / .github/** only) runs checks.yml, builds arm64 + x64 DMGs and a Windows NSIS .exe, commits

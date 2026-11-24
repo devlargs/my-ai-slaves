@@ -8,6 +8,7 @@ on:
     paths-ignore:
       - "**.md"
       - ".github/**"
+      - "packages/landing/**"
       - ".vscode/**"
       - "LICENSE"
   # Ship a release for an ignored-path commit (or re-run a failed one) on demand.
