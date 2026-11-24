@@ -477,6 +477,7 @@ export function GitGraphDialog({
                       const isSelected = c.hash === selected;
                       const isWip = c.hash === WIP;
                       const groups = c.refs.length ? groupRefs(c.refs, remoteRefs) : [];
+                      const isHead = groups.some((g) => g.head);
                       return (
                         <button
                           key={c.hash}
@@ -488,6 +489,8 @@ export function GitGraphDialog({
                           onContextMenu={isWip ? undefined : (e) => openMenu(e, { commit: c.hash, local: null, remotes: [] })}
                           className={cn(
                             "absolute inset-x-0 flex cursor-pointer items-center text-left text-xs hover:bg-paper-2",
+                            // The checked-out commit: a coral edge and a faint coral wash across the row.
+                            isHead && "bg-signal/5 shadow-[inset_3px_0_0_var(--color-signal)]",
                             isSelected && "bg-signal-soft hover:bg-signal-soft",
                           )}
                           style={{ top: i * ROW, height: ROW }}
@@ -537,13 +540,13 @@ export function GitGraphDialog({
                                 strokeDasharray="3 2"
                               />
                             ) : (
-                              <CommitAvatar commit={c} cx={x(row.lane)} color={row.color} avatars={avatars} />
+                              <CommitAvatar commit={c} cx={x(row.lane)} color={row.color} avatars={avatars} head={isHead} />
                             )}
                           </svg>
                           {isWip && graph.wip ? (
                             <WipMessage summary={graph.wip} />
                           ) : (
-                            <span className={cn("min-w-0 flex-1 truncate px-2", c.parents.length > 1 ? "text-muted-foreground" : "text-ink")}>
+                            <span className={cn("min-w-0 flex-1 truncate px-2", c.parents.length > 1 ? "text-muted-foreground" : "text-ink", isHead && "font-semibold")}>
                               {c.subject}
                             </span>
                           )}

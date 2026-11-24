@@ -3,6 +3,7 @@ import { CheckIcon, CloudIcon, FileMinusIcon, FilePenIcon, FilePlusIcon, LaptopI
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { ROW, DOT } from "./layout";
 import type { RefGroup } from "./view-state";
 
@@ -22,11 +23,14 @@ export function CommitAvatar({
   cx,
   color,
   avatars,
+  head = false,
 }: {
   commit: GraphCommit;
   cx: number;
   color: string;
   avatars: boolean;
+  /** The checked-out commit: gets a coral halo around its mark. */
+  head?: boolean;
 }) {
   const cy = ROW / 2;
   const r = DOT - 1;
@@ -34,6 +38,7 @@ export function CommitAvatar({
   const [failed, setFailed] = useState(false);
   return (
     <g>
+      {head && <circle cx={cx} cy={cy} r={r + 2} fill="none" stroke="var(--color-signal)" strokeWidth={1.5} />}
       <clipPath id={clip}>
         <circle cx={cx} cy={cy} r={r} />
       </clipPath>
@@ -101,10 +106,14 @@ function RefPill({ group, color }: { group: RefGroup; color: string }) {
   return (
     <Badge
       variant={group.head ? "signal" : "default"}
-      className="min-w-0 max-w-full shrink gap-1 rounded-md font-mono"
+      className={cn(
+        "min-w-0 max-w-full shrink gap-1 rounded-md font-mono",
+        // The checked-out branch: solid coral, bold, so it can't be missed among the other labels.
+        group.head && "bg-signal font-semibold text-on-signal shadow-sm ring-2 ring-signal/30",
+      )}
       title={`${group.name}${title ? ` (${title})` : ""}`}
     >
-      {group.head && <CheckIcon className="size-3 shrink-0" />}
+      {group.head && <CheckIcon className="size-3 shrink-0" strokeWidth={3} />}
       <span className="truncate">{group.name}</span>
       {group.kind === "branch" && group.local && <LaptopIcon className="size-3 shrink-0 opacity-70" />}
       {group.remotes.length > 0 && <CloudIcon className="size-3 shrink-0 opacity-70" />}
