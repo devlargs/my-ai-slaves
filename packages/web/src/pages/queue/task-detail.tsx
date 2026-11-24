@@ -3,7 +3,9 @@ import {
   ActivityIcon,
   CheckIcon,
   ClockIcon,
+  ChevronDownIcon,
   FileDiffIcon,
+  GitGraphIcon,
   HistoryIcon,
   MinusIcon,
   SendIcon,
@@ -14,6 +16,7 @@ import { ActivityTimeline } from "@/components/activity-timeline";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { AttachButton, AttachmentList, AttachmentTray, DropZone, useAttachments } from "@/components/attachments";
 import { DiffPanel } from "@/components/diff-panel";
+import { GitGraphDialog } from "@/components/git-graph";
 import { LiveOutput } from "@/components/live-output";
 import {
   BoundPromptChips,
@@ -24,6 +27,7 @@ import {
 } from "@/components/prompt-picker";
 import { TaskStatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, attempt } from "@/lib/api";
 import { useApi, useRepoName, useTaskSubscription } from "@/lib/hooks";
@@ -51,6 +55,7 @@ export function TaskDetail({ task }: { task: TaskView }) {
             {task.title}
           </h2>
           <TaskStatusBadge status={task.status} className="mt-1 shrink-0" />
+          <RepoGraphButton repos={[task.repo, ...task.extraRepos.map((x) => x.repo)]} />
           {(task.status === "pending" || task.status === "running") && <DiscardTaskButton task={task} withLabel />}
         </div>
         <dl className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-muted-foreground">
@@ -194,6 +199,45 @@ function ReplyBox({ taskId }: { taskId: string }) {
         </div>
       </DropZone>
     </div>
+  );
+}
+
+/**
+ * Opens the commit graph (the Repos page's view) of the task's repo, any time, to see what changed.
+ * A cross-repo task gets a small menu to pick which of its repos.
+ */
+function RepoGraphButton({ repos }: { repos: string[] }) {
+  const repoName = useRepoName();
+  const [openRepo, setOpenRepo] = useState<string | null>(null);
+  const button = (onClick?: () => void) => (
+    <Button size="sm" variant="ghost" className="text-muted-foreground" title="Open the repo's commit graph" onClick={onClick}>
+      <GitGraphIcon /> Git graph
+      {repos.length > 1 && <ChevronDownIcon />}
+    </Button>
+  );
+  return (
+    <>
+      {repos.length > 1 ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>{button()}</DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {repos.map((id) => (
+              <DropdownMenuItem key={id} onSelect={() => setOpenRepo(id)}>
+                {repoName(id)}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        button(() => setOpenRepo(repos[0] ?? null))
+      )}
+      <GitGraphDialog
+        repoId={openRepo ?? repos[0] ?? ""}
+        repoName={repoName(openRepo ?? repos[0] ?? "")}
+        open={openRepo !== null}
+        onOpenChange={(open) => !open && setOpenRepo(null)}
+      />
+    </>
   );
 }
 
