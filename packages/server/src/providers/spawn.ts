@@ -82,6 +82,10 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
   const remote = Boolean(spec.host);
   /** On a remote host: the CLI's pid there, announced by the wrapper before it execs. */
   let remotePid: string | null = null;
+  let pidAnnounced: () => void = () => {};
+  const pidKnown = new Promise<void>((resolve) => {
+    pidAnnounced = resolve;
+  });
 
   let launch: Launch;
   try {
@@ -105,6 +109,7 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
   createInterface({ input: child.stdout! }).on("line", (line) => {
     if (remote && remotePid === null && line.startsWith(REMOTE_PID_MARKER)) {
       remotePid = line.slice(REMOTE_PID_MARKER.length).trim();
+      pidAnnounced();
       return;
     }
     emitRaw({ src: "stdout", line });
@@ -159,6 +164,14 @@ export function runProcess(spec: SpawnSpec, stdinText: string | null, parser: St
     async cancel() {
       cancelled = true;
       if (child.exitCode !== null || child.signalCode !== null) return;
+      // Remote, cancelled before the wrapper announced its pid: wait for it (or the exit), since
+      // signalling only the local ssh doesn't stop the CLI on the server.
+      if (remote && remotePid === null) {
+        let waited: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([pidKnown, exited, new Promise((r) => { waited = setTimeout(r, 5000); })]);
+        clearTimeout(waited);
+        if (child.exitCode !== null || child.signalCode !== null) return;
+      }
       // Remote: stop the process on the server itself; killing the local ssh alone can leave it running.
       const signal = (sig: "INT" | "TERM" | "KILL") => {
         if (remote && remotePid && spec.host) {

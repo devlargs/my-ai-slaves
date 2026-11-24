@@ -239,7 +239,7 @@ describe("repos on an SSH host", () => {
     await waitFor(async () => (await queue.list()).find((t) => t.id === task.id && t.status === "interrupted"));
     expect(Date.now() - started).toBeLessThan(8000); // killed via `kill -INT <pid>` on the host, not a timeout
     expect(head(repoPath)).toBe("master");
-  });
+  }, 15000);
 
   it("shows an unreachable repo and makes its tasks wait instead of failing", async () => {
     const { repos, queue, repoPath, stores, createRemote } = await setup();
