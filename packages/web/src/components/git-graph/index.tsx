@@ -345,12 +345,14 @@ export function GitGraphDialog({
 
   const jump = (hash: string) => {
     const i = index.get(hash);
-    if (i === undefined) return;
+    // A stash isn't a row in the graph: still leave its file for its details, just with nothing to scroll to.
+    if (i === undefined && !graph?.stashes.some((st) => st.hash === hash)) return;
     setSelected(hash);
     setOpenFile(null);
     setWipFile(null);
     setCompare(null);
     setCompareFile(null);
+    if (i === undefined) return;
     // The graph may be remounting (coming back from a file): scroll once it's there.
     requestAnimationFrame(() => {
       const el = scroller.current;
