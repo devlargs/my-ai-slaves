@@ -82,7 +82,7 @@ export function CommitAvatar({
   );
 }
 
-function RefPill({ group, color }: { group: RefGroup; color: string }) {
+function RefPill({ group }: { group: RefGroup }) {
   const title =
     group.kind === "tag"
       ? `Tag ${group.name}`
@@ -90,16 +90,16 @@ function RefPill({ group, color }: { group: RefGroup; color: string }) {
         ? "Detached HEAD"
         : [group.head && "checked out", group.local && "local", ...group.remotes.map((r) => `on ${r}`)].filter(Boolean).join(" · ");
   if (group.kind === "tag") {
-    // Tags: the name, then the tag icon, edged in the commit's lane colour.
+    // Tags: the name, then the tag icon, kept quiet (neutral outline, muted text) so the
+    // checked-out branch's solid coral pill is what the eye lands on.
     return (
       <Badge
-        variant="default"
-        className="min-w-0 max-w-full shrink gap-1 rounded-md border font-mono text-ink"
-        style={{ borderColor: color, background: `color-mix(in oklch, ${color} 14%, transparent)` }}
+        variant="outline"
+        className="min-w-0 max-w-full shrink gap-1 rounded-md bg-paper font-mono font-normal"
         title={`Tag ${group.name}`}
       >
         <span className="truncate">{group.name}</span>
-        <TagIcon className="size-3 shrink-0 opacity-80" />
+        <TagIcon className="size-3 shrink-0 opacity-60" />
       </Badge>
     );
   }
@@ -146,7 +146,7 @@ export function RefCell({
           className="flex min-w-0 shrink"
           onContextMenu={g.kind === "branch" && onMenu ? (e) => onMenu(e, g) : undefined}
         >
-          <RefPill group={g} color={color} />
+          <RefPill group={g} />
         </span>
       ))}
       {rest.length > 0 && (
