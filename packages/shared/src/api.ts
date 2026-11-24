@@ -5,6 +5,7 @@
  */
 import type { Account, AccountStatus } from "./schemas/accounts";
 import type { ActivityEntry, TokenUsage } from "./schemas/activity";
+import type { AskChat } from "./schemas/ask";
 import type { ProviderId } from "./schemas/common";
 import type { Task, TaskStatus } from "./schemas/queue";
 import type { SavedPrompt as SavedPromptT } from "./schemas/prompts";
@@ -282,6 +283,18 @@ export interface PromptPreviewResponse {
   prompt: string;
   layers: { name: "global" | "repo" | "prompts" | "message" | "repos" | "attachments"; included: boolean }[];
 }
+
+// ── Ask mode ────────────────────────────────────────────────────────────────
+/** A chat in the Ask page's list (its messages come as the chat's stream replay). */
+export type AskChatView = Omit<AskChat, "messages"> & {
+  messageCount: number;
+  /** First line of the latest message, for the list. */
+  preview: string;
+};
+/** GET /api/ask → AskChatView[] (newest first) */
+/** POST /api/ask (body CreateAskRequest) → AskChatView */
+/** POST /api/ask/:id/messages (body AskFollowUpRequest) — continues the chat's session */
+/** POST /api/ask/:id/stop · PATCH /api/ask/:id (UpdateAskRequest) · DELETE /api/ask/:id */
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
 export type TaskView = Task & {

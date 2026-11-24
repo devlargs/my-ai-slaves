@@ -55,6 +55,11 @@ export interface RunInput extends AccountContext {
   addDirs?: string[];
   /** Author/committer for any commit the agent makes (the repo's setting). */
   gitIdentity?: GitIdentity | null;
+  /**
+   * Ask mode: questions, not tasks. The CLI may read but not change anything (Claude: plan mode without
+   * its edit tools; Cursor: `--mode ask`), whatever the provider's permission setting.
+   */
+  readOnly?: boolean;
 }
 
 export interface GitIdentity {

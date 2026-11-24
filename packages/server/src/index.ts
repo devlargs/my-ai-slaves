@@ -9,6 +9,7 @@ import { createAdapters } from "./providers";
 import { registerCsp } from "./security/csp";
 import { createRequestGuard } from "./security/request-guard";
 import { AccountService } from "./services/account-service";
+import { AskService } from "./services/ask-service";
 import { PromptAssembler } from "./services/prompt-assembler";
 import { PromptLibrary } from "./services/prompt-library";
 import { QueueService } from "./services/queue-service";
@@ -60,6 +61,9 @@ const assembler = new PromptAssembler({
   globalBasePrompt: async () => (await stores.settings.read()).basePrompt,
 });
 const queue = new QueueService({ stores, accounts, repos, git, assembler, adapters, broadcaster: hub, attachments, prompts });
+const ask = new AskService({ stores, accounts, repos, adapters, broadcaster: hub });
+// Deleting an account is refused while a task or a chat runs on it.
+accounts.useTaskLock((accountId) => queue.taskUsingAccount(accountId) ?? ask.chatUsingAccount(accountId));
 const actions = new RepoActions((repoId) => queue.busyRepoIds().has(repoId));
 // Tasks wait for a graph action (pull, rebase…) in their repo, and start once it's done.
 queue.useRepoActionLock((repoId) => actions.inFlight(repoId));
@@ -71,7 +75,7 @@ const logins = new LoginService(stores, accounts, adapters, {
 hub.setSources({
   listQueue: () => queue.list(),
   listAccounts: () => accounts.list(),
-  replay: (taskId) => queue.replay(taskId),
+  replay: (taskId) => (AskService.isChatId(taskId) ? ask.replay(taskId) : queue.replay(taskId)),
   scriptRuns: (repoId) => scripts.replay(repoId),
 });
 
@@ -83,7 +87,7 @@ await app.register(fastifyWebsocket);
 app.register(async (scope) => {
   scope.get("/ws", { websocket: true }, (socket) => hub.handle(socket));
 });
-registerRoutes(app, { stores, accounts, repos, queue, assembler, adapters, logins, attachments, prompts, git, actions, scripts });
+registerRoutes(app, { stores, accounts, repos, queue, ask, assembler, adapters, logins, attachments, prompts, git, actions, scripts });
 
 let closeVite: (() => Promise<void>) | null = null;
 if (isProduction) {
@@ -124,6 +128,8 @@ try {
   throw error;
 }
 
+await ask.init();
+await ask.loadBuffers();
 await queue.init();
 // Reachability of every repo (SSH hosts can come and go): now, then every minute.
 void repos.checkAll();
@@ -145,6 +151,7 @@ async function shutdown(signal: string, opts: { resume?: boolean } = {}) {
   shuttingDown = true;
   console.log(`\n${signal}: stopping. Running tasks will show as interrupted next time.`);
   logins.closeAll();
+  await ask.shutdown().catch(() => {});
   await queue.shutdown(opts).catch(() => {});
   await scripts.stopAll().catch(() => {});
   await closeVite?.().catch(() => {});

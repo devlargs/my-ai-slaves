@@ -23,7 +23,22 @@ const NO_RAW: LiveState["raw"] = [];
 const ITEM_WINDOW = 150;
 const RAW_WINDOW = 1000;
 
-export function LiveOutput({ taskId }: { taskId: string }) {
+/** What your messages are labelled in the output (a task's first message and replies, or a chat's questions). */
+export interface UserLabels {
+  first: string;
+  reply: string;
+}
+const TASK_LABELS: UserLabels = { first: "Your task", reply: "Your reply" };
+
+export function LiveOutput({
+  taskId,
+  labels = TASK_LABELS,
+  emptyText = "No output yet. It streams here while the task runs.",
+}: {
+  taskId: string;
+  labels?: UserLabels;
+  emptyText?: string;
+}) {
   const [raw, setRaw] = useState(false);
   const [itemLimit, setItemLimit] = useState(ITEM_WINDOW);
   const [rawLimit, setRawLimit] = useState(RAW_WINDOW);
@@ -84,7 +99,7 @@ export function LiveOutput({ taskId }: { taskId: string }) {
         {raw && rawLines.length === 0 ? (
           <p className="p-4 text-[13px] text-muted-foreground">No raw output kept for this task.</p>
         ) : !raw && items.length === 0 && !streaming ? (
-          <p className="p-4 text-[13px] text-muted-foreground">No output yet. It streams here while the task runs.</p>
+          <p className="p-4 text-[13px] text-muted-foreground">{emptyText}</p>
         ) : raw ? (
           <pre className="flex min-h-full flex-col bg-paper-2 px-3 py-2.5 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-ink-2">
             {showEarlier(hiddenRaw, RAW_WINDOW * 2, (step) => setRawLimit((n) => n + step))}
@@ -99,7 +114,7 @@ export function LiveOutput({ taskId }: { taskId: string }) {
             {shownItems.map((item, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: append-only
               <div key={hiddenItems + i} className="offscreen-skip">
-                <LiveRow item={item} />
+                <LiveRow item={item} labels={labels} />
               </div>
             ))}
             {streaming && (
@@ -155,12 +170,12 @@ const RawRow = memo(function RawRow({ line }: { line: LiveState["raw"][number] }
 
 // Items never change once added (a finished tool call is replaced by a new object), so a row
 // re-renders only when its own item does, and old messages aren't re-parsed on every token.
-const LiveRow = memo(function LiveRow({ item }: { item: LiveItem }) {
+const LiveRow = memo(function LiveRow({ item, labels }: { item: LiveItem; labels: UserLabels }) {
   switch (item.type) {
     case "user":
       return (
         <div className="my-1.5 ml-auto flex w-fit max-w-[85%] min-w-0 flex-col gap-1.5 rounded-lg border border-rule-strong bg-paper-3 px-3 py-2">
-          <span className="label-mono text-[10px] text-muted-foreground">{item.reply ? "Your reply" : "Your task"}</span>
+          <span className="label-mono text-[10px] text-muted-foreground">{item.reply ? labels.reply : labels.first}</span>
           <Markdown>{item.text}</Markdown>
           {(item.prompts.length > 0 || item.attachments.length > 0) && (
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">

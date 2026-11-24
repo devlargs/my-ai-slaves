@@ -1,5 +1,6 @@
 import type {
   AccountView,
+  AskChatView,
   Attachment,
   ClientMessage,
   RawLine,
@@ -84,6 +85,9 @@ export interface AppState {
   tasks: TaskView[];
   tasksLoaded: boolean;
   accounts: AccountView[];
+  /** The Ask page's chats, newest first. */
+  chats: AskChatView[];
+  chatsLoaded: boolean;
   live: Record<string, LiveState>;
 }
 
@@ -93,6 +97,8 @@ let state: AppState = {
   tasks: [],
   tasksLoaded: false,
   accounts: [],
+  chats: [],
+  chatsLoaded: false,
   live: {},
 };
 const listeners = new Set<() => void>();
@@ -144,6 +150,10 @@ export function markUnauthorized() {
 
 export function setAccounts(accounts: AccountView[]) {
   setState({ accounts });
+}
+
+export function setChats(chats: AskChatView[]) {
+  setState({ chats, chatsLoaded: true });
 }
 
 export function setTasks(tasks: TaskView[]) {
@@ -351,6 +361,9 @@ class WsClient {
         break;
       case "accounts.updated":
         setAccounts(msg.accounts);
+        break;
+      case "ask.updated":
+        setChats(msg.chats);
         break;
       case "task.replay":
       case "task.event":

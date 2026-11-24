@@ -1,7 +1,7 @@
 /**
  * One WebSocket at /ws (same origin). JSON text frames.
  */
-import type { AccountView, LoginState, ScriptRun, ScriptRunInfo, TaskView } from "./api";
+import type { AccountView, AskChatView, LoginState, ScriptRun, ScriptRunInfo, TaskView } from "./api";
 import type { QueuedTaskStatus } from "./schemas/queue";
 import type { RawLine, StreamEvent } from "./stream";
 
@@ -21,6 +21,8 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "queue.updated"; tasks: TaskView[] }
+  /** The Ask page's chats (sent to `queue` subscribers). A chat's messages stream on the `task` topic, by chat id. */
+  | { type: "ask.updated"; chats: AskChatView[] }
   | { type: "accounts.updated"; accounts: AccountView[] }
   /** Progress of an in-app login (sent to `accounts` subscribers). */
   | { type: "login.updated"; login: LoginState }

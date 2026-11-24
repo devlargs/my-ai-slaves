@@ -39,7 +39,7 @@ export class CursorAgentAdapter implements ProviderAdapter {
    * argument there), and it doesn't show in the process list. The docs don't mention stdin; checked
    * by hand on CLI 2026.11.13 for both a fresh `-p` run and `-p --resume <chatId>`.
    */
-  buildArgs(input: Pick<RunInput, "cwd" | "resume" | "addDirs">, settings: SettingsFile): string[] {
+  buildArgs(input: Pick<RunInput, "cwd" | "resume" | "addDirs" | "readOnly">, settings: SettingsFile): string[] {
     const s = settings.providers["cursor-agent"];
     const args = [
       "-p",
@@ -49,7 +49,8 @@ export class CursorAgentAdapter implements ProviderAdapter {
       "--trust",
       "--workspace",
       input.cwd,
-      ...MODE_FLAGS[s.permissionMode],
+      // Ask mode: Cursor's documented read-only mode ("read-only exploration without making changes"), never --force.
+      ...(input.readOnly ? ["--mode", "ask"] : MODE_FLAGS[s.permissionMode]),
     ];
     if (s.model) args.push("--model", s.model);
     if (input.resume) args.push("--resume", input.resume.sessionId);

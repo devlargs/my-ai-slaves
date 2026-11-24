@@ -646,7 +646,8 @@ export class QueueService {
     // From the activity log's in-memory summaries: no re-reading every activity file per page.
     const items: HistoryItem[] = [];
     for (const s of activity.taskSummaries()) {
-      if (!s.terminal) continue;
+      // Ask-mode chats aren't tasks (they never log an ending, but older or hand-made entries might).
+      if (!s.terminal || s.taskId.startsWith("ask_")) continue;
       items.push({
         taskId: s.taskId,
         title: String(s.queued?.title ?? s.taskId),

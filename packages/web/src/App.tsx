@@ -6,6 +6,7 @@ import {
   LibraryBigIcon,
   ListOrderedIcon,
   type LucideIcon,
+  MessageCircleQuestionIcon,
   SettingsIcon,
 } from "lucide-react";
 import { useDeferredValue, useEffect, useState } from "react";
@@ -18,6 +19,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { useStore, ws } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { AskPage } from "@/pages/ask-page";
 import { HistoryPage } from "@/pages/history-page";
 import { PromptsPage } from "@/pages/prompts-page";
 import { QueuePage } from "@/pages/queue-page";
@@ -25,10 +27,11 @@ import { ReposPage } from "@/pages/repos-page";
 import { SettingsPage } from "@/pages/settings-page";
 import { StatsPage } from "@/pages/stats-page";
 
-type Route = "queue" | "repos" | "prompts" | "settings" | "history" | "stats";
+type Route = "queue" | "ask" | "repos" | "prompts" | "settings" | "history" | "stats";
 
 const NAV: { route: Route; label: string; icon: LucideIcon }[] = [
   { route: "queue", label: "Queue", icon: ListOrderedIcon },
+  { route: "ask", label: "Ask", icon: MessageCircleQuestionIcon },
   { route: "repos", label: "Repos", icon: FolderGit2Icon },
   { route: "prompts", label: "Prompts", icon: LibraryBigIcon },
   { route: "settings", label: "Settings", icon: SettingsIcon },
@@ -74,6 +77,7 @@ export function App() {
       <Sidebar route={route} />
       <main className="scroll-quiet min-w-0 flex-1 overflow-auto">
         {page === "queue" && <QueuePage />}
+        {page === "ask" && <AskPage />}
         {page === "repos" && <ReposPage />}
         {page === "prompts" && <PromptsPage />}
         {page === "settings" && <SettingsPage />}

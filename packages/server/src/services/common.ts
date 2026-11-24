@@ -1,4 +1,4 @@
-import type { AccountView, QueuedTaskStatus, RawLine, StreamEvent, TaskView } from "@my-ai-slaves/shared";
+import type { AccountView, AskChatView, QueuedTaskStatus, RawLine, StreamEvent, TaskView } from "@my-ai-slaves/shared";
 
 /** Thrown by services; the HTTP layer turns it into `{ error }` with this status. */
 export class HttpError extends Error {
@@ -17,6 +17,7 @@ export const conflict = (m: string) => new HttpError(409, m);
 /** Everything services push to connected browsers. */
 export interface Broadcaster {
   queueUpdated(tasks: TaskView[]): void;
+  askUpdated(chats: AskChatView[]): void;
   accountsUpdated(accounts: AccountView[]): void;
   taskEvent(taskId: string, event: StreamEvent): void;
   taskRaw(taskId: string, raw: RawLine): void;
@@ -26,6 +27,7 @@ export interface Broadcaster {
 
 export const nullBroadcaster: Broadcaster = {
   queueUpdated: () => {},
+  askUpdated: () => {},
   accountsUpdated: () => {},
   taskEvent: () => {},
   taskRaw: () => {},

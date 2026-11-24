@@ -1,5 +1,7 @@
 import {
+  AskFollowUpRequest,
   ATTACHMENT_LIMITS,
+  CreateAskRequest,
   CreateAccountRequest,
   CreatePromptRequest,
   CreateRepoPromptRequest,
@@ -20,6 +22,7 @@ import {
   ScriptRequest,
   SetLabelColorRequest,
   SettingsFile,
+  UpdateAskRequest,
   UpdatePromptRequest,
   UpdateRepoPromptRequest,
   UpdateRepoRequest,
@@ -28,6 +31,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { AdapterRegistry } from "../providers";
 import type { AccountService } from "../services/account-service";
+import type { AskService } from "../services/ask-service";
 import { AvatarProxy } from "../services/avatar-proxy";
 import { badRequest, HttpError } from "../services/common";
 import { CommandError } from "../services/git";
@@ -49,6 +53,7 @@ export interface RouteDeps {
   accounts: AccountService;
   repos: RepoService;
   queue: QueueService;
+  ask: AskService;
   assembler: PromptAssembler;
   adapters: AdapterRegistry;
   logins: LoginService;
@@ -73,7 +78,7 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
 const params = (req: { params: unknown }) => req.params as { id: string };
 
 export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
-  const { stores, accounts, repos, queue, assembler, logins, attachments, prompts, git, actions, scripts } = deps;
+  const { stores, accounts, repos, queue, ask, assembler, logins, attachments, prompts, git, actions, scripts } = deps;
   const avatars = deps.avatars ?? new AvatarProxy();
 
   app.setErrorHandler((error, _req, reply) => {
@@ -335,6 +340,23 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.post("/api/tasks/:id/discard", async (req) => {
     parseBody(DiscardRequest, req.body);
     await queue.discard(params(req).id);
+    return { ok: true };
+  });
+
+  // ── ask mode ──
+  app.get("/api/ask", () => ask.list());
+  app.post("/api/ask", async (req) => ask.create(parseBody(CreateAskRequest, req.body)));
+  app.post("/api/ask/:id/messages", async (req) => {
+    await ask.ask(params(req).id, parseBody(AskFollowUpRequest, req.body).message);
+    return { ok: true };
+  });
+  app.post("/api/ask/:id/stop", async (req) => {
+    await ask.stop(params(req).id);
+    return { ok: true };
+  });
+  app.patch("/api/ask/:id", async (req) => ask.update(params(req).id, parseBody(UpdateAskRequest, req.body)));
+  app.delete("/api/ask/:id", async (req) => {
+    await ask.remove(params(req).id);
     return { ok: true };
   });
 

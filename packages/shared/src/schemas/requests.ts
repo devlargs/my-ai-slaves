@@ -215,3 +215,23 @@ export type ReplyRequest = z.infer<typeof ReplyRequest>;
 /** POST /api/tasks/:id/discard */
 export const DiscardRequest = z.object({ confirm: z.literal(true) });
 export type DiscardRequest = z.infer<typeof DiscardRequest>;
+
+// ── Ask mode ────────────────────────────────────────────────────────────────
+/** POST /api/ask: a new chat with its first question (runs at once). */
+export const CreateAskRequest = z.object({
+  message: z.string(),
+  repo: z.string().min(1).nullable().optional(),
+  accountOverride: z.string().min(1).nullable().optional(),
+});
+export type CreateAskRequest = z.infer<typeof CreateAskRequest>;
+
+/** POST /api/ask/:id/messages: a follow-up in the same session. */
+export const AskFollowUpRequest = z.object({ message: z.string() });
+export type AskFollowUpRequest = z.infer<typeof AskFollowUpRequest>;
+
+/** PATCH /api/ask/:id */
+export const UpdateAskRequest = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  accountOverride: z.string().min(1).nullable().optional(),
+});
+export type UpdateAskRequest = z.infer<typeof UpdateAskRequest>;

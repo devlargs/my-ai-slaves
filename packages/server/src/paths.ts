@@ -18,6 +18,9 @@ export function dataPaths(dataDir: string) {
     repos: join(dataDir, "repos.json"),
     queue: join(dataDir, "queue.json"),
     prompts: join(dataDir, "prompts.json"),
+    ask: join(dataDir, "ask.json"),
+    /** Where Ask-mode chats without a repo run (a scratch folder: nothing in it matters). */
+    askDir: join(dataDir, "ask"),
     knowledgeDir: join(dataDir, "knowledge"),
     activityDir: join(dataDir, "activity"),
     cliConfigDir: join(dataDir, "cli-config"),

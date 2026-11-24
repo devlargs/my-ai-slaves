@@ -42,7 +42,7 @@ async function findTranscript(configDir: string, sessionId: string): Promise<str
 export class ClaudeCodeAdapter implements ProviderAdapter {
   readonly provider = "claude-code" as const;
 
-  buildArgs(input: Pick<RunInput, "resume" | "addDirs">, settings: SettingsFile, resumeTarget: string | null): string[] {
+  buildArgs(input: Pick<RunInput, "resume" | "addDirs" | "readOnly">, settings: SettingsFile, resumeTarget: string | null): string[] {
     const s = settings.providers["claude-code"];
     const args = [
       "-p",
@@ -51,7 +51,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       "--verbose",
       "--include-partial-messages",
       "--permission-mode",
-      s.permissionMode,
+      // Ask mode: plan mode researches without editing (documented: "does not edit your source").
+      input.readOnly ? "plan" : s.permissionMode,
       "--permission-prompts",
       "none",
       // autoContinueAtUsageLimit: default true would wait out a limit instead of falling back to the next account.
@@ -61,6 +62,8 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     ];
     // Tasks run in the repo as it's checked out (no worktrees): take away Claude's own worktree tools and `git worktree`.
     args.push("--disallowedTools", "EnterWorktree", "ExitWorktree", "Bash(git worktree *)");
+    // Ask mode: a bare tool name removes the tool altogether (deny rules hold in every mode).
+    if (input.readOnly) args.push("Edit", "Write", "NotebookEdit");
     if (s.model) args.push("--model", s.model);
     if (resumeTarget) args.push("--resume", resumeTarget);
     for (const dir of input.addDirs ?? []) args.push("--add-dir", dir);
@@ -69,7 +72,7 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
 
   run(input: RunInput, settings: SettingsFile): RunHandle {
     const s = settings.providers["claude-code"];
-    const parser = new ClaudeStreamParser(s.permissionMode);
+    const parser = new ClaudeStreamParser(input.readOnly ? "plan" : s.permissionMode);
 
     // Resuming a session from another local Claude account needs the transcript's absolute path.
     const from = input.resume?.fromConfigDir ?? null;

@@ -7,6 +7,7 @@ export * from "./schemas/repos";
 export * from "./schemas/queue";
 export * from "./schemas/activity";
 export * from "./schemas/prompts";
+export * from "./schemas/ask";
 export * from "./schemas/requests";
 export type * from "./stream";
 export type * from "./api";

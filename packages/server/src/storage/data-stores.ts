@@ -2,6 +2,7 @@ import { mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AccountsFile,
+  AskFile,
   type DataFileRecovery,
   KnowledgeFile,
   PromptsFile,
@@ -23,6 +24,8 @@ export interface DataStores {
   queue: JsonStore<QueueFile>;
   /** `.data/prompts.json`: the saved prompt library. */
   prompts: JsonStore<PromptsFile>;
+  /** `.data/ask.json`: the Ask page's chats. */
+  ask: JsonStore<AskFile>;
   activity: ActivityLog;
   /** `.data/knowledge/<slug>.json`; created blank on first load. */
   knowledge(repoSlug: string): JsonStore<KnowledgeFile>;
@@ -56,6 +59,7 @@ export async function openDataStores(
   const repos = new JsonStore({ file: paths.repos, schema: ReposFile, ...common });
   const queue = new JsonStore({ file: paths.queue, schema: QueueFile, ...common });
   const prompts = new JsonStore({ file: paths.prompts, schema: PromptsFile, ...common });
+  const ask = new JsonStore({ file: paths.ask, schema: AskFile, ...common });
 
   const knowledgeStores = new Map<string, JsonStore<KnowledgeFile>>();
   const knowledge = (repoSlug: string) => {
@@ -74,7 +78,7 @@ export async function openDataStores(
   };
 
   const report: Record<string, LoadOutcome> = {};
-  for (const store of [settings, accounts, repos, queue, prompts]) report[store.file] = await store.load();
+  for (const store of [settings, accounts, repos, queue, prompts, ask]) report[store.file] = await store.load();
 
   for (const name of await readdir(paths.knowledgeDir)) {
     const slug = name.endsWith(".json") ? name.slice(0, -".json".length) : null;
@@ -92,7 +96,7 @@ export async function openDataStores(
   await activity.init();
 
   return {
-    stores: { paths, settings, accounts, repos, queue, prompts, activity, knowledge, recoveries },
+    stores: { paths, settings, accounts, repos, queue, prompts, ask, activity, knowledge, recoveries },
     report,
   };
 }

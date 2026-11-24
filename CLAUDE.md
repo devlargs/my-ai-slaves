@@ -44,13 +44,15 @@ packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with t
                   QueueService (scheduler, runs, fallback, replies, review actions; what a run
                   sends is the pure planRun in run-plan.ts), RepoActions (graph
                   toolbar: undo/redo/pull/branch), ScriptService
-                  (runs a repo's package.json scripts from the Repos page, locally or over ssh; stopped on quit)
+                  (runs a repo's package.json scripts from the Repos page, locally or over ssh; stopped on quit),
+                  AskService (the Ask page's chats, `.data/ask.json`: run at once, read-only, outside the queue)
   src/login       LoginService: drives `claude auth login` / `agent login` in a hidden pty
   src/remote        machine.ts (run git/CLIs locally or over ssh), hosts.ts (~/.ssh/config aliases)
   src/http, src/ws, src/security (Host / Origin / Sec-Fetch-Site guard; no token)
   src/scripts       data-init, demo-activity, prompt-preview, run-task
 packages/web      React 19 + Vite 8 + Tailwind 4, hand-written shadcn-style components (radix-ui)
-                  pages: queue, history, repos, prompts, settings, stats (token usage per account + overall)
+                  pages: queue, ask (chats for questions, no repo needed), history, repos, prompts, settings,
+                  stats (token usage per account + overall)
                   components/git-graph/ (layout.ts, view-state.ts + columns.ts are pure; header (resizable columns), rows, toolbar, sidebar, files,
                   details, menu, rebase dialog) and pages/queue/ (list, composer, task detail) are split by part
 packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder (remembered in
@@ -74,7 +76,7 @@ design.md         locked visual design system (Hallmark, Coral theme): read befo
 ## Data (`.data/`, gitignored, never commit it)
 
 Plain pretty-printed JSON: `settings.json`, `accounts.json`, `repos.json`, `queue.json`,
-`prompts.json` (saved prompt library), `knowledge/<repo>.json` (the repo's prompts; repos also carry
+`prompts.json` (saved prompt library), `ask.json` (Ask page chats; repo-less ones run in the scratch folder `ask/`), `knowledge/<repo>.json` (the repo's prompts; repos also carry
 a display name and `labels` for filtering, renaming never touches the folder), `activity/NNNN_activity.jsonl` (JSON Lines, only ever appended to, 5 MB rotation;
 older `NNNN_activity.json` files are still read) + `activity/activity-index.json` (summaries + usage cache, so startup
 doesn't parse every file; rebuilt when it doesn't match), `attachments/<id>/`,
@@ -94,6 +96,12 @@ desktop app also uses 3005 and refuses to start if it's taken).
   cross-repo task's other repos, after the message) and "Attached files:" (when files are attached: the ticked/bound prompts' saved screenshots
   first, in prompt order, then the message's). Never add hidden system/role/wrapper text anywhere. Replies resume
   the session and send only the reply (+ its attachments).
+- **Ask mode** (Ask page, `services/ask-service.ts`) is not a task: a chat sends **only your message** (no base,
+  repo or saved prompts), runs at once outside the queue on the chat's account, else the attached repo's chain,
+  else every account on this Mac in Settings order (limit → next account), and is **read-only**
+  (`RunInput.readOnly`: Claude `--permission-mode plan` + `--disallowedTools Edit Write NotebookEdit`, Cursor
+  `--mode ask`, never `--force`). Follow-ups resume its session. Its runs are logged (`ask_…` ids, repo `ask`
+  when none) and count in Statistics, but never show in History.
 - **Every started run is logged** in activity with its full assembled prompt.
 - **No AI attribution** in commits or PRs: Claude runs with `attribution: false`, Cursor's cli-config sets
   `attributeCommitsToAgent/attributePRsToAgent: false`. The agent's commits use the repo's committer

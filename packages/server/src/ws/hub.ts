@@ -1,5 +1,6 @@
 import type {
   AccountView,
+  AskChatView,
   ClientMessage,
   LoginState,
   QueuedTaskStatus,
@@ -106,6 +107,9 @@ export class WsHub implements Broadcaster, ScriptListener {
   // ── Broadcaster ──────────────────────────────────────────────────────────
   queueUpdated(tasks: TaskView[]): void {
     this.broadcast((c) => c.queue, { type: "queue.updated", tasks });
+  }
+  askUpdated(chats: AskChatView[]): void {
+    this.broadcast((c) => c.queue, { type: "ask.updated", chats });
   }
   accountsUpdated(accounts: AccountView[]): void {
     this.broadcast((c) => c.accounts, { type: "accounts.updated", accounts });
