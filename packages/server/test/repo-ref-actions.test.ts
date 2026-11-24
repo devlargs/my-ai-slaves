@@ -240,6 +240,26 @@ describe("RepoActions.refAction (the graph's right-click menu)", () => {
     expect(await git.stashes(repo)).toEqual([]);
   });
 
+  it("stashes every change (untracked files too) from the toolbar, and refuses when there are none", async () => {
+    const { path, repo } = await newRepo();
+    const git = new RepoGit();
+    const actions = new RepoActions();
+    await expect(actions.refAction(repo, { op: "stash-save" }, identity)).rejects.toThrow(/no changes/);
+
+    await writeFile(join(path, "a.txt"), "changed\n");
+    await writeFile(join(path, "new.txt"), "new\n");
+    await actions.refAction(repo, { op: "stash-save", message: "  my work " }, identity);
+    expect(sh(path, "status", "--porcelain")).toBe("");
+    const [top] = await git.stashes(repo);
+    expect(top?.message).toBe("On main: my work");
+
+    // Pop (the toolbar's Pop is stash@{0}) brings both back.
+    await actions.refAction(repo, { op: "stash-apply", index: 0, stash: top!.hash, pop: true }, identity);
+    expect(await readFile(join(path, "a.txt"), "utf8")).toBe("changed\n");
+    expect(await readFile(join(path, "new.txt"), "utf8")).toBe("new\n");
+    expect(await git.stashes(repo)).toEqual([]);
+  });
+
   it("refuses while a task is running in the repo", async () => {
     const { repo, m1 } = await forked();
     const actions = new RepoActions(() => true);

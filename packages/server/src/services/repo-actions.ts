@@ -8,7 +8,7 @@ import { parseRebasePlan, parseStashList, rebasePlanArgs, STASH_FORMAT } from ".
 
 /**
  * The graph toolbar (Undo, Redo, Pull, Branch), the WIP panel (stage, unstage, commit), the right-click
- * menus and the Stashes group (apply, pop, delete, edit message). These are
+ * menus, the toolbar's Stash / Pop and the Stashes group (apply, pop, delete, edit message). These are
  * the only places the app changes a repo, and only when you click them (tasks never do). Undo/Redo work like GitKraken's:
  *
  * - Actions done here (pull, new branch) go on an undo stack.
@@ -562,6 +562,14 @@ export class RepoActions {
             if ((await this.currentRef(repo)) === branch) throw conflict(`${branch} is checked out. Check out another branch first.`);
             await this.git(repo, ["branch", "-D", branch]);
           }
+          return this.view(await this.sync(repo));
+        }
+        case "stash-save": {
+          await this.notMidOperation(repo);
+          if (!(await this.git(repo, ["status", "--porcelain", "--untracked-files=all"])).trim()) throw badRequest("There are no changes to stash.");
+          const message = action.message?.trim();
+          // Stashing makes commits, so it gets the repo's committer.
+          await this.git(repo, ["stash", "push", "--include-untracked", ...(message ? ["-m", message] : [])], { env, ...slow });
           return this.view(await this.sync(repo));
         }
         case "stash-apply": {

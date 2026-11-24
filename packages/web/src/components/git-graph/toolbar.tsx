@@ -1,5 +1,7 @@
-import type { GitHistory, PullMode } from "@my-ai-slaves/shared";
+import type { GitHistory, PullMode, StashEntry } from "@my-ai-slaves/shared";
 import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
   ArrowDownToLineIcon,
   ChevronDownIcon,
   GitBranchPlusIcon,
@@ -23,7 +25,7 @@ export const storedPullMode = (): PullMode => {
   return v && v in PULL_LABELS ? (v as PullMode) : "pull-ff";
 };
 
-export type GitAction = "undo" | "redo" | "pull" | "branch" | "ref";
+export type GitAction = "undo" | "redo" | "pull" | "branch" | "stash" | "pop" | "ref";
 
 function ToolButton({
   icon,
@@ -60,15 +62,21 @@ function ToolButton({
   );
 }
 
-/** Undo, Redo, Pull (with its default mode) and Branch, like GitKraken's toolbar. */
+/** Undo, Redo, Pull (with its default mode), Branch, Stash and Pop, like GitKraken's toolbar. */
 export function GitToolbar({
   history,
+  hasChanges,
+  topStash,
   acting,
   pullMode,
   onPullMode,
   onAction,
 }: {
   history: GitHistory | null;
+  /** The checkout has uncommitted changes (something to stash). */
+  hasChanges: boolean;
+  /** stash@{0}, what Pop brings back. */
+  topStash: StashEntry | undefined;
   acting: GitAction | null;
   pullMode: PullMode;
   onPullMode: (mode: PullMode) => void;
@@ -160,6 +168,22 @@ export function GitToolbar({
         busy={acting === "branch"}
         disabled={off}
         onClick={() => onAction("branch")}
+      />
+      <ToolButton
+        icon={<ArchiveIcon />}
+        label="Stash"
+        title={hasChanges ? "Stash every uncommitted change (untracked files too)" : "No changes to stash"}
+        busy={acting === "stash"}
+        disabled={off || !hasChanges}
+        onClick={() => onAction("stash")}
+      />
+      <ToolButton
+        icon={<ArchiveRestoreIcon />}
+        label="Pop"
+        title={topStash ? `Pop ${topStash.message}` : "No stashes to pop"}
+        busy={acting === "pop"}
+        disabled={off || !topStash}
+        onClick={() => onAction("pop")}
       />
     </div>
   );

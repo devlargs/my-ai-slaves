@@ -146,6 +146,8 @@ export const GitRefAction = z.discriminatedUnion("op", [
    * The sidebar's Stashes menu. `stash` = the stash commit's hash (checked against `index`, so a list
    * that changed meanwhile is refused). Apply keeps the stash, Pop drops it once it applied cleanly.
    */
+  /** The toolbar's Stash: every uncommitted change (untracked files too) goes into a new stash@{0}. */
+  z.object({ op: z.literal("stash-save"), message: LongText.optional() }),
   z.object({ op: z.literal("stash-apply"), index: StashIndex, stash: Sha, pop: z.boolean().optional() }),
   z.object({ op: z.literal("stash-drop"), index: StashIndex, stash: Sha }),
   /** New message for a stash (it moves to the top of the list, stash@{0}). */

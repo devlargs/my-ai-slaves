@@ -114,7 +114,7 @@ desktop app also uses 3005 and refuses to start if it's taken).
   is, and the diff since the task started), plus the one-time legacy worktree migration. Claude runs with
   `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and Cursor never gets `-w`.
   The one exception is the Repos commit graph (`src/services/repo-actions.ts`): the toolbar's Undo, Redo,
-  Pull and Branch, and the WIP panel's Stage / Unstage file (or all) and Commit (summary + description,
+  Pull, Branch, Stash (every change, untracked too) and Pop (stash@{0}), and the WIP panel's Stage / Unstage file (or all) and Commit (summary + description,
   amend, skip hooks; uses the repo's committer), and the right-click menu on a branch or commit
   (GitKraken's: pull/push/set upstream, merge, rebase, interactive rebase, checkout, create branch,
   cherry-pick, reset soft/mixed/hard, revert, rename/delete branch, tags; a conflicting merge/rebase/

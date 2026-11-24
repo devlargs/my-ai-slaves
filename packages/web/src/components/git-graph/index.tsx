@@ -223,7 +223,11 @@ export function GitGraphDialog({
       if (action === "undo") await api.gitUndo(repoId);
       else if (action === "redo") await api.gitRedo(repoId);
       else if (action === "pull") await api.gitPull(repoId, pullMode);
-      else await api.gitBranch(repoId, name!);
+      else if (action === "stash") await api.gitRefAction(repoId, { op: "stash-save" });
+      else if (action === "pop") {
+        const top = graph?.stashes[0];
+        if (top) await api.gitRefAction(repoId, { op: "stash-apply", index: top.index, stash: top.hash, pop: true });
+      } else await api.gitBranch(repoId, name!);
       setNaming(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -387,6 +391,8 @@ export function GitGraphDialog({
           <div className="mx-auto">
             <GitToolbar
               history={graph?.history ?? null}
+              hasChanges={!!graph?.wip}
+              topStash={graph?.stashes[0]}
               acting={acting}
               pullMode={pullMode}
               onPullMode={(mode) => {
