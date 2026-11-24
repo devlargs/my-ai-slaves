@@ -19,7 +19,9 @@ import { api } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { cn, formatTime, storageSet } from "@/lib/utils";
 import { type WipSection, WipPanel, CommitPanel, CommitFileView, ComparePanel } from "./details";
-import { PAGE, ROW, DOT, OVERSCAN, REF_COL, layout, x, WIP, wipCommit, edgePath } from "./layout";
+import { autoGraphWidth } from "./columns";
+import { GraphHeader, useColumnWidths } from "./header";
+import { PAGE, ROW, DOT, OVERSCAN, layout, x, WIP, wipCommit, edgePath } from "./layout";
 import { type ActionSpec, ActionDialog, RefMenu } from "./menu";
 import { RebaseDialog } from "./rebase-dialog";
 import { CommitAvatar, RefCell, BranchNameInput, WipMessage } from "./rows";
@@ -196,7 +198,8 @@ export function GitGraphDialog({
     if (head && !commits.some((c) => c.hash === head)) return layout(commits, pinned);
     return layout([wipCommit(head), ...commits], pinned);
   }, [graph, view]);
-  const graphWidth = Math.min(Math.max(width, 56), 240);
+  const [cols, resizeColumn] = useColumnWidths();
+  const graphWidth = cols.graph ?? autoGraphWidth(width);
   const index = useMemo(() => new Map(rows.map((r, i) => [r.commit.hash, i])), [rows]);
   const loaded = useMemo(() => new Set(index.keys()), [index]);
   const remoteRefs = useMemo(() => new Map((graph?.remote ?? []).map((r) => [r.ref, r])), [graph]);
@@ -455,21 +458,7 @@ export function GitGraphDialog({
               <CommitFileView files={detail.files} patch={detail.patch} path={openFile} onBack={() => jump(detail.hash)} onOpen={setOpenFile} />
             ) : (
               <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-rule bg-surface">
-                <div
-                  className="flex shrink-0 items-center border-b border-rule bg-paper-2 text-[11px] text-muted-foreground label-mono"
-                  style={{ height: 26 }}
-                >
-                  <span className="shrink-0 px-2" style={{ width: REF_COL }}>
-                    Branch / tag
-                  </span>
-                  <span className="shrink-0 px-2.5" style={{ width: graphWidth }}>
-                    Graph
-                  </span>
-                  <span className="min-w-0 flex-1 px-2">Commit message</span>
-                  <span className="hidden w-36 shrink-0 px-2 xl:block">Author</span>
-                  <span className="w-24 shrink-0 px-2">Date</span>
-                  <span className="hidden w-20 shrink-0 px-2 2xl:block">Commit</span>
-                </div>
+                <GraphHeader widths={cols} graphWidth={graphWidth} onResize={resizeColumn} />
                 <div
                   ref={scroller}
                   className="min-h-0 flex-1 overflow-y-auto"
@@ -497,7 +486,7 @@ export function GitGraphDialog({
                           )}
                           style={{ top: i * ROW, height: ROW }}
                         >
-                          <span className="flex shrink-0 items-center pl-2" style={{ width: REF_COL }}>
+                          <span className="flex shrink-0 items-center overflow-hidden pl-2" style={{ width: cols.ref }}>
                             <RefCell
                               groups={groups}
                               color={row.color}
@@ -552,11 +541,20 @@ export function GitGraphDialog({
                               {c.subject}
                             </span>
                           )}
-                          <span className="hidden w-36 shrink-0 truncate px-2 text-muted-foreground xl:block">{c.author}</span>
-                          <span className="w-24 shrink-0 truncate px-2 text-muted-foreground" title={isWip ? undefined : new Date(c.date).toLocaleString()}>
+                          <span className="hidden shrink-0 truncate px-2 text-muted-foreground xl:block" style={{ width: cols.author }}>
+                            {c.author}
+                          </span>
+                          <span
+                            className="shrink-0 truncate px-2 text-muted-foreground"
+                            style={{ width: cols.date }}
+                            title={isWip ? undefined : new Date(c.date).toLocaleString()}
+                          >
                             {isWip ? "" : formatTime(c.date)}
                           </span>
-                          <span className="hidden w-20 shrink-0 px-2 font-mono text-[11px] text-muted-foreground 2xl:block">
+                          <span
+                            className="hidden shrink-0 truncate px-2 font-mono text-[11px] text-muted-foreground 2xl:block"
+                            style={{ width: cols.hash }}
+                          >
                             {isWip ? "" : c.hash.slice(0, 7)}
                           </span>
                         </button>
@@ -565,7 +563,7 @@ export function GitGraphDialog({
                     {naming && (
                       <div
                         className="absolute left-0 z-10 flex items-center bg-surface px-2"
-                        style={{ top: namingRow * ROW, height: ROW, width: REF_COL }}
+                        style={{ top: namingRow * ROW, height: ROW, width: cols.ref }}
                       >
                         <BranchNameInput
                           busy={acting === "branch" || acting === "ref"}

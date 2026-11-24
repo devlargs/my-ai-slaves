@@ -51,7 +51,7 @@ packages/server   Fastify 5 + @fastify/websocket + node-pty (Node 22, run with t
   src/scripts       data-init, demo-activity, prompt-preview, run-task
 packages/web      React 19 + Vite 8 + Tailwind 4, hand-written shadcn-style components (radix-ui)
                   pages: queue, history, repos, prompts, settings, stats (token usage per account + overall)
-                  components/git-graph/ (layout.ts + view-state.ts are pure; rows, toolbar, sidebar, files,
+                  components/git-graph/ (layout.ts, view-state.ts + columns.ts are pure; header (resizable columns), rows, toolbar, sidebar, files,
                   details, menu, rebase dialog) and pages/queue/ (list, composer, task detail) are split by part
 packages/desktop  Electron 45 shell (main.ts, preload.ts): picks the data folder (remembered in
                   <userData>/desktop.json), forks the bundled server on Electron's Node
