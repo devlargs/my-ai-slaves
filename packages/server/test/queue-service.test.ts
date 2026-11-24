@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -477,6 +478,24 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     await waitFor(taskWith(queue, created.id, "interrupted"));
     expect(head(repo.path)).toBe("main");
     expect(aiBranches(repo.path)).toBe("");
+  });
+
+  it("refuses to delete an account while a task runs on it, and allows it once the task stopped", async () => {
+    const { queue, accounts, repo } = await setup();
+    const created = await queue.create({ repo: repo.id, message: "SLOW job" });
+    await waitFor(async () => queue.replay(created.id).events.length > 0);
+    const account = (await queue.list()).find((t) => t.id === created.id)?.currentAccount as string;
+    expect(queue.taskUsingAccount(account)).toBe(created.id);
+
+    await expect(accounts.remove(account)).rejects.toMatchObject({ status: 409 });
+    expect((await accounts.listRaw()).some((a) => a.id === account)).toBe(true);
+    expect(existsSync(accounts.configDirOf(await accounts.get(account)) as string)).toBe(true);
+
+    await queue.cancel(created.id);
+    await waitFor(taskWith(queue, created.id, "interrupted"));
+    expect(queue.taskUsingAccount(account)).toBeNull();
+    await accounts.remove(account);
+    expect((await accounts.listRaw()).some((a) => a.id === account)).toBe(false);
   });
 
   it("an interrupted task (first run or reply) can still get a follow-up in the same session", async () => {

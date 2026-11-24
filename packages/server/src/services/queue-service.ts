@@ -107,6 +107,8 @@ export class QueueService {
   private readonly live = new Map<string, LiveRun>();
   /** Tasks marked running whose process isn't attached yet (git, attachments, CLI setup): their repos are held too. */
   private readonly starting = new Map<string, string[]>();
+  /** Accounts a running or starting task uses (the one it runs on + the one its resumed session is from). */
+  private readonly heldAccounts = new Map<string, string[]>();
   /** Whether a commit-graph action is queued or running in a repo (set by the app; none in tests). */
   private repoActionInFlight: (repoId: string) => boolean = () => false;
   private readonly buffers = new Map<string, OutputBuffer>();
@@ -118,6 +120,8 @@ export class QueueService {
 
   constructor(private readonly deps: QueueDeps) {
     this.now = deps.now ?? (() => new Date());
+    // Deleting an account logs it out and removes its config folder: refused while a task uses it.
+    deps.accounts.useTaskLock((accountId) => this.taskUsingAccount(accountId));
   }
 
   private get stores() {
@@ -305,6 +309,12 @@ export class QueueService {
   /** Repos (main and extra) in a running or starting task right now. */
   busyRepoIds(): Set<string> {
     return new Set([...[...this.live.values()].flatMap((r) => r.repos), ...[...this.starting.values()].flat()]);
+  }
+
+  /** The running or starting task that uses the account (runs on it, or resumes a session from it). */
+  taskUsingAccount(accountId: string): string | null {
+    for (const [taskId, ids] of this.heldAccounts) if (ids.includes(accountId)) return taskId;
+    return null;
   }
 
   async list(): Promise<TaskView[]> {
@@ -747,9 +757,15 @@ export class QueueService {
         }
         continue;
       }
+      // Being deleted (logout + folder removal in progress): nothing awaits between this and startRun.
+      const usedAccounts = this.accountsFor(task, pick.account, isReply);
+      if (usedAccounts.some((id) => this.deps.accounts.isRemoving(id))) {
+        notes.set(task.id, "Waiting for an account being deleted.");
+        continue;
+      }
       running += 1;
       for (const id of taskRepos) busyRepos.add(id);
-      await this.startRun(task, repo, pick.account, isReply, taskRepos);
+      await this.startRun(task, repo, pick.account, isReply, taskRepos, usedAccounts);
     }
 
     const changed =
@@ -781,13 +797,29 @@ export class QueueService {
 
   // ── running ──────────────────────────────────────────────────────────────
 
-  private async startRun(task: Task, repo: Repo, account: Account, isReply: boolean, taskRepos: string[]): Promise<void> {
-    // Held before the first await: a graph action clicked while the task starts is refused.
+  /** The account a run uses, plus (for a reply) the one its session was recorded on. */
+  private accountsFor(task: Task, account: Account, isReply: boolean): string[] {
+    const from = isReply ? task.session?.account : undefined;
+    return from && from !== account.id ? [account.id, from] : [account.id];
+  }
+
+  private async startRun(
+    task: Task,
+    repo: Repo,
+    account: Account,
+    isReply: boolean,
+    taskRepos: string[],
+    usedAccounts: string[],
+  ): Promise<void> {
+    // Held before the first await: a graph action clicked (or an account deleted) while the task starts is refused.
     this.starting.set(task.id, taskRepos);
+    this.heldAccounts.set(task.id, usedAccounts);
     try {
       await this.launch(task, repo, account, isReply);
     } finally {
       this.starting.delete(task.id);
+      // Never spawned: free its accounts (unless a newer run of the task, e.g. a fallback, holds them now).
+      if (!this.live.has(task.id) && this.heldAccounts.get(task.id) === usedAccounts) this.heldAccounts.delete(task.id);
     }
   }
 
@@ -960,6 +992,7 @@ export class QueueService {
 
   private async finishRun(run: LiveRun, result: RunResult): Promise<void> {
     this.live.delete(run.taskId);
+    this.heldAccounts.delete(run.taskId);
     const task = (await this.stores.queue.read()).tasks.find((t) => t.id === run.taskId);
     if (!task) {
       void this.tick(); // discarded while it ran: its repos are free again

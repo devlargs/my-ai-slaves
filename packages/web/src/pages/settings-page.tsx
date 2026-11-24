@@ -332,7 +332,8 @@ function AccountRow({
               <p>
                 This logs the CLI out for this account, deletes its config folder{" "}
                 <code className="font-mono text-xs">{account.configDir}</code>, and removes it from every repo&apos;s
-                chain.
+                chain. Its session transcripts go with the folder, so tasks it ran can no longer take replies.
+                It can&apos;t be deleted while a task is running on it.
               </p>
             )}
             {!account.host && account.provider === "cursor-agent" && (

@@ -19,6 +19,7 @@ if (args[0] === "auth" && args[1] === "status") {
   out(loggedIn ? { loggedIn, authMethod: "claude.ai", email: `${label}@example.com`, subscriptionType: "max" } : { loggedIn, authMethod: "none" });
   process.exit(0);
 }
+if (args[0] === "auth" && args[1] === "logout") process.exit(0);
 if (args[0] === "auth" && args[1] === "login") {
   // Mimics the real output: OSC-8 hyperlink + coloured URL, then a code prompt. Code "good" works.
   const url = "https://claude.com/cai/oauth/authorize?code=true&state=abc";

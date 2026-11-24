@@ -18,6 +18,10 @@ import { badRequest, type Broadcaster, conflict, notFound } from "./common";
 export class AccountService {
   /** Last status-check result per account (email/plan stay in memory, never written to accounts.json). */
   private readonly authInfo = new Map<string, { email: string | null; plan: string | null }>();
+  /** Accounts being deleted right now: the scheduler doesn't start a run on them. */
+  private readonly removing = new Set<string>();
+  /** The task running (or starting) on an account, if any (set by the queue). */
+  private taskUsing: (accountId: string) => string | null = () => null;
 
   constructor(
     private readonly stores: DataStores,
@@ -134,8 +138,36 @@ export class AccountService {
     await this.publish();
   }
 
-  /** Log the CLI out for that config dir, delete the dir, and drop the account everywhere. */
+  /** Lets remove() refuse an account a task is running on (its login and session files are in use). */
+  useTaskLock(taskUsing: (accountId: string) => string | null): void {
+    this.taskUsing = taskUsing;
+  }
+
+  /** Whether the account is being deleted (a run must not start on it). */
+  isRemoving(id: string): boolean {
+    return this.removing.has(id);
+  }
+
+  /**
+   * Log the CLI out for that config dir, delete the dir, and drop the account everywhere.
+   * Refused while a task runs on it: checked and held before the first await, so the scheduler
+   * can't start one on it in between.
+   */
   async remove(id: string): Promise<void> {
+    if (this.removing.has(id)) throw conflict(`Account "${id}" is already being deleted.`);
+    const taskId = this.taskUsing(id);
+    if (taskId) {
+      throw conflict(`Task "${taskId}" is running on account "${id}". Stop it or let it finish, then delete the account.`);
+    }
+    this.removing.add(id);
+    try {
+      await this.removeNow(id);
+    } finally {
+      this.removing.delete(id);
+    }
+  }
+
+  private async removeNow(id: string): Promise<void> {
     const account = await this.get(id);
     const settings = await this.stores.settings.read();
     const adapter = this.adapters[account.provider];

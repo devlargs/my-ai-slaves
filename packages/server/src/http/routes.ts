@@ -120,6 +120,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.delete("/api/accounts/:id", async (req) => {
     await accounts.remove(params(req).id);
     await queue.publish();
+    void queue.tick(); // a task that waited for it to be deleted picks another account
     return { ok: true };
   });
   app.post("/api/accounts/:id/login", (req) => logins.start(params(req).id));
