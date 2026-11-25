@@ -121,6 +121,13 @@ export function ActionDialog({ spec, onClose }: { spec: ActionSpec | null; onClo
   );
 }
 
+/** A branch name short enough for one menu line: the middle of a long one is cut out. */
+export function shortRef(name: string, max = 36): string {
+  if (name.length <= max) return name;
+  const head = Math.ceil((max - 1) / 2);
+  return `${name.slice(0, head)}…${name.slice(name.length - (max - 1 - head))}`;
+}
+
 /** The right-click menu, GitKraken's items in GitKraken's order. */
 export function RefMenu({
   menu,
@@ -155,6 +162,9 @@ export function RefMenu({
   const isCurrent = !!t.local && t.local === currentBranch?.name;
   const local = t.local ? graph.local.find((b) => b.name === t.local) : undefined;
   const short = t.commit.slice(0, 7);
+  // Menu labels only: dialogs and actions keep the full names.
+  const nameLabel = name ? shortRef(name) : "";
+  const hereLabel = shortRef(here);
   const keys = targetKeys(t);
   const hidden = keys.length > 0 && keys.every((k) => view.hidden.includes(k));
   const soloed = keys.length > 0 && keys.every((k) => view.solo.includes(k));
@@ -208,18 +218,18 @@ export function RefMenu({
   if (name && !isCurrent) {
     sections.push([
       <DropdownMenuItem key="merge" onSelect={() => void onRun({ op: "merge", ref: name })}>
-        Merge {name} into {here}
+        Merge {nameLabel} into {hereLabel}
       </DropdownMenuItem>,
       <DropdownMenuItem key="rebase" onSelect={() => void onRun({ op: "rebase", ref: name })}>
-        Rebase {here} onto {name}
+        Rebase {hereLabel} onto {nameLabel}
       </DropdownMenuItem>,
       <DropdownMenuItem key="irebase" onSelect={() => onRebase(name)}>
-        Interactive Rebase {here} onto {name}
+        Interactive Rebase {hereLabel} onto {nameLabel}
       </DropdownMenuItem>,
     ]);
     sections.push([
       <DropdownMenuItem key="checkout" onSelect={() => void onRun({ op: "checkout", ref: name })}>
-        Checkout {name}
+        Checkout {nameLabel}
       </DropdownMenuItem>,
     ]);
   }
@@ -231,7 +241,7 @@ export function RefMenu({
       Cherry pick commit
     </DropdownMenuItem>,
     <DropdownMenuSub key="reset">
-      <DropdownMenuSubTrigger disabled={t.commit === headCommit}>Reset {here} to this commit</DropdownMenuSubTrigger>
+      <DropdownMenuSubTrigger disabled={t.commit === headCommit}>Reset {hereLabel} to this commit</DropdownMenuSubTrigger>
       <DropdownMenuSubContent>
         <DropdownMenuItem onSelect={() => onAsk(resetSpec("soft"))}>Soft - keep all changes</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => onAsk(resetSpec("mixed"))}>Mixed - keep working copy but reset index</DropdownMenuItem>
@@ -260,7 +270,7 @@ export function RefMenu({
                 })
               }
             >
-              Rename {t.local}
+              Rename {nameLabel}
             </DropdownMenuItem>,
           ]
         : []),
@@ -282,7 +292,7 @@ export function RefMenu({
           })
         }
       >
-        Delete {name}
+        Delete {nameLabel}
       </DropdownMenuItem>,
     ]);
   }
@@ -361,7 +371,7 @@ export function RefMenu({
       <DropdownMenuTrigger asChild>
         <span aria-hidden className="pointer-events-none fixed size-0" style={{ left: menu.x, top: menu.y }} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="bottom" className="max-w-[min(640px,90vw)]">
+      <DropdownMenuContent align="start" side="bottom" className="max-w-[min(640px,90vw)] whitespace-nowrap">
         {sections.map((items, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: sections are fixed and never reorder
           <div key={i}>

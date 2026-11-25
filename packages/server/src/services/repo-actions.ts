@@ -56,6 +56,12 @@ const PULL_ARGS: Record<Exclude<PullMode, "fetch">, string[]> = {
 };
 
 /** A branch or commit name read from the reflog; never something git could take for an option. */
+/** Why a merge / rebase / cherry-pick / revert / pull was undone: the files that conflict. */
+const conflictMessage = (what: string, files: string[]) => {
+  const shown = files.slice(0, 5).join(", ") + (files.length > 5 ? ` and ${files.length - 5} more` : "");
+  return `The ${what} stopped on ${files.length === 1 ? "a conflict" : "conflicts"} in ${shown}. It was undone, so the repo is as it was. Resolve the ${files.length === 1 ? "conflict" : "conflicts"} outside the app (or queue a task for it), then refresh.`;
+};
+
 const safeRef = (ref: string) => !!ref && !ref.startsWith("-") && !/[\s\0]/.test(ref);
 
 /** Paths per git call when staging / unstaging, so a long list never hits Windows' command-line limit. */
@@ -250,8 +256,10 @@ export class RepoActions {
         await this.git(repo, PULL_ARGS[mode], { env: gitIdentityEnv(identity), timeoutMs: 300_000 });
       } catch (error) {
         // Leave the repo as it was rather than half-merged.
+        const files = await this.conflicted(repo);
         if (await this.exists(repo, "MERGE_HEAD")) await this.git(repo, ["merge", "--abort"]).catch(() => {});
         if (await this.exists(repo, "REBASE_HEAD")) await this.git(repo, ["rebase", "--abort"]).catch(() => {});
+        if (files.length > 0) throw conflict(conflictMessage("pull", files));
         throw error;
       }
       const after = await this.head(repo);
@@ -420,13 +428,22 @@ export class RepoActions {
    * Runs a merge / rebase / cherry-pick / revert; when it stops (a conflict), it's aborted so the repo
    * is as it was, and the error is passed on.
    */
-  private async orAbort(repo: Repo, abort: string[], work: () => Promise<unknown>): Promise<void> {
+  private async orAbort(repo: Repo, abort: string[], work: () => Promise<unknown>, what = abort[0]!): Promise<void> {
     try {
       await work();
     } catch (error) {
+      // git names the conflicts on stdout, so the error alone says nothing: read them before aborting.
+      const files = await this.conflicted(repo);
       await this.git(repo, abort).catch(() => {});
+      if (files.length > 0) throw conflict(conflictMessage(what, files));
       throw error;
     }
+  }
+
+  /** The files a stopped merge / rebase / cherry-pick / revert left in conflict. */
+  private async conflicted(repo: Repo): Promise<string[]> {
+    const out = await this.git(repo, ["diff", "--name-only", "--diff-filter=U", "-z"]).catch(() => "");
+    return out.split("\0").filter(Boolean);
   }
 
   /** Something that moved HEAD: undoable as a `reset --keep` back to `before`. */
@@ -491,6 +508,7 @@ export class RepoActions {
           const before = await this.head(repo);
           await this.orAbort(repo, ["merge", "--abort"], () =>
             this.git(repo, ["merge", "--no-edit", action.ref], { env: { ...env, GIT_EDITOR: "true" }, ...slow }),
+            `merge of ${action.ref}`,
           );
           return this.moved(repo, h, before, `merge ${action.ref}`);
         }

@@ -62,7 +62,9 @@ describe("RepoActions.refAction (the graph's right-click menu)", () => {
     await commit(path, "a.txt", "theirs");
     sh(path, "checkout", "-q", "main");
     const head = await commit(path, "a.txt", "ours");
-    await expect(new RepoActions().refAction(repo, { op: "merge", ref: "other" }, identity)).rejects.toThrow();
+    await expect(new RepoActions().refAction(repo, { op: "merge", ref: "other" }, identity)).rejects.toThrow(
+      /merge of other stopped on a conflict in a\.txt/,
+    );
     expect(sh(path, "rev-parse", "HEAD")).toBe(head);
     expect(sh(path, "status", "--porcelain")).toBe("");
   });
