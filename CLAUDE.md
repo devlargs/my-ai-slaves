@@ -121,7 +121,8 @@ desktop app also uses 3005 and refuses to start if it's taken).
   task's other repos. Runs happen in the checkout as it is (no clean-tree requirement); the repo prompts
   decide how changes are handled. The only git the app runs on a task is read-only (where the checkout
   is, and the diff since the task started), plus the one-time legacy worktree migration. Claude runs with
-  `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)"`, and Cursor never gets `-w`.
+  `--disallowedTools EnterWorktree ExitWorktree "Bash(git worktree *)" "Agent(isolation:worktree)"`, and Cursor never
+  gets `-w` and its cli-config denies `Shell(git:worktree*)` (local accounts). So "no worktrees" needs no prompt text.
   The one exception is the Repos commit graph (`src/services/repo-actions.ts`): the toolbar's Undo, Redo,
   Pull, Branch, Stash (every change, untracked too) and Pop (stash@{0}), and the WIP panel's Stage / Unstage file (or all) and Commit (summary + description,
   amend, skip hooks; uses the repo's committer), and the right-click menu on a branch or commit

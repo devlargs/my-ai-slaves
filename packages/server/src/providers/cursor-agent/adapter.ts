@@ -30,6 +30,9 @@ const MODE_FLAGS: Record<SettingsFile["providers"]["cursor-agent"]["permissionMo
   allowlist: [],
 };
 
+/** cli-config.json deny rule: the `git` command with arguments starting with `worktree`. */
+export const CURSOR_NO_WORKTREE = "Shell(git:worktree*)";
+
 export class CursorAgentAdapter implements ProviderAdapter {
   readonly provider = "cursor-agent" as const;
 
@@ -59,8 +62,9 @@ export class CursorAgentAdapter implements ProviderAdapter {
   }
 
   /**
-   * Turn off "Made with Cursor" on commits and PRs (documented cli-config.json keys), for local
-   * accounts. Remote accounts use the server's own config, which the app leaves as it is.
+   * Local accounts' cli-config.json (documented keys): turn off "Made with Cursor" on commits and PRs,
+   * and deny `git worktree` (`Shell(command:args)`; deny rules hold even with --force), since tasks run
+   * in the repo as it's checked out. Remote accounts use the server's own config, which the app leaves as it is.
    */
   async prepare(ctx: AccountContext): Promise<void> {
     if (!ctx.configDir) return;
@@ -73,8 +77,11 @@ export class CursorAgentAdapter implements ProviderAdapter {
       config = { version: 1, editor: { vimMode: false }, permissions: { allow: [], deny: [] } };
     }
     const attribution = { ...(config.attribution ?? {}) };
-    if (attribution.attributeCommitsToAgent === false && attribution.attributePRsToAgent === false) return;
+    const deny: unknown[] = Array.isArray(config.permissions?.deny) ? config.permissions.deny : [];
+    const attributionOff = attribution.attributeCommitsToAgent === false && attribution.attributePRsToAgent === false;
+    if (attributionOff && deny.includes(CURSOR_NO_WORKTREE)) return;
     config.attribution = { ...attribution, attributeCommitsToAgent: false, attributePRsToAgent: false };
+    config.permissions = { ...(config.permissions ?? {}), deny: deny.includes(CURSOR_NO_WORKTREE) ? deny : [...deny, CURSOR_NO_WORKTREE] };
     await mkdir(ctx.configDir, { recursive: true });
     await writeFile(file, `${JSON.stringify(config, null, 2)}\n`);
   }

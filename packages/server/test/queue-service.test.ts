@@ -389,7 +389,7 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     await waitFor(taskWith(queue, created.id, "needs-review"));
     const [call] = await received();
     const i = call!.args.indexOf("--disallowedTools");
-    expect(call!.args.slice(i + 1, i + 4)).toEqual(["EnterWorktree", "ExitWorktree", "Bash(git worktree *)"]);
+    expect(call!.args.slice(i + 1, i + 5)).toEqual(["EnterWorktree", "ExitWorktree", "Bash(git worktree *)", "Agent(isolation:worktree)"]);
   });
 
   it("falls back to the next account on a usage limit; Cursor gets the same full prompt", async () => {

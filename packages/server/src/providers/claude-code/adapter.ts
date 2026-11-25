@@ -60,8 +60,9 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
       "--settings",
       JSON.stringify({ autoContinueAtUsageLimit: false, attribution: false }),
     ];
-    // Tasks run in the repo as it's checked out (no worktrees): take away Claude's own worktree tools and `git worktree`.
-    args.push("--disallowedTools", "EnterWorktree", "ExitWorktree", "Bash(git worktree *)");
+    // Tasks run in the repo as it's checked out (no worktrees): take away Claude's own worktree tools, `git worktree`
+    // and subagents that ask for a worktree (documented deny rule: `Tool(param:value)` matches an input parameter).
+    args.push("--disallowedTools", "EnterWorktree", "ExitWorktree", "Bash(git worktree *)", "Agent(isolation:worktree)");
     // Ask mode: a bare tool name removes the tool altogether (deny rules hold in every mode).
     if (input.readOnly) args.push("Edit", "Write", "NotebookEdit");
     if (s.model) args.push("--model", s.model);
