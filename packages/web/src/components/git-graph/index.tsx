@@ -38,6 +38,9 @@ import {
   visibleCommits,
 } from "./view-state";
 
+const WIP_SECTIONS: WipSection[] = ["conflicted", "staged", "unstaged"];
+const WIP_LABEL: Record<WipSection, string> = { conflicted: "Conflicted", unstaged: "Unstaged", staged: "Staged" };
+
 /**
  * GitKraken-style view of a repo: branches, the commit graph, and each commit's files and diffs. The
  * toolbar (Undo / Redo / Pull / Branch) is the only thing here that changes the repo, on a click.
@@ -148,8 +151,8 @@ export function GitGraphDialog({
         // An open diff follows its file when it's staged / unstaged, and closes when the file is gone.
         setWipFile((f) => {
           if (!f || w[f.section].some((x) => x.path === f.path)) return f;
-          const other: WipSection = f.section === "staged" ? "unstaged" : "staged";
-          return w[other].some((x) => x.path === f.path) ? { section: other, path: f.path } : null;
+          const other = WIP_SECTIONS.find((s) => w[s].some((x) => x.path === f.path));
+          return other ? { section: other, path: f.path } : null;
         });
       },
       (e: unknown) => live && setWipError(e instanceof Error ? e.message : String(e)),
@@ -271,7 +274,14 @@ export function GitGraphDialog({
     } finally {
       setActing(null);
       details.current.clear();
-      await load(limit);
+      const g = await load(limit);
+      // A merge that stopped on conflicts: open the WIP panel, where they're resolved (or the merge aborted).
+      if (action.op === "merge" && g?.wip?.merging) {
+        setCompare(null);
+        setCompareFile(null);
+        setOpenFile(null);
+        setSelected(WIP);
+      }
     }
   };
 
@@ -358,6 +368,21 @@ export function GitGraphDialog({
       setSelected(head?.hash ?? null);
     }
     return true;
+  };
+
+  /** Abort Merge: back to how the repo was before the merge. */
+  const abortMerge = async () => {
+    setWipBusy(true);
+    setWipActionError(null);
+    try {
+      await api.gitRefAction(repoId, { op: "merge-abort" });
+      setWipFile(null);
+    } catch (e) {
+      setWipActionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWipBusy(false);
+      await load(limit);
+    }
   };
 
   const jump = (hash: string) => {
@@ -473,13 +498,13 @@ export function GitGraphDialog({
             ) : selected === WIP && wipFile && wip ? (
               <CommitFileView
                 files={wip[wipFile.section]}
-                patch={wipFile.section === "staged" ? wip.stagedPatch : wip.unstagedPatch}
+                patch={wipFile.section === "staged" ? wip.stagedPatch : wipFile.section === "unstaged" ? wip.unstagedPatch : wip.conflictedPatch}
                 path={wipFile.path}
-                label={wipFile.section === "staged" ? "Staged" : "Unstaged"}
+                label={WIP_LABEL[wipFile.section]}
                 action={{
-                  label: wipFile.section === "staged" ? "Unstage File" : "Stage File",
+                  label: wipFile.section === "staged" ? "Unstage File" : wipFile.section === "unstaged" ? "Stage File" : "Mark Resolved",
                   disabled: wipBusy,
-                  onClick: (f) => void stageFiles(wipFile.section === "unstaged", [f]),
+                  onClick: (f) => void stageFiles(wipFile.section !== "staged", [f]),
                 }}
                 onBack={() => jump(WIP)}
                 onOpen={(path) => setWipFile({ section: wipFile.section, path })}
@@ -645,6 +670,7 @@ export function GitGraphDialog({
                 onStage={(files) => void stageFiles(true, files)}
                 onUnstage={(files) => void stageFiles(false, files)}
                 onCommit={commitStaged}
+                onAbortMerge={() => void abortMerge()}
               />
             )}
             {!compare && current && selected !== WIP && (

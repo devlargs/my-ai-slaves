@@ -109,8 +109,9 @@ export type RebaseStep = z.infer<typeof RebaseStep>;
 
 /**
  * The graph's right-click menu on a branch or commit (like GitKraken's). Only run on a click, refused
- * with 409 while a task runs in the repo. A merge, rebase, cherry-pick or revert that stops on a
- * conflict is aborted, so the repo is left as it was.
+ * with 409 while a task runs in the repo. A rebase, cherry-pick or revert that stops on a conflict
+ * is aborted, so the repo is left as it was. A merge that stops on conflicts is left in progress:
+ * resolve the files (staging one marks it resolved), then commit it, or abort it with `merge-abort`.
  * POST /api/repos/:id/git/ref GitRefAction → GitActionResult
  *
  * `branch` = a local branch name ("main"); `ref` = a local branch or a remote-tracking ref
@@ -125,6 +126,8 @@ export const GitRefAction = z.discriminatedUnion("op", [
   z.object({ op: z.literal("set-upstream"), branch: RefName, upstream: RefName }),
   /** Merge `ref` into the checked-out branch. */
   z.object({ op: z.literal("merge"), ref: RefName }),
+  /** Abort the merge in progress (`git merge --abort`): the repo goes back to how it was before it. */
+  z.object({ op: z.literal("merge-abort") }),
   /** Rebase the checked-out branch onto `ref`. */
   z.object({ op: z.literal("rebase"), ref: RefName }),
   /** Rebase the checked-out branch onto `ref`, with the commits reordered / squashed / reworded / dropped. */

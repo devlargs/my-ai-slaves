@@ -56,7 +56,7 @@ const PULL_ARGS: Record<Exclude<PullMode, "fetch">, string[]> = {
 };
 
 /** A branch or commit name read from the reflog; never something git could take for an option. */
-/** Why a merge / rebase / cherry-pick / revert / pull was undone: the files that conflict. */
+/** Why a rebase / cherry-pick / revert / pull was undone: the files that conflict. */
 const conflictMessage = (what: string, files: string[]) => {
   const shown = files.slice(0, 5).join(", ") + (files.length > 5 ? ` and ${files.length - 5} more` : "");
   return `The ${what} stopped on ${files.length === 1 ? "a conflict" : "conflicts"} in ${shown}. It was undone, so the repo is as it was. Resolve the ${files.length === 1 ? "conflict" : "conflicts"} outside the app (or queue a task for it), then refresh.`;
@@ -315,7 +315,11 @@ export class RepoActions {
       if (!summary) throw badRequest("Write a commit summary first.");
       if (/[\r\n]/.test(summary)) throw badRequest("The commit summary is a single line.");
       if (input.amend && !(await this.exists(repo, "HEAD"))) throw conflict("There's no commit to amend yet.");
-      if (!input.amend) {
+      // A merge that stopped on conflicts: this commit finishes it, once every file is resolved.
+      const merging = await this.exists(repo, "MERGE_HEAD");
+      if (merging && input.amend) throw conflict("A merge is in progress. Commit or abort it before amending.");
+      if ((await this.conflicted(repo)).length > 0) throw conflict("Some files still have conflicts. Resolve them (or mark them resolved) first.");
+      if (!input.amend && !merging) {
         const staged = await this.git(repo, ["diff", "--cached", "--name-only", "-z", "--"]);
         if (!staged) throw conflict("Nothing is staged. Stage the files to commit first.");
       }
@@ -425,7 +429,7 @@ export class RepoActions {
   }
 
   /**
-   * Runs a merge / rebase / cherry-pick / revert; when it stops (a conflict), it's aborted so the repo
+   * Runs a rebase / cherry-pick / revert; when it stops (a conflict), it's aborted so the repo
    * is as it was, and the error is passed on.
    */
   private async orAbort(repo: Repo, abort: string[], work: () => Promise<unknown>, what = abort[0]!): Promise<void> {
@@ -506,11 +510,20 @@ export class RepoActions {
           await this.notMidOperation(repo);
           const h = await this.sync(repo);
           const before = await this.head(repo);
-          await this.orAbort(repo, ["merge", "--abort"], () =>
-            this.git(repo, ["merge", "--no-edit", action.ref], { env: { ...env, GIT_EDITOR: "true" }, ...slow }),
-            `merge of ${action.ref}`,
-          );
+          try {
+            await this.git(repo, ["merge", "--no-edit", action.ref], { env: { ...env, GIT_EDITOR: "true" }, ...slow });
+          } catch (error) {
+            // Stopped on conflicts: left in progress, for the WIP panel to resolve and commit, or abort.
+            if ((await this.exists(repo, "MERGE_HEAD")) && (await this.conflicted(repo)).length > 0) return this.view(h);
+            await this.git(repo, ["merge", "--abort"]).catch(() => {});
+            throw error;
+          }
           return this.moved(repo, h, before, `merge ${action.ref}`);
+        }
+        case "merge-abort": {
+          if (!(await this.exists(repo, "MERGE_HEAD"))) throw conflict("There's no merge in progress. Refresh and try again.");
+          await this.git(repo, ["merge", "--abort"]);
+          return this.view(await this.sync(repo));
         }
         case "rebase":
         case "interactive-rebase": {

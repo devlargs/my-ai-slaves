@@ -127,8 +127,10 @@ desktop app also uses 3005 and refuses to start if it's taken).
   Pull, Branch, Stash (every change, untracked too) and Pop (stash@{0}), and the WIP panel's Stage / Unstage file (or all) and Commit (summary + description,
   amend, skip hooks; uses the repo's committer), and the right-click menu on a branch or commit
   (GitKraken's: pull/push/set upstream, merge, rebase, interactive rebase, checkout, create branch,
-  cherry-pick, reset soft/mixed/hard, revert, rename/delete branch, tags; a conflicting merge/rebase/
-  cherry-pick/revert is aborted, and a failed merge shows a "Merge Failed" alert in the corner), a double click on a local or remote branch (label or sidebar row: checks it out,
+  cherry-pick, reset soft/mixed/hard, revert, rename/delete branch, tags; a conflicting rebase/
+  cherry-pick/revert is aborted; a merge that stops on conflicts is left in progress and the WIP panel
+  becomes GitKraken's "Merge conflicts detected" panel: conflicted files (Mark Resolved = stage), resolved
+  files, Commit and Merge / Abort Merge; a merge that fails for another reason shows a "Merge Failed" alert in the corner), a double click on a local or remote branch (label or sidebar row: checks it out,
   and an alert says why when it can't: a merge in progress, changes that would be overwritten), and the sidebar's Stashes group (right-click: apply, pop, delete,
   edit message, hide; stashes are listed there, not drawn in the graph) change the repo **only when you click them**, and are refused while a
   task runs there. Its Hide / Solo / Pin to Left (and a stash's Hide) only change the view (localStorage); its "Create

@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import type {
   CommitDetail,
   CommitFile,
   CompareResult,
   GraphCommit,
   LocalBranch,
+  MergeState,
   RebasePlan,
   RemoteBranch,
   Repo,
@@ -145,12 +147,30 @@ export class RepoGit {
       });
     }
     const more = commits.length > limit;
-    const [{ local, remote }, status, stashes] = await Promise.all([
+    const [{ local, remote }, status, stashes, merging] = await Promise.all([
       this.branches(repo).catch(() => ({ local: [], remote: [] })),
-      this.status(repo).catch(() => ({ staged: [], unstaged: [] })),
+      this.status(repo).catch(() => ({ staged: [], unstaged: [], conflicted: [] })),
       this.stashes(repo).catch(() => []),
+      this.merging(repo).catch(() => false),
     ]);
-    return { commits: commits.slice(0, limit), head, more, local, remote, wip: summarize(status.staged, status.unstaged), stashes };
+    return { commits: commits.slice(0, limit), head, more, local, remote, wip: summarize(status, merging), stashes };
+  }
+
+  /** Whether a merge is in progress (it stopped on conflicts and hasn't been committed or aborted). */
+  private async merging(repo: Repo): Promise<boolean> {
+    return (await this.git(repo, ["rev-parse", "-q", "--verify", "MERGE_HEAD"], [1])).trim() !== "";
+  }
+
+  /** The merge in progress: what's being merged in, and the message git prepared for its commit. Read-only. */
+  private async mergeState(repo: Repo): Promise<MergeState | null> {
+    const theirs = (await this.git(repo, ["rev-parse", "-q", "--verify", "MERGE_HEAD"], [1])).trim();
+    if (!theirs) return null;
+    const path = (await this.git(repo, ["rev-parse", "--git-path", "MERGE_MSG"])).trim();
+    const text = await (repo.host
+      ? runOn(repo.host, "cat", [path], repo.path).then((r) => r.stdout)
+      : readFile(isAbsolute(path) ? path : join(repo.path, path), "utf8")
+    ).catch(() => "");
+    return { ref: /^Merge (?:remote-tracking )?branch '([^']+)'/.exec(text)?.[1] ?? theirs.slice(0, 7), ...parseMergeMessage(text) };
   }
 
   /** `git stash list`, newest first. Read-only. */
@@ -159,7 +179,7 @@ export class RepoGit {
   }
 
   /** Staged and unstaged (incl. untracked) files, from `git status`. Read-only. */
-  async status(repo: Repo): Promise<{ staged: CommitFile[]; unstaged: CommitFile[] }> {
+  async status(repo: Repo): Promise<ReturnType<typeof parseStatus>> {
     const out = await this.git(repo, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
     return parseStatus(out);
   }
@@ -167,19 +187,25 @@ export class RepoGit {
   /** What isn't committed yet: staged and unstaged files with their diffs, for the graph's WIP row. Read-only. */
   async workingChanges(repo: Repo): Promise<WorkingChanges> {
     const diffArgs = ["--no-color", "--no-ext-diff", "-M"];
-    const [head, { staged, unstaged }, stagedPatch, trackedPatch] = await Promise.all([
+    const [head, { staged, unstaged, conflicted }, stagedPatch, trackedPatch, merge] = await Promise.all([
       this.currentRef(repo).catch(() => null),
       this.status(repo),
       this.git(repo, ["diff", "--cached", ...diffArgs, "--"]),
       this.git(repo, ["diff", ...diffArgs, "--"]),
+      this.mergeState(repo).catch(() => null),
     ]);
     const added = await this.untrackedPatch(repo);
+    // A conflicted file's plain diff is a three-way one ("diff --cc"); against HEAD it reads like any other.
+    const conflictedPatch = conflicted.length > 0 ? await this.git(repo, ["diff", "HEAD", ...diffArgs, "--"]).catch(() => "") : "";
     return {
       head,
       staged,
       unstaged,
+      conflicted,
       stagedPatch,
-      unstagedPatch: [trackedPatch, added].filter((p) => p.trim()).join(""),
+      unstagedPatch: [withoutUnmerged(trackedPatch), added].filter((p) => p.trim()).join(""),
+      conflictedPatch,
+      merge,
     };
   }
 
@@ -364,12 +390,13 @@ function statusLetter(c: string): CommitFile["status"] {
 
 /**
  * `git status --porcelain=v1 -z` → staged (index) and unstaged (working tree + untracked) files.
- * Renames print the new path, then the old one. Conflicted files count as unstaged.
+ * Renames print the new path, then the old one. Files with unresolved conflicts are listed on their own.
  */
-export function parseStatus(out: string): { staged: CommitFile[]; unstaged: CommitFile[] } {
+export function parseStatus(out: string): { staged: CommitFile[]; unstaged: CommitFile[]; conflicted: CommitFile[] } {
   const parts = out.split("\0");
   const staged: CommitFile[] = [];
   const unstaged: CommitFile[] = [];
+  const conflicted: CommitFile[] = [];
   for (let i = 0; i < parts.length; i++) {
     const entry = parts[i]!;
     if (entry.length < 4) continue;
@@ -381,28 +408,45 @@ export function parseStatus(out: string): { staged: CommitFile[]; unstaged: Comm
       continue;
     }
     if (x === "U" || y === "U" || (x === "A" && y === "A") || (x === "D" && y === "D")) {
-      unstaged.push({ status: "M", path, oldPath: null });
+      conflicted.push({ status: "M", path, oldPath: null });
       continue;
     }
     if (x !== " ") staged.push({ status: statusLetter(x), path, oldPath });
     if (y !== " ") unstaged.push({ status: statusLetter(y), path, oldPath: null });
   }
-  return { staged, unstaged };
+  return { staged, unstaged, conflicted };
 }
 
-/** The WIP row's counts: each path once, by what it looks like overall. */
-function summarize(staged: CommitFile[], unstaged: CommitFile[]): WipSummary | null {
+/** `git diff` without its three-way parts ("diff --cc", "* Unmerged path"), which the diff view can't read. */
+export function withoutUnmerged(patch: string): string {
+  if (!/^(diff --cc |\* Unmerged path )/m.test(patch)) return patch;
+  return patch
+    .split(/^(?=diff )/m)
+    .filter((part) => !part.startsWith("diff --cc "))
+    .join("")
+    .replace(/^\* Unmerged path .*\r?\n?/gm, "");
+}
+
+/** MERGE_MSG → the commit box's summary and description (git's "# Conflicts:" comment lines left out). */
+export function parseMergeMessage(text: string): { summary: string; description: string } {
+  const lines = text.split(/\r?\n/).filter((l) => !l.startsWith("#"));
+  return { summary: (lines[0] ?? "").trim(), description: lines.slice(1).join("\n").trim() };
+}
+
+/** The WIP row's counts: each path once, by what it looks like overall. Null when there's nothing to show. */
+function summarize({ staged, unstaged, conflicted }: ReturnType<typeof parseStatus>, merging: boolean): WipSummary | null {
   const by = new Map<string, CommitFile["status"]>();
-  for (const f of [...staged, ...unstaged]) {
+  for (const f of [...staged, ...unstaged, ...conflicted]) {
     const before = by.get(f.path);
     // Staged as new, then edited: still a new file. Deleted anywhere: deleted.
     by.set(f.path, f.status === "D" ? "D" : before === "A" || before === "D" ? before : f.status);
   }
-  if (by.size === 0) return null;
+  // A merge with nothing left to commit still shows the row: that's where it's finished or aborted.
+  if (by.size === 0 && !merging) return null;
   const all = [...by.values()];
   const added = all.filter((s) => s === "A" || s === "C").length;
   const deleted = all.filter((s) => s === "D").length;
-  return { files: by.size, added, deleted, modified: by.size - added - deleted };
+  return { files: by.size, added, deleted, modified: by.size - added - deleted, conflicts: conflicted.length, merging };
 }
 
 /** Gravatar id: SHA-256 of the trimmed, lowercased email. */

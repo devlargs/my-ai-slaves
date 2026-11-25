@@ -56,17 +56,60 @@ describe("RepoActions.refAction (the graph's right-click menu)", () => {
     expect(sh(path, "rev-parse", "HEAD")).toBe(m1);
   });
 
-  it("aborts a merge that conflicts, leaving the repo as it was", async () => {
-    const { path, repo } = await newRepo();
-    sh(path, "checkout", "-q", "-b", "other");
-    await commit(path, "a.txt", "theirs");
-    sh(path, "checkout", "-q", "main");
-    const head = await commit(path, "a.txt", "ours");
-    await expect(new RepoActions().refAction(repo, { op: "merge", ref: "other" }, identity)).rejects.toThrow(
-      /merge of other stopped on a conflict in a\.txt/,
-    );
+  /** main and `other` both changed a.txt; `other` also added b.txt. */
+  async function conflicting() {
+    const r = await newRepo();
+    sh(r.path, "checkout", "-q", "-b", "other");
+    await commit(r.path, "a.txt", "theirs");
+    await commit(r.path, "b.txt", "theirs too");
+    sh(r.path, "checkout", "-q", "main");
+    const head = await commit(r.path, "a.txt", "ours");
+    return { ...r, head };
+  }
+
+  it("leaves a merge that conflicts in progress, then commits it once the files are resolved", async () => {
+    const { path, repo, head } = await conflicting();
+    const actions = new RepoActions();
+    const git = new RepoGit();
+    await actions.refAction(repo, { op: "merge", ref: "other" }, identity);
+    expect(sh(path, "rev-parse", "HEAD")).toBe(head);
+    expect((await git.graph(repo, 10)).wip).toMatchObject({ conflicts: 1, merging: true });
+
+    const wip = await git.workingChanges(repo);
+    expect(wip.merge).toEqual({ ref: "other", summary: "Merge branch 'other'", description: "" });
+    expect(wip.conflicted).toEqual([{ status: "M", path: "a.txt", oldPath: null }]);
+    expect(wip.unstaged).toEqual([]);
+    expect(wip.staged).toEqual([{ status: "A", path: "b.txt", oldPath: null }]);
+    expect(wip.conflictedPatch).toContain("+<<<<<<< HEAD");
+    expect(wip.unstagedPatch).not.toContain("diff --cc");
+
+    // Still conflicted: no commit, no amend, no second merge.
+    await expect(actions.commit(repo, { summary: "Merge branch 'other'" }, identity)).rejects.toThrow(/still have conflicts/);
+    await expect(actions.commit(repo, { summary: "x", amend: true }, identity)).rejects.toThrow(/merge is in progress/);
+    await expect(actions.refAction(repo, { op: "merge", ref: "other" }, identity)).rejects.toThrow(/in progress/);
+
+    // Resolve it (staging marks it resolved), then Commit and Merge.
+    await writeFile(join(path, "a.txt"), "both\n");
+    await actions.stage(repo, ["a.txt"]);
+    const resolved = await git.workingChanges(repo);
+    expect(resolved.conflicted).toEqual([]);
+    expect(resolved.merge?.ref).toBe("other");
+    await actions.commit(repo, { summary: "Merge branch 'other'" }, identity);
+    expect(sh(path, "log", "-1", "--format=%P").split(" ")).toHaveLength(2);
+    expect(sh(path, "log", "-1", "--format=%s|%cn")).toBe("Merge branch 'other'|Tester");
+    expect(sh(path, "status", "--porcelain")).toBe("");
+    expect((await git.workingChanges(repo)).merge).toBeNull();
+  });
+
+  it("aborts a merge in progress, leaving the repo as it was", async () => {
+    const { path, repo, head } = await conflicting();
+    const actions = new RepoActions();
+    await actions.refAction(repo, { op: "merge", ref: "other" }, identity);
+    await actions.refAction(repo, { op: "merge-abort" }, identity);
     expect(sh(path, "rev-parse", "HEAD")).toBe(head);
     expect(sh(path, "status", "--porcelain")).toBe("");
+    expect((await new RepoGit().graph(repo, 10)).wip).toBeNull();
+    await expect(actions.refAction(repo, { op: "merge-abort" }, identity)).rejects.toThrow(/no merge in progress/);
   });
 
   it("rebases the checked-out branch onto another", async () => {

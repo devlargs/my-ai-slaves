@@ -1,5 +1,5 @@
 import type { CommitFile } from "@my-ai-slaves/shared";
-import { FileMinusIcon, FilePenIcon, FilePlusIcon, FileSymlinkIcon, FolderTreeIcon, ListIcon } from "lucide-react";
+import { FileMinusIcon, FilePenIcon, FilePlusIcon, FileSymlinkIcon, FolderTreeIcon, ListIcon, TriangleAlertIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { FolderRow } from "./sidebar";
@@ -33,6 +33,7 @@ function FileRow({
   active,
   onOpen,
   action,
+  conflict,
 }: {
   file: CommitFile;
   label: React.ReactNode;
@@ -40,6 +41,7 @@ function FileRow({
   active: boolean;
   onOpen: (path: string) => void;
   action?: FileAction;
+  conflict?: boolean;
 }) {
   return (
     <div
@@ -55,7 +57,11 @@ function FileRow({
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 pr-2 text-left"
         style={{ paddingLeft: 8 + depth * 14 }}
       >
-        <FileStatusIcon status={file.status} />
+        {conflict ? (
+          <TriangleAlertIcon className="size-3.5 shrink-0 text-warning-ink" aria-label="conflicted" />
+        ) : (
+          <FileStatusIcon status={file.status} />
+        )}
         <span className="flex min-w-0 flex-1 font-mono">{label}</span>
       </button>
       {action && (
@@ -102,12 +108,15 @@ export function FileList({
   openFile,
   onOpen,
   action,
+  conflict,
 }: {
   files: CommitFile[];
   view: FileView;
   openFile: string | null;
   onOpen: (path: string) => void;
   action?: FileAction;
+  /** Files with unresolved conflicts: a warning sign instead of the status icon. */
+  conflict?: boolean;
 }) {
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const tree = useMemo(() => buildTree(files, (f) => f.path), [files]);
@@ -124,6 +133,7 @@ export function FileList({
             active={openFile === node.item.path}
             onOpen={onOpen}
             action={action}
+            conflict={conflict}
           />
         );
       }
@@ -160,6 +170,7 @@ export function FileList({
                 active={openFile === f.path}
                 onOpen={onOpen}
                 action={action}
+                conflict={conflict}
                 label={
                   // A long folder path gives way first, so the file name stays readable.
                   <>

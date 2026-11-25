@@ -4,7 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Repo } from "@my-ai-slaves/shared";
 import { describe, expect, it } from "vitest";
-import { parseStatus, RepoGit } from "../src/services/repo-git";
+import { parseMergeMessage, parseStatus, RepoGit, withoutUnmerged } from "../src/services/repo-git";
 import { tempDir } from "./helpers";
 
 const sh = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -126,7 +126,7 @@ describe("RepoGit working changes (the graph's WIP row)", () => {
     const status = sh(path, "status", "--porcelain");
 
     const graph = await git.graph(repo, 10);
-    expect(graph.wip).toEqual({ files: 3, added: 1, modified: 1, deleted: 1 });
+    expect(graph.wip).toEqual({ files: 3, added: 1, modified: 1, deleted: 1, conflicts: 0, merging: false });
 
     const wip = await git.workingChanges(repo);
     expect(wip.head).toBe("main");
@@ -149,10 +149,21 @@ describe("RepoGit working changes (the graph's WIP row)", () => {
   it("parses renames and conflicts from git status", () => {
     expect(parseStatus("R  new.txt\0old.txt\0UU both.txt\0?? x\0")).toEqual({
       staged: [{ status: "R", path: "new.txt", oldPath: "old.txt" }],
-      unstaged: [
-        { status: "M", path: "both.txt", oldPath: null },
-        { status: "A", path: "x", oldPath: null },
-      ],
+      unstaged: [{ status: "A", path: "x", oldPath: null }],
+      conflicted: [{ status: "M", path: "both.txt", oldPath: null }],
     });
+  });
+
+  it("reads git's merge message, without its comment lines", () => {
+    expect(parseMergeMessage("Merge branch 'feat' into dev\n\n# Conflicts:\n#\tf\n")).toEqual({
+      summary: "Merge branch 'feat' into dev",
+      description: "",
+    });
+  });
+
+  it("drops three-way diffs from an unstaged patch", () => {
+    const plain = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n";
+    expect(withoutUnmerged(plain)).toBe(plain);
+    expect(withoutUnmerged(`diff --cc f\nindex 1,2..0\n--- a/f\n+++ b/f\n@@@ -1,1 -1,1 +1,5 @@@\n++x\n${plain}* Unmerged path g\n`)).toBe(plain);
   });
 });

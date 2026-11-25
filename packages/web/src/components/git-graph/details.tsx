@@ -13,7 +13,9 @@ import {
   ChevronRightIcon,
   CopyIcon,
   GitCommitHorizontalIcon,
+  GitMergeIcon,
   Loader2Icon,
+  TriangleAlertIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseDiff } from "react-diff-view";
@@ -26,7 +28,7 @@ import { type FileAction, type FileView, ViewToggle, FileList, CommitFiles } fro
 import { initial, avatarUrl } from "./rows";
 
 /** Which list of the WIP panel a file was opened from. */
-export type WipSection = "unstaged" | "staged";
+export type WipSection = "conflicted" | "unstaged" | "staged";
 
 /** The summary line's soft limit; the counter goes negative past it, like GitKraken's. */
 const SUMMARY_LIMIT = 72;
@@ -34,6 +36,8 @@ const SUMMARY_LIMIT = 72;
 /**
  * The WIP row's details, like GitKraken's: the checkout's unstaged and staged files (stage / unstage
  * one file or all of them), and a commit box that commits what's staged. Nothing changes until you click.
+ * A merge that stopped on conflicts turns it into GitKraken's "Merge conflicts detected" panel: the
+ * conflicted files (mark them resolved once fixed), the resolved ones, and Commit and Merge / Abort Merge.
  */
 export function WipPanel({
   repoId,
@@ -46,6 +50,7 @@ export function WipPanel({
   onStage,
   onUnstage,
   onCommit,
+  onAbortMerge,
 }: {
   repoId: string;
   /** The checked-out commit: what "Amend previous commit" replaces. */
@@ -58,6 +63,7 @@ export function WipPanel({
   onStage: (files: CommitFile[] | null) => void;
   onUnstage: (files: CommitFile[] | null) => void;
   onCommit: (input: GitCommitRequest) => Promise<boolean>;
+  onAbortMerge: () => void;
 }) {
   const [view, setView] = useState<FileView>("path");
   const [closed, setClosed] = useState<Set<WipSection>>(new Set());
@@ -66,8 +72,32 @@ export function WipPanel({
   const [amend, setAmend] = useState(false);
   const [options, setOptions] = useState(false);
   const [noVerify, setNoVerify] = useState(false);
-  const total = changes ? new Set([...changes.staged, ...changes.unstaged].map((f) => f.path)).size : 0;
+  const total = changes ? new Set([...changes.staged, ...changes.unstaged, ...changes.conflicted].map((f) => f.path)).size : 0;
   const staged = changes?.staged.length ?? 0;
+  const conflicts = changes?.conflicted.length ?? 0;
+  const merge = changes?.merge ?? null;
+
+  // A merge starts from git's own message for it ("Merge branch 'x' into y"), unless something's written already.
+  const mergeKey = merge ? `${merge.ref}\n${merge.summary}` : null;
+  const prefilled = useRef<{ summary: string; description: string } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only when a merge starts or ends
+  useEffect(() => {
+    if (!merge) {
+      // Aborted (or finished elsewhere): take the untouched merge message back out.
+      const was = prefilled.current;
+      prefilled.current = null;
+      if (was) {
+        setSummary((s) => (s === was.summary ? "" : s));
+        setDescription((d) => (d === was.description ? "" : d));
+      }
+      return;
+    }
+    setAmend(false);
+    if (summary.trim() || description.trim()) return;
+    prefilled.current = { summary: merge.summary, description: merge.description };
+    setSummary(merge.summary);
+    setDescription(merge.description);
+  }, [mergeKey]);
 
   // Amending starts from the last commit's message (only when nothing's written yet).
   const toggleAmend = (on: boolean) => {
@@ -82,10 +112,10 @@ export function WipPanel({
     );
   };
 
-  const canCommit = !busy && !!summary.trim() && (staged > 0 || amend);
+  const canCommit = !busy && !!summary.trim() && conflicts === 0 && (staged > 0 || amend || !!merge);
   const commit = async () => {
     if (!canCommit) return;
-    const ok = await onCommit({ summary: summary.trim(), description: description.trim() || undefined, amend, noVerify });
+    const ok = await onCommit({ summary: summary.trim(), description: description.trim() || undefined, amend: amend && !merge, noVerify });
     if (ok) {
       setSummary("");
       setDescription("");
@@ -95,7 +125,9 @@ export function WipPanel({
 
   const section = (key: WipSection, label: string, files: CommitFile[]) => {
     const open = !closed.has(key);
-    const all = key === "unstaged" ? "Stage All Changes" : "Unstage All Changes";
+    const all = key === "conflicted" ? "Mark All Resolved" : key === "unstaged" ? "Stage All Changes" : "Unstage All Changes";
+    // Staging a conflicted file is how git is told it's resolved.
+    const stages = key !== "staged";
     return (
       <div className="flex flex-col">
         <div className="flex items-center gap-2">
@@ -119,7 +151,7 @@ export function WipPanel({
               variant="outline"
               className="h-6 px-2 text-[11px]"
               disabled={busy}
-              onClick={() => (key === "unstaged" ? onStage(null) : onUnstage(null))}
+              onClick={() => (key === "conflicted" ? onStage(files) : key === "unstaged" ? onStage(null) : onUnstage(null))}
             >
               {all}
             </Button>
@@ -134,10 +166,11 @@ export function WipPanel({
               view={view}
               openFile={openFile?.section === key ? openFile.path : null}
               onOpen={(path) => onOpenFile(key, path)}
+              conflict={key === "conflicted"}
               action={{
-                label: key === "unstaged" ? "Stage File" : "Unstage File",
+                label: key === "conflicted" ? "Mark Resolved" : key === "unstaged" ? "Stage File" : "Unstage File",
                 disabled: busy,
-                onClick: (f) => (key === "unstaged" ? onStage([f]) : onUnstage([f])),
+                onClick: (f) => (stages ? onStage([f]) : onUnstage([f])),
               }}
             />
           ))}
@@ -149,6 +182,29 @@ export function WipPanel({
   return (
     <aside className="flex w-96 shrink-0 flex-col overflow-hidden rounded-lg border border-rule bg-surface text-sm">
       <div className="scroll-quiet flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+        {merge && (
+          <div className="flex flex-col gap-1.5 rounded-md border border-rule bg-paper-2/50 p-2.5">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-ink">
+              {conflicts > 0 ? (
+                <TriangleAlertIcon className="size-3.5 shrink-0 text-warning-ink" />
+              ) : (
+                <CheckIcon className="size-3.5 shrink-0 text-success-ink" />
+              )}
+              {conflicts > 0 ? "Merge conflicts detected" : "All conflicts resolved"}
+            </p>
+            <p className="text-xs leading-relaxed break-words text-ink-2">
+              Merging <span className="rounded bg-signal-soft px-1 py-0.5 font-mono text-signal-ink">{merge.ref}</span> into{" "}
+              <span className="rounded bg-paper-3 px-1 py-0.5 font-mono text-ink">
+                {changes?.head ? (changes.head.length === 40 ? changes.head.slice(0, 10) : changes.head) : "HEAD"}
+              </span>
+            </p>
+            {conflicts > 0 && (
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Fix the conflict markers in each file (in your editor, or queue a task for it), then mark it resolved.
+              </p>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-1.5 text-xs text-ink-2">
           <span className="label-mono text-muted-foreground">Work in progress</span>
           {changes && (
@@ -176,22 +232,25 @@ export function WipPanel({
           <>
             {total > 0 && <ViewToggle view={view} onView={setView} />}
             {total === 0 && <p className="text-xs text-muted-foreground">No uncommitted changes.</p>}
-            {section("unstaged", "Unstaged files", changes.unstaged)}
-            {section("staged", "Staged files", changes.staged)}
+            {(merge || conflicts > 0) && section("conflicted", "Conflicted files", changes.conflicted)}
+            {(!merge || changes.unstaged.length > 0) && section("unstaged", "Unstaged files", changes.unstaged)}
+            {section("staged", merge ? "Resolved files" : "Staged files", changes.staged)}
           </>
         )}
       </div>
       <div className="flex shrink-0 flex-col gap-2 border-t border-rule p-3">
-        <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-2">
-          <input
-            type="checkbox"
-            className="accent-signal"
-            checked={amend}
-            disabled={!headCommit}
-            onChange={(e) => toggleAmend(e.target.checked)}
-          />
-          Amend previous commit
-        </label>
+        {!merge && (
+          <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-2">
+            <input
+              type="checkbox"
+              className="accent-signal"
+              checked={amend}
+              disabled={!headCommit}
+              onChange={(e) => toggleAmend(e.target.checked)}
+            />
+            Amend previous commit
+          </label>
+        )}
         <div className="flex flex-col rounded-md border border-rule bg-paper focus-within:border-signal">
           <div className="flex items-center gap-2 px-3">
             <input
@@ -237,14 +296,38 @@ export function WipPanel({
             Skip Git hooks (--no-verify)
           </label>
         )}
-        <Button variant="signal" disabled={!canCommit} onClick={() => void commit()} title="⌘/Ctrl + Enter">
-          {busy ? <Loader2Icon className="animate-spin" /> : <GitCommitHorizontalIcon />}
-          {staged === 0 && !amend
-            ? "Stage Changes to Commit"
-            : amend
-              ? "Amend Previous Commit"
-              : `Commit Changes to ${staged} ${staged === 1 ? "File" : "Files"}`}
-        </Button>
+        {merge ? (
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="signal"
+              disabled={!canCommit}
+              onClick={() => void commit()}
+              title={conflicts > 0 ? "Resolve the conflicted files first" : "⌘/Ctrl + Enter"}
+            >
+              {busy ? <Loader2Icon className="animate-spin" /> : <GitMergeIcon />}
+              Commit and Merge
+            </Button>
+            <Button
+              variant="outline"
+              className="border-danger/40 text-danger-ink hover:border-danger/60 hover:bg-danger-soft"
+              disabled={busy}
+              onClick={onAbortMerge}
+            >
+              Abort Merge
+            </Button>
+          </div>
+        ) : (
+          <Button variant="signal" disabled={!canCommit} onClick={() => void commit()} title="⌘/Ctrl + Enter">
+            {busy ? <Loader2Icon className="animate-spin" /> : <GitCommitHorizontalIcon />}
+            {conflicts > 0
+              ? "Resolve Conflicts to Commit"
+              : staged === 0 && !amend
+                ? "Stage Changes to Commit"
+                : amend
+                  ? "Amend Previous Commit"
+                  : `Commit Changes to ${staged} ${staged === 1 ? "File" : "Files"}`}
+          </Button>
+        )}
       </div>
     </aside>
   );
