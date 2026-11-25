@@ -374,23 +374,26 @@ export function GitGraphDialog({
           }
         }}
       >
-        <div className="flex items-center gap-2 pr-8">
-          <DialogTitle>{repoName}</DialogTitle>
-          {graph?.head && (
-            <Badge variant="signal" className="gap-1 font-mono">
-              <GitBranchIcon className="size-3" />
-              {graph.head.length === 40 ? graph.head.slice(0, 10) : graph.head}
-            </Badge>
-          )}
-          <DialogDescription className="text-xs">
-            {graph ? `${graph.commits.length}${graph.more ? "+" : ""} commits · all branches` : "Commit graph"}
-          </DialogDescription>
-          {acting === "ref" && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Loader2Icon className="size-3.5 animate-spin" /> Working…
-            </span>
-          )}
-          <div className="mx-auto">
+        {/* Three columns: the toolbar sits dead centre whatever the sides hold. */}
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 pr-8">
+          <div className="flex min-w-0 items-center gap-2">
+            <DialogTitle className="shrink-0">{repoName}</DialogTitle>
+            {graph?.head && (
+              <Badge variant="signal" className="min-w-0 gap-1 font-mono" title={graph.head}>
+                <GitBranchIcon className="size-3 shrink-0" />
+                <span className="truncate">{graph.head.length === 40 ? graph.head.slice(0, 10) : graph.head}</span>
+              </Badge>
+            )}
+            <DialogDescription className="shrink-0 text-xs whitespace-nowrap">
+              {graph ? `${graph.commits.length}${graph.more ? "+" : ""} commits · all branches` : "Commit graph"}
+            </DialogDescription>
+            {acting === "ref" && (
+              <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                <Loader2Icon className="size-3.5 animate-spin" /> Working…
+              </span>
+            )}
+          </div>
+          <div>
             <GitToolbar
               history={graph?.history ?? null}
               hasChanges={!!graph?.wip}
@@ -407,6 +410,7 @@ export function GitGraphDialog({
           <Button
             size="sm"
             variant="ghost"
+            className="justify-self-end"
             disabled={loading}
             onClick={() => {
               details.current.clear();
