@@ -10,7 +10,7 @@ import type {
   StashEntry,
   WorkingChanges,
 } from "@my-ai-slaves/shared";
-import { GitBranchIcon, Loader2Icon, RefreshCwIcon } from "lucide-react";
+import { CircleXIcon, GitBranchIcon, Loader2Icon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,6 +76,8 @@ export function GitGraphDialog({
   const [viewport, setViewport] = useState(600);
   const [acting, setActing] = useState<GitAction | null>(null);
   /** Why a double-clicked branch couldn't be checked out. */
+  /** A merge that failed: shown as an alert in the corner until it's closed or another action runs. */
+  const [mergeAlert, setMergeAlert] = useState<string | null>(null);
   const [checkoutAlert, setCheckoutAlert] = useState<{ ref: string; message: string } | null>(null);
   const [pullMode, setPullMode] = useState<PullMode>(storedPullMode);
   /** The inline branch-name field: at the checked-out commit (Branch button) or a right-clicked one. */
@@ -257,12 +259,15 @@ export function GitGraphDialog({
   const runRef = async (action: GitRefAction, fromDialog = false) => {
     setActing("ref");
     setError(null);
+    setMergeAlert(null);
     try {
       await api.gitRefAction(repoId, action);
       if (action.op === "create-branch") setNaming(null);
     } catch (e) {
       if (fromDialog) throw e;
-      setError(e instanceof Error ? e.message : String(e));
+      const message = e instanceof Error ? e.message : String(e);
+      if (action.op === "merge") setMergeAlert(message);
+      else setError(message);
     } finally {
       setActing(null);
       details.current.clear();
@@ -683,6 +688,30 @@ export function GitGraphDialog({
           }}
         />
         <ActionDialog spec={ask} onClose={() => setAsk(null)} />
+        {mergeAlert !== null && (
+          <div
+            role="alert"
+            className="fixed bottom-4 left-4 z-50 flex w-[calc(100%-2rem)] max-w-sm overflow-hidden rounded-lg border border-rule bg-popover text-popover-foreground shadow-float"
+          >
+            <div className="flex w-9 shrink-0 items-center justify-center bg-danger text-white">
+              <CircleXIcon className="size-4" />
+            </div>
+            <div className="min-w-0 flex-1 px-3 py-2.5">
+              <p className="text-sm font-medium">Merge Failed</p>
+              <p className="scroll-quiet mt-0.5 max-h-40 overflow-y-auto text-xs leading-snug break-words whitespace-pre-wrap text-muted-foreground">
+                {mergeAlert}
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label="Close"
+              className="m-1.5 flex size-6 shrink-0 items-center justify-center self-start rounded-md text-muted-foreground cursor-pointer hover:bg-paper-2 hover:text-ink"
+              onClick={() => setMergeAlert(null)}
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </div>
+        )}
         <Dialog open={checkoutAlert !== null} onOpenChange={(o) => !o && setCheckoutAlert(null)}>
           <DialogContent role="alertdialog">
             <DialogTitle>Can't check out {checkoutAlert?.ref}</DialogTitle>
