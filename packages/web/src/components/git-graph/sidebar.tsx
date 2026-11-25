@@ -64,6 +64,7 @@ function BranchRow({
   pinned,
   onPick,
   onMenu,
+  onCheckout,
 }: {
   depth: number;
   name: string;
@@ -77,12 +78,15 @@ function BranchRow({
   pinned?: boolean;
   onPick: (hash: string) => void;
   onMenu?: (e: React.MouseEvent) => void;
+  /** Double click: check the branch out. */
+  onCheckout?: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={() => onPick(commit)}
       onContextMenu={onMenu}
+      onDoubleClick={onCheckout}
       title={loaded ? name : `${name}: older than the loaded commits (load older commits to see it)`}
       className={cn(
         "flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs text-ink-2 hover:bg-paper-2 hover:text-ink",
@@ -151,6 +155,7 @@ export function BranchSidebar({
   view,
   onPick,
   onMenu,
+  onCheckout,
   onPickStash,
   onStashMenu,
   onShowAll,
@@ -162,6 +167,8 @@ export function BranchSidebar({
   view: GraphView;
   onPick: (hash: string) => void;
   onMenu: (e: React.MouseEvent, target: MenuTarget) => void;
+  /** Double click on a local or remote branch ("origin/main"). */
+  onCheckout: (ref: string) => void;
   onPickStash: (stash: StashEntry) => void;
   onStashMenu: (e: React.MouseEvent, stash: StashEntry) => void;
   onShowAll: () => void;
@@ -206,6 +213,7 @@ export function BranchSidebar({
       pinned={view.pinned === b.name}
       onPick={onPick}
       onMenu={(e) => onMenu(e, { commit: b.commit, local: b.name, remotes: [] })}
+      onCheckout={() => onCheckout(b.name)}
       extra={
         (b.ahead > 0 || b.behind > 0 || b.gone) && (
           <span
@@ -229,6 +237,7 @@ export function BranchSidebar({
       pinned={view.pinned === b.ref}
       onPick={onPick}
       onMenu={(e) => onMenu(e, { commit: b.commit, local: null, remotes: [b.ref] })}
+      onCheckout={() => onCheckout(b.ref)}
     />
   );
 

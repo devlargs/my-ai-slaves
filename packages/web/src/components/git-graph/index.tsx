@@ -14,7 +14,7 @@ import { GitBranchIcon, Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { useApi } from "@/lib/hooks";
 import { cn, formatTime, storageSet } from "@/lib/utils";
@@ -75,6 +75,8 @@ export function GitGraphDialog({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(600);
   const [acting, setActing] = useState<GitAction | null>(null);
+  /** Why a double-clicked branch couldn't be checked out. */
+  const [checkoutAlert, setCheckoutAlert] = useState<{ ref: string; message: string } | null>(null);
   const [pullMode, setPullMode] = useState<PullMode>(storedPullMode);
   /** The inline branch-name field: at the checked-out commit (Branch button) or a right-clicked one. */
   const [naming, setNaming] = useState<{ at: string | null } | null>(null);
@@ -268,6 +270,16 @@ export function GitGraphDialog({
     }
   };
 
+  /** Double click on a branch (label or sidebar row): check it out. A refusal shows as an alert. */
+  const checkout = async (ref: string) => {
+    if (acting !== null || !graph || ref === graph.head) return;
+    try {
+      await runRef({ op: "checkout", ref }, true);
+    } catch (e) {
+      setCheckoutAlert({ ref, message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   const openMenu = (e: React.MouseEvent, target: MenuTarget) => {
     e.preventDefault();
     e.stopPropagation();
@@ -438,6 +450,7 @@ export function GitGraphDialog({
               view={view}
               onPick={jump}
               onMenu={openMenu}
+              onCheckout={(ref) => void checkout(ref)}
               onPickStash={pickStash}
               onStashMenu={openStashMenu}
               onShowAll={() => setView({ ...view, hidden: [], solo: [] })}
@@ -512,6 +525,10 @@ export function GitGraphDialog({
                                   remotes: g.remotes.map((r) => `${r}/${g.name}`),
                                 })
                               }
+                              onCheckout={(g) => {
+                                const ref = g.local ? g.name : g.remotes[0] ? `${g.remotes[0]}/${g.name}` : null;
+                                if (ref) void checkout(ref);
+                              }}
                             />
                           </span>
                           <svg
@@ -666,6 +683,19 @@ export function GitGraphDialog({
           }}
         />
         <ActionDialog spec={ask} onClose={() => setAsk(null)} />
+        <Dialog open={checkoutAlert !== null} onOpenChange={(o) => !o && setCheckoutAlert(null)}>
+          <DialogContent role="alertdialog">
+            <DialogTitle>Can't check out {checkoutAlert?.ref}</DialogTitle>
+            <DialogDescription className="scroll-quiet max-h-[50vh] overflow-y-auto break-words whitespace-pre-wrap">
+              {checkoutAlert?.message}
+            </DialogDescription>
+            <DialogFooter>
+              <Button variant="signal" autoFocus onClick={() => setCheckoutAlert(null)}>
+                OK
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <RebaseDialog
           repoId={repoId}
           onto={rebaseOnto}

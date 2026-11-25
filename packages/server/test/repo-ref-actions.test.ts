@@ -128,6 +128,36 @@ describe("RepoActions.refAction (the graph's right-click menu)", () => {
     await expect(actions.refAction(repo, { op: "checkout", ref: "--orphan" }, identity)).rejects.toThrow();
   });
 
+  it("refuses a checkout that would overwrite uncommitted changes, naming the files", async () => {
+    const { path, repo } = await forked();
+    sh(path, "checkout", "-q", "feature");
+    await commit(path, "a.txt", "feature edit");
+    sh(path, "checkout", "-q", "main");
+    await writeFile(join(path, "a.txt"), "mine\n");
+    await expect(new RepoActions().refAction(repo, { op: "checkout", ref: "feature" }, identity)).rejects.toThrow(
+      /Can't check out feature: your uncommitted changes[\s\S]*a\.txt/,
+    );
+    expect(sh(path, "branch", "--show-current")).toBe("main");
+    expect(await readFile(join(path, "a.txt"), "utf8")).toBe("mine\n");
+    // Changes that don't clash come along, as with git.
+    sh(path, "checkout", "--", "a.txt");
+    await writeFile(join(path, "new.txt"), "mine\n");
+    await new RepoActions().refAction(repo, { op: "checkout", ref: "feature" }, identity);
+    expect(sh(path, "branch", "--show-current")).toBe("feature");
+    expect(await readFile(join(path, "new.txt"), "utf8")).toBe("mine\n");
+  });
+
+  it("refuses a checkout while a merge is in progress", async () => {
+    const { path, repo } = await newRepo();
+    sh(path, "checkout", "-q", "-b", "other");
+    await commit(path, "a.txt", "theirs");
+    sh(path, "checkout", "-q", "main");
+    await commit(path, "a.txt", "ours");
+    expect(() => sh(path, "merge", "other")).toThrow();
+    await expect(new RepoActions().refAction(repo, { op: "checkout", ref: "other" }, identity)).rejects.toThrow(/in progress/);
+    expect(sh(path, "branch", "--show-current")).toBe("main");
+  });
+
   it("cherry-picks, reverts, resets and tags", async () => {
     const { path, repo, f1, m1 } = await forked();
     const actions = new RepoActions();

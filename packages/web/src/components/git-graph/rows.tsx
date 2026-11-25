@@ -126,11 +126,14 @@ export function RefCell({
   groups,
   color,
   onMenu,
+  onCheckout,
 }: {
   groups: RefGroup[];
   color: string;
   /** Right-click on a branch label. */
   onMenu?: (e: React.MouseEvent, group: RefGroup) => void;
+  /** Double click on a branch label. */
+  onCheckout?: (group: RefGroup) => void;
 }) {
   const [first] = groups;
   if (!first) return null;
@@ -145,6 +148,7 @@ export function RefCell({
           key={`${g.kind}:${g.name}`}
           className="flex min-w-0 shrink"
           onContextMenu={g.kind === "branch" && onMenu ? (e) => onMenu(e, g) : undefined}
+          onDoubleClick={g.kind === "branch" && onCheckout ? () => onCheckout(g) : undefined}
         >
           <RefPill group={g} />
         </span>

@@ -4,6 +4,7 @@ import type { GitHistory, GitRefAction, PullMode, RebaseStep, Repo } from "@my-a
 import { type GitIdentity, gitIdentityEnv } from "../providers/types";
 import { runOn } from "../remote/machine";
 import { badRequest, conflict } from "./common";
+import { CommandError } from "./git";
 import { parseRebasePlan, parseStashList, rebasePlanArgs, STASH_FORMAT } from "./repo-git";
 
 /**
@@ -512,13 +513,18 @@ export class RepoActions {
         }
         case "checkout": {
           const kind = await this.checkRef(repo, action.ref);
-          if (kind === "local") {
-            await this.git(repo, ["checkout", action.ref, "--"]);
-          } else {
-            // A remote branch: check out its local branch, or make one that tracks it.
-            const { name } = await this.splitRemoteRef(repo, action.ref);
-            if (await this.exists(repo, `refs/heads/${name}`)) await this.git(repo, ["checkout", name, "--"]);
-            else await this.git(repo, ["checkout", "-b", await this.newBranchName(repo, name), "--track", action.ref, "--"]);
+          await this.notMidOperation(repo);
+          try {
+            if (kind === "local") {
+              await this.git(repo, ["checkout", action.ref, "--"]);
+            } else {
+              // A remote branch: check out its local branch, or make one that tracks it.
+              const { name } = await this.splitRemoteRef(repo, action.ref);
+              if (await this.exists(repo, `refs/heads/${name}`)) await this.git(repo, ["checkout", name, "--"]);
+              else await this.git(repo, ["checkout", "-b", await this.newBranchName(repo, name), "--track", action.ref, "--"]);
+            }
+          } catch (error) {
+            throw checkoutBlocked(error, action.ref) ?? error;
           }
           return this.view(await this.sync(repo));
         }
@@ -674,4 +680,20 @@ export function fromReflog(entry: ReflogEntry, before: string): Action | null {
     return { kind: "reset", mode: "keep", before, after, label };
   }
   return null;
+}
+
+/**
+ * Git refusing a checkout because of the working tree, said plainly: which files are in the way.
+ * Null for any other failure.
+ */
+export function checkoutBlocked(error: unknown, ref: string): Error | null {
+  const text = error instanceof CommandError ? error.stderr : error instanceof Error ? error.message : "";
+  const blocks = [...text.matchAll(/error: [^\n]*would be (?:overwritten|removed) by checkout[^\n]*\n((?:[ \t]+[^\n]*\n?)+)/g)];
+  if (blocks.length === 0) {
+    return /resolve your current index first/.test(text) ? conflict(`Can't check out ${ref}: there are unresolved conflicts. Resolve or abort them first.`) : null;
+  }
+  const files = [...new Set(blocks.flatMap((b) => (b[1] ?? "").split("\n").map((l) => l.trim()).filter(Boolean)))];
+  const shown = files.slice(0, 10).join("\n");
+  const more = files.length > 10 ? `\n… and ${files.length - 10} more` : "";
+  return conflict(`Can't check out ${ref}: your uncommitted changes to these files would be overwritten. Commit, stash or discard them first.\n${shown}${more}`);
 }
