@@ -36,6 +36,7 @@ import {
   storedView,
   refCommits,
   visibleCommits,
+  workingLabel,
 } from "./view-state";
 
 const WIP_SECTIONS: WipSection[] = ["conflicted", "staged", "unstaged"];
@@ -90,6 +91,8 @@ export function GitGraphDialog({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(600);
   const [acting, setActing] = useState<GitAction | null>(null);
+  /** What the overlay over the panes says while an action runs and the graph is read again; null = no overlay. */
+  const [working, setWorking] = useState<string | null>(null);
   /** Why a double-clicked branch couldn't be checked out. */
   /** A merge that failed: shown as an alert in the corner until it's closed or another action runs. */
   const [mergeAlert, setMergeAlert] = useState<string | null>(null);
@@ -237,6 +240,7 @@ export function GitGraphDialog({
       return;
     }
     setActing(action);
+    setWorking(workingLabel(action));
     setError(null);
     try {
       if (action === "undo") await api.gitUndo(repoId);
@@ -253,6 +257,7 @@ export function GitGraphDialog({
     } finally {
       setActing(null);
       await load(limit);
+      setWorking(null);
     }
   };
 
@@ -273,6 +278,7 @@ export function GitGraphDialog({
   /** A right-click menu action. Errors show above the graph (or in the dialog that asked for it). */
   const runRef = async (action: GitRefAction, fromDialog = false) => {
     setActing("ref");
+    setWorking(workingLabel(action));
     setError(null);
     setMergeAlert(null);
     try {
@@ -294,6 +300,7 @@ export function GitGraphDialog({
         setOpenFile(null);
         setSelected(WIP);
       }
+      setWorking(null);
     }
   };
 
@@ -363,17 +370,20 @@ export function GitGraphDialog({
 
   const commitStaged = async (input: GitCommitRequest): Promise<boolean> => {
     setWipBusy(true);
+    setWorking(workingLabel("commit"));
     setWipActionError(null);
     try {
       await api.gitCommit(repoId, input);
     } catch (e) {
       setWipActionError(e instanceof Error ? e.message : String(e));
       setWipBusy(false);
+      setWorking(null);
       return false;
     }
     setWipBusy(false);
     setWipFile(null);
     const g = await load(limit);
+    setWorking(null);
     // Nothing left to commit: show the new commit, as GitKraken does.
     if (g && !g.wip) {
       const head = g.commits.find((c) => c.refs.some((ref) => ref === "HEAD" || ref.startsWith("HEAD -> ")));
@@ -385,6 +395,7 @@ export function GitGraphDialog({
   /** Abort Merge: back to how the repo was before the merge. */
   const abortMerge = async () => {
     setWipBusy(true);
+    setWorking(workingLabel({ op: "merge-abort" }));
     setWipActionError(null);
     try {
       await api.gitRefAction(repoId, { op: "merge-abort" });
@@ -394,6 +405,7 @@ export function GitGraphDialog({
     } finally {
       setWipBusy(false);
       await load(limit);
+      setWorking(null);
     }
   };
 
@@ -441,11 +453,6 @@ export function GitGraphDialog({
             <DialogDescription className="shrink-0 text-xs whitespace-nowrap max-lg:sr-only">
               {graph ? `${graph.commits.length}${graph.more ? "+" : ""} commits · all branches` : "Commit graph"}
             </DialogDescription>
-            {acting === "ref" && (
-              <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-                <Loader2Icon className="size-3.5 animate-spin" /> Working…
-              </span>
-            )}
           </div>
           <div data-hscroll className="scroll-quiet max-lg:col-span-2 max-lg:row-start-2 max-lg:-mr-8 max-lg:overflow-x-auto">
             <GitToolbar
@@ -484,7 +491,19 @@ export function GitGraphDialog({
           <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">No commits yet.</p>
         )}
         {graph && rows.length > 0 && (
-          <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+          <div className="relative flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+            {working && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute inset-0 z-20 flex cursor-progress items-center justify-center rounded-md bg-surface/70"
+              >
+                <span className="flex max-w-[calc(100%-2rem)] items-center gap-2 rounded-full border border-rule bg-surface px-3.5 py-2 text-sm text-ink shadow-[0_4px_16px_oklch(0%_0_0/0.12)]">
+                  <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                  <span className="truncate">{working}</span>
+                </span>
+              </div>
+            )}
             <div role="tablist" aria-label="Pane" className="flex shrink-0 rounded-full border border-rule bg-paper-2 p-0.5 lg:hidden">
               {PANES.map(([value, label]) => (
                 <button
@@ -815,7 +834,8 @@ export function GitGraphDialog({
           onDone={() => {
             setRebaseOnto(null);
             details.current.clear();
-            void load(limit);
+            setWorking("Reading the graph…");
+            void load(limit).finally(() => setWorking(null));
           }}
         />
       </DialogContent>

@@ -10,6 +10,7 @@ import {
   targetName,
   viewKey,
   visibleCommits,
+  workingLabel,
 } from "@/components/git-graph/view-state";
 import { memoryStorage } from "./memory-storage";
 
@@ -126,5 +127,18 @@ describe("visibleCommits", () => {
 
   it("solos a branch: only what it reaches", () => {
     expect(hashes(visibleCommits(g, { ...view, solo: ["feature"] }))).toEqual(["f1", "base"]);
+  });
+});
+
+describe("workingLabel", () => {
+  it("names the branch a menu action works on", () => {
+    expect(workingLabel({ op: "checkout", ref: "feature" })).toBe("Checking out feature…");
+    expect(workingLabel({ op: "merge", ref: "origin/main" })).toBe("Merging origin/main…");
+    expect(workingLabel({ op: "stash-apply", pop: true })).toBe("Popping stash…");
+  });
+
+  it("covers the toolbar actions and falls back for the rest", () => {
+    expect(workingLabel("pull")).toBe("Pulling…");
+    expect(workingLabel({ op: "stash-rename" })).toBe("Working…");
   });
 });

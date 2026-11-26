@@ -163,3 +163,55 @@ export function visibleCommits(graph: RepoGraph, view: GraphView): GraphCommit[]
   }
   return graph.commits.filter((c) => seen.has(c.hash));
 }
+
+/** What the graph's loading overlay says while a toolbar or menu action runs. */
+export function workingLabel(action: { op: string; ref?: string; branch?: string; name?: string; pop?: boolean } | string): string {
+  if (typeof action === "string") {
+    const verbs: Record<string, string> = {
+      undo: "Undoing",
+      redo: "Redoing",
+      pull: "Pulling",
+      stash: "Stashing changes",
+      pop: "Popping stash",
+      branch: "Creating branch",
+      commit: "Committing",
+    };
+    return `${verbs[action] ?? "Working"}…`;
+  }
+  const on = (verb: string, what: string | undefined) => (what ? `${verb} ${what}…` : `${verb}…`);
+  switch (action.op) {
+    case "checkout":
+      return on("Checking out", action.ref);
+    case "merge":
+      return on("Merging", action.ref);
+    case "merge-abort":
+      return "Aborting merge…";
+    case "rebase":
+    case "interactive-rebase":
+      return on("Rebasing onto", action.ref);
+    case "pull":
+      return on("Pulling", action.branch);
+    case "push":
+      return on("Pushing", action.branch);
+    case "create-branch":
+      return on("Creating branch", action.name);
+    case "delete-branch":
+      return on("Deleting", action.ref);
+    case "rename-branch":
+      return on("Renaming", action.branch);
+    case "cherry-pick":
+      return "Cherry-picking…";
+    case "revert":
+      return "Reverting…";
+    case "reset":
+      return "Resetting…";
+    case "stash-save":
+      return "Stashing changes…";
+    case "stash-apply":
+      return action.pop ? "Popping stash…" : "Applying stash…";
+    case "stash-drop":
+      return "Deleting stash…";
+    default:
+      return "Working…";
+  }
+}
