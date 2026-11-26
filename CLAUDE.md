@@ -148,6 +148,12 @@ desktop app also uses 3005 and refuses to start if it's taken).
   index.html's early theme code in `public/theme-init.js`). The browser never contacts a third party:
   commit-graph avatars are off by default (Settings → General) and, when on, fetched by the server
   (`/api/avatars/:hash`, `services/avatar-proxy.ts`).
+- **Hidden repos and subscriptions (Settings → Security, a collapsed accordion below Desktop app):** `hidden` on a
+  repo (`repos.json`) or account (`accounts.json`). The server leaves hidden ones out of every response
+  (`services/visibility.ts`: repo and account lists, chains, tasks, chats, history, usage, notifications); only
+  `GET/PUT /api/visibility` lists them. A hidden subscription stays logged in and is skipped by every chain (tasks
+  and Ask); a hidden repo's queued tasks wait until it is shown again. Chain and order edits keep hidden ones in
+  place. New lists or endpoints that name a repo or account must filter the same way.
 - Cursor supports **one** account on this Mac (its login lives in the macOS Keychain under a fixed name).
 - **Remote repos (SSH, like VS Code Remote Explorer):** a repo or account can have a `host` (an alias from
   `~/.ssh/config`). For those, git and the CLI run **on that server** via `ssh` (`src/remote/machine.ts`):

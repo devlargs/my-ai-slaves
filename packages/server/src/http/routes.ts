@@ -22,6 +22,7 @@ import {
   ScriptRequest,
   SetLabelColorRequest,
   SettingsFile,
+  SetVisibilityRequest,
   UpdateAskRequest,
   UpdatePromptRequest,
   UpdateRepoPromptRequest,
@@ -44,6 +45,7 @@ import type { RepoGit } from "../services/repo-git";
 import { identityOf } from "../services/queue-service";
 import type { RepoService } from "../services/repo-service";
 import type { ScriptService } from "../services/script-service";
+import { readHidden, readVisibility, shownUsage } from "../services/visibility";
 import { AttachmentError, type AttachmentStore } from "../storage/attachment-store";
 import type { DataStores } from "../storage/data-stores";
 import type { LoginService } from "../login/login-service";
@@ -112,6 +114,19 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return saved;
   });
 
+  // ── visibility (Settings → Security) ──────────────────────────────────────
+  // The one place hidden repos and subscriptions are listed. Hiding changes nothing on disk but the
+  // flag: logins stay, and a hidden repo's queued tasks wait until it is shown again.
+  app.get("/api/visibility", () => readVisibility(stores));
+  app.put("/api/visibility", async (req) => {
+    const body = parseBody(SetVisibilityRequest, req.body);
+    if (body.kind === "repo") await repos.setHidden(body.id, body.hidden);
+    else await accounts.setHidden(body.id, body.hidden);
+    await Promise.all([accounts.publish(), queue.publish(), ask.publish()]);
+    void queue.tick(); // a repo shown again runs its waiting tasks; a hidden account is skipped from now on
+    return readVisibility(stores);
+  });
+
   // ── accounts ──────────────────────────────────────────────────────────────
   app.get("/api/accounts", () => accounts.list());
   app.post("/api/accounts", async (req) => {
@@ -155,7 +170,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     const repo = await repos.get(params(req).id);
     await repos.checkAvailability(repo);
     void queue.tick();
-    return repos.toView(repo);
+    return repos.view(repo);
   });
   // Read-only commit graph (git log --all) for the repo's graph view.
   app.get("/api/repos/:id/graph", async (req) => {
@@ -222,7 +237,10 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
   app.get("/api/remote/hosts", () => listRemoteHosts());
   // One colour per label, shared by every repo that has it. App only; never sent to a CLI.
   // ── repo scripts (package.json) ───────────────────────────────────────────
-  app.get("/api/scripts/running", () => ({ repoIds: scripts.runningRepoIds() }));
+  app.get("/api/scripts/running", async () => {
+    const hidden = await readHidden(stores);
+    return { repoIds: scripts.runningRepoIds().filter((id) => !hidden.repos.has(id)) };
+  });
   app.get("/api/repos/:id/scripts", async (req) => scripts.list(await repos.get(params(req).id)));
   app.post("/api/repos/:id/scripts/run", async (req) => {
     const { script } = parseBody(ScriptRequest, req.body);
@@ -360,7 +378,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps): void {
     return { ok: true };
   });
 
-  app.get("/api/stats/usage", () => ({ records: stores.activity.usageRecords() }));
+  app.get("/api/stats/usage", async () => ({ records: shownUsage(stores.activity.usageRecords(), await readHidden(stores)) }));
 
   app.get("/api/history", async (req) => {
     const q = req.query as { offset?: string; limit?: string };

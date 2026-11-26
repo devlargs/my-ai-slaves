@@ -22,6 +22,14 @@ export type CreateAccountRequest = z.infer<typeof CreateAccountRequest>;
 export const ReorderRequest = z.object({ ids: z.array(z.string()) });
 export type ReorderRequest = z.infer<typeof ReorderRequest>;
 
+/** PUT /api/visibility: hide or show one repo or one subscription (Settings → Security). */
+export const SetVisibilityRequest = z.object({
+  kind: z.enum(["repo", "account"]),
+  id: z.string().min(1),
+  hidden: z.boolean(),
+});
+export type SetVisibilityRequest = z.infer<typeof SetVisibilityRequest>;
+
 /** POST /api/logins/:loginId/code */
 export const LoginCodeRequest = z.object({ code: z.string() });
 export type LoginCodeRequest = z.infer<typeof LoginCodeRequest>;

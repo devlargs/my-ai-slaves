@@ -26,6 +26,7 @@ import type { PromptLibrary } from "./prompt-library";
 import type { RepoService } from "./repo-service";
 import type { RepoGit } from "./repo-git";
 import { planRun, type ResolvedRepoPrompts, type RunInputs, runFiles } from "./run-plan";
+import { hiddenRepoOf, readHidden, reorderWithin, shownHistory, shownTask } from "./visibility";
 
 const LIVE_BUFFER_LIMIT = 5000;
 // Raw lines can be huge (a tool result carrying a whole file), and every task in the queue keeps
@@ -317,9 +318,18 @@ export class QueueService {
     return null;
   }
 
+  /** The queue as the app shows it: tasks on a hidden repo (Settings → Security) are left out. */
   async list(): Promise<TaskView[]> {
     const { tasks } = await this.stores.queue.read();
-    return tasks.map((t) => ({ ...t, waitingNote: t.status === "pending" ? (this.waitingNotes.get(t.id) ?? null) : null }));
+    const hidden = await readHidden(this.stores);
+    return tasks
+      .filter((t) => !hiddenRepoOf(t, hidden))
+      .map((t) => ({ ...shownTask(t, hidden), waitingNote: t.status === "pending" ? (this.waitingNotes.get(t.id) ?? null) : null }));
+  }
+
+  /** Status lines and notifications of a task on a hidden repo aren't sent to the page. */
+  private async quiet(task: Pick<Task, "repo" | "extraRepos">): Promise<boolean> {
+    return hiddenRepoOf(task, await readHidden(this.stores)) !== null;
   }
 
   private async getTask(id: string): Promise<Task> {
@@ -366,7 +376,7 @@ export class QueueService {
     const repo = await this.deps.repos.get(req.repo);
     const override = req.accountOverride || null;
     const draft = req.draft === true;
-    if (override) await this.deps.accounts.get(override);
+    if (override && (await this.deps.accounts.get(override)).hidden) throw notFound(`No account "${override}".`);
     if (req.replacesDraft !== undefined && (await this.getTask(req.replacesDraft)).status !== "draft") {
       throw conflict(`Task "${req.replacesDraft}" is not a draft.`);
     }
@@ -456,11 +466,12 @@ export class QueueService {
 
   /** Reorder pending tasks; others keep their relative positions. */
   async reorder(ids: string[]): Promise<void> {
+    const hidden = await readHidden(this.stores);
     await this.stores.queue.update((q) => {
-      const rank = new Map(ids.map((id, i) => [id, i]));
-      const pending = q.tasks.filter((t) => t.status === "pending").sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
-      let i = 0;
-      q.tasks = q.tasks.map((t) => (t.status === "pending" ? (pending[i++] as Task) : t));
+      // Pending tasks the page didn't list (those on a hidden repo) keep their places.
+      const listed = new Set(ids);
+      const rest = q.tasks.filter((t) => t.status === "pending" && !listed.has(t.id) && !hiddenRepoOf(t, hidden)).map((t) => t.id);
+      q.tasks = reorderWithin(q.tasks, [...ids, ...rest], (t) => t.id, (t) => t.status === "pending");
     });
     await this.publish();
     void this.tick();
@@ -628,7 +639,7 @@ export class QueueService {
 
   async history(): Promise<HistoryItem[]> {
     const inQueue = new Set((await this.stores.queue.read()).tasks.map((t) => t.id));
-    const items = this.endedTasks();
+    const items = shownHistory(this.endedTasks(), await readHidden(this.stores));
     return inQueue.size === 0 ? [...items] : items.filter((item) => !inQueue.has(item.taskId));
   }
 
@@ -699,6 +710,7 @@ export class QueueService {
     const { tasks } = await this.stores.queue.read();
     const accounts = await this.deps.accounts.listRaw();
     const repos = await this.deps.repos.list();
+    const hidden = await readHidden(this.stores);
     const now = this.now();
 
     let running = this.live.size + [...this.starting.keys()].filter((id) => !this.live.has(id)).length;
@@ -708,6 +720,12 @@ export class QueueService {
 
     for (const task of tasks) {
       if (task.status !== "pending") continue;
+      // A hidden repo (Settings → Security): its tasks wait until it is shown again.
+      const hiddenRepo = hiddenRepoOf(task, hidden);
+      if (hiddenRepo) {
+        notes.set(task.id, `Waiting until ${hiddenRepo} is shown again (Settings → Security).`);
+        continue;
+      }
       if (running >= settings.maxParallelTasks) {
         notes.set(task.id, `Waiting for a free slot (${running} of ${settings.maxParallelTasks} running).`);
         continue;
@@ -744,7 +762,8 @@ export class QueueService {
       }
       const isReply = task.pendingReply !== null && task.session !== null;
       const pick = pickAccount({
-        candidates: [task.accountOverride, ...repo.accountChain].filter((a): a is string => !!a),
+        // Hidden accounts are skipped, as if they weren't in the chain.
+        candidates: [task.accountOverride, ...repo.accountChain].filter((a): a is string => !!a && !hidden.accounts.has(a)),
         accounts,
         now,
         provider: isReply ? task.session?.provider : undefined,
@@ -945,7 +964,7 @@ export class QueueService {
         pushRawCapped(buffer, raw);
         this.deps.broadcaster.taskRaw(task.id, raw);
       });
-      this.deps.broadcaster.taskStatus(task.id, "running", `Running on ${account.id}`);
+      if (!(await this.quiet(task))) this.deps.broadcaster.taskStatus(task.id, "running", `Running on ${account.id}`);
       await this.publish();
 
       handle.done
@@ -1004,6 +1023,9 @@ export class QueueService {
     const repo = (await this.deps.repos.list()).find((r) => r.id === task.repo);
     // The entry that ends the run carries its token usage, for the Statistics page.
     const usage = result.usage ? { usage: result.usage } : {};
+    const hidden = await readHidden(this.stores);
+    // A task on a repo that was hidden while it ran: it ends as usual, but the page isn't told.
+    const quiet = hiddenRepoOf(task, hidden) !== null;
 
     switch (result.outcome) {
       case "success": {
@@ -1019,8 +1041,10 @@ export class QueueService {
           detail: `Finished on ${account.id}. Ready for review.`,
           data: { result: result.resultText, costUsd: result.costUsd, ...usage },
         });
-        this.deps.broadcaster.taskStatus(task.id, "needs-review", "Ready for review");
-        this.deps.broadcaster.notify(task.id, "Task ready for review", task.title);
+        if (!quiet) {
+          this.deps.broadcaster.taskStatus(task.id, "needs-review", "Ready for review");
+          this.deps.broadcaster.notify(task.id, "Task ready for review", task.title);
+        }
         break;
       }
 
@@ -1042,7 +1066,7 @@ export class QueueService {
 
         // Each account in the chain gets two goes (one more after its cooldown), then the task stops
         // here instead of being re-run forever: the failure may only have looked like a limit.
-        const candidates = [task.accountOverride, ...(repo?.accountChain ?? [])].filter((a): a is string => !!a);
+        const candidates = [task.accountOverride, ...(repo?.accountChain ?? [])].filter((a): a is string => !!a && !hidden.accounts.has(a));
         const maxFallbacks = MAX_FALLBACKS_PER_ACCOUNT * Math.max(1, new Set(candidates).size);
         if (task.fallbacks + 1 >= maxFallbacks) {
           const what = result.outcome === "limit" ? "a usage limit" : "a logged-out account";
@@ -1082,7 +1106,7 @@ export class QueueService {
               ? `${account.id} ${what}, retrying on ${next.account.id}`
               : `${account.id} ${what}; no other account available, waiting.`,
         });
-        this.deps.broadcaster.taskStatus(task.id, "pending", `${account.id} ${what}`);
+        if (!quiet) this.deps.broadcaster.taskStatus(task.id, "pending", `${account.id} ${what}`);
         break;
       }
 
@@ -1099,7 +1123,7 @@ export class QueueService {
           detail: task.resumeOnStart ? "Stopped to restart for an update; it runs again when the app is back." : "Stopped by you. Retry or discard it.",
           data: usage,
         });
-        this.deps.broadcaster.taskStatus(task.id, "interrupted", "Stopped");
+        if (!quiet) this.deps.broadcaster.taskStatus(task.id, "interrupted", "Stopped");
         break;
       }
 
@@ -1116,6 +1140,7 @@ export class QueueService {
   /** A failed reply goes back to review (the earlier work stays); a failed first run leaves the queue. */
   private async failRun(task: Task, run: LiveRun, message: string, data: Record<string, unknown>): Promise<void> {
     const base = { taskId: task.id, repo: task.repo, account: run.account.id };
+    const quiet = await this.quiet(task);
     if (run.isReply) {
       await this.updateTask(task.id, (t) => {
         t.status = "needs-review";
@@ -1123,13 +1148,13 @@ export class QueueService {
         t.fallbacks = 0;
       });
       this.log({ ...base, event: "warning", detail: `Reply run failed: ${message}`, data });
-      this.deps.broadcaster.taskStatus(task.id, "needs-review", `Reply failed: ${message}`);
+      if (!quiet) this.deps.broadcaster.taskStatus(task.id, "needs-review", `Reply failed: ${message}`);
     } else {
       await this.removeTask(task.id);
       this.log({ ...base, event: "failed", detail: message.slice(0, 500), data });
-      this.deps.broadcaster.taskStatus(task.id, "failed", message);
+      if (!quiet) this.deps.broadcaster.taskStatus(task.id, "failed", message);
     }
-    this.deps.broadcaster.notify(task.id, "Task failed", `${task.title}: ${message.slice(0, 140)}`);
+    if (!quiet) this.deps.broadcaster.notify(task.id, "Task failed", `${task.title}: ${message.slice(0, 140)}`);
   }
 }
 

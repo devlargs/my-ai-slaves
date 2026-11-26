@@ -43,6 +43,8 @@ import type {
   TaskView,
   UpdateRepoRequest,
   UpdateSettingsRequest,
+  SetVisibilityRequest,
+  Visibility,
 } from "@my-ai-slaves/shared";
 import { markUnauthorized } from "./store";
 
@@ -93,6 +95,8 @@ export const api = {
   getSettings: () => request<Settings>("GET", "/settings"),
   putSettings: (body: UpdateSettingsRequest) => request<Settings>("PUT", "/settings", body),
 
+  getVisibility: () => request<Visibility>("GET", "/visibility"),
+  setVisibility: (body: SetVisibilityRequest) => request<Visibility>("PUT", "/visibility", body),
   getAccounts: () => request<AccountView[]>("GET", "/accounts"),
   createAccount: (body: CreateAccountRequest) => request<AccountView>("POST", "/accounts", body),
   orderAccounts: (ids: string[]) => request<unknown>("PUT", "/accounts/order", { ids }),

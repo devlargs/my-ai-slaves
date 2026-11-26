@@ -35,6 +35,7 @@ describe("account config folders", () => {
     limitedUntil: null,
     lastLimitReason: null,
     mcpConfigPath: null,
+    hidden: false,
     createdAt: "2026-11-18T18:02:00+08:00",
     updatedAt: "2026-11-18T18:02:00+08:00",
   });

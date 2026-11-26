@@ -92,6 +92,16 @@ export interface LoginState {
 /** POST /api/accounts/:id/clear-limit → AccountView */
 /** DELETE /api/accounts/:id → { ok: true } (logs the CLI out for that config dir, deletes the dir, removes it from repo chains) */
 
+// ── Visibility (Settings → Security) ────────────────────────────────────────
+/**
+ * GET /api/visibility → Visibility · PUT /api/visibility (body SetVisibilityRequest) → Visibility.
+ * The only response that lists hidden repos and subscriptions: every other one leaves them out.
+ */
+export interface Visibility {
+  repos: { id: string; name: string; host: string | null; hidden: boolean }[];
+  accounts: { id: string; provider: ProviderId; host: string | null; hidden: boolean }[];
+}
+
 // ── Repos ───────────────────────────────────────────────────────────────────
 /** Whether the repo can be reached right now (checked in the background). */
 export interface RepoAvailability {

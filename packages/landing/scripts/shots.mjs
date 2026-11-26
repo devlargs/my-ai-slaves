@@ -229,6 +229,7 @@ writeJson("accounts.json", {
     limitedUntil: null,
     lastLimitReason: null,
     mcpConfigPath: null,
+    hidden: false,
     createdAt: stamp,
     updatedAt: stamp,
   })),

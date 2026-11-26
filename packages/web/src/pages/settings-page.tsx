@@ -5,9 +5,11 @@ import type {
   ProviderId,
   Settings,
   UpdateSettingsRequest,
+  Visibility,
 } from "@my-ai-slaves/shared";
 import {
   ArrowUpRightIcon,
+  ChevronRightIcon,
   FileTextIcon,
   FolderInputIcon,
   FolderOpenIcon,
@@ -38,7 +40,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { api, attempt } from "@/lib/api";
 import { checkedLabel, desktop, desktopAction, useDesktop, useUpdateCheck } from "@/lib/desktop";
-import { useApi } from "@/lib/hooks";
+import { clearApiCache, refreshRepoNames, useApi } from "@/lib/hooks";
 import { getState, setAccounts, useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -53,8 +55,123 @@ export function SettingsPage() {
       <CommittersCard />
       <GeneralSettingsCard />
       <DesktopCard />
+      <SecurityCard />
       <DataRecoveriesCard />
     </div>
+  );
+}
+
+// ── Security: hide repos and subscriptions (collapsed whenever the page opens) ──
+
+function SecurityCard() {
+  // Closed on every visit, and the full lists are only asked for once it is opened: scrolling past
+  // it (say, while sharing your screen) shows the title and nothing else.
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<Visibility | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setData(null);
+      return;
+    }
+    let stale = false;
+    api.getVisibility().then(
+      (v) => !stale && setData(v),
+      (e: unknown) => !stale && setError(e instanceof Error ? e.message : String(e)),
+    );
+    return () => {
+      stale = true;
+    };
+  }, [open]);
+
+  const set = async (kind: "repo" | "account", id: string, shown: boolean) => {
+    setError(null);
+    try {
+      setData(await api.setVisibility({ kind, id, hidden: !shown }));
+      // Pages remember what they last showed: forget it, so a hidden repo doesn't flash on the next visit.
+      clearApiCache();
+      void refreshRepoNames();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <Card>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={cn("flex min-h-12 w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left", open && "border-b border-rule")}
+      >
+        <ChevronRightIcon className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-150", open && "rotate-90")} />
+        <CardTitle>Security</CardTitle>
+      </button>
+      {open && (
+        <CardContent className="flex flex-col gap-4">
+          <p className="text-xs text-muted-foreground">
+            Untick a repo or a subscription to hide it everywhere in the app. A hidden subscription stays logged in and is
+            skipped by every account chain. A hidden repo's queued tasks wait until it is shown again.
+          </p>
+          {error && <p className="text-xs text-danger-ink">{error}</p>}
+          {!data ? (
+            !error && <p className="text-[13px] text-muted-foreground">Loading…</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <VisibilityColumn title="Repos" empty="No repos yet.">
+                {data.repos.map((r) => (
+                  <VisibilityRow key={r.id} shown={!r.hidden} onChange={(shown) => void set("repo", r.id, shown)} name={r.name}>
+                    {r.host && <span className="font-mono text-[11px] text-muted-foreground">{r.host}</span>}
+                  </VisibilityRow>
+                ))}
+              </VisibilityColumn>
+              <VisibilityColumn title="Subscriptions" empty="No subscriptions yet.">
+                {data.accounts.map((a) => (
+                  <VisibilityRow key={a.id} shown={!a.hidden} onChange={(shown) => void set("account", a.id, shown)} name={a.id}>
+                    <ProviderLabel provider={a.provider} />
+                    {a.host && <span className="font-mono text-[11px] text-muted-foreground">{a.host}</span>}
+                  </VisibilityRow>
+                ))}
+              </VisibilityColumn>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+function VisibilityColumn({ title, empty, children }: { title: string; empty: string; children: ReactNode[] }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <Label>{title}</Label>
+      {children.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{empty}</p>
+      ) : (
+        <div className="flex flex-col divide-y divide-rule rounded-md border border-rule">{children}</div>
+      )}
+    </div>
+  );
+}
+
+function VisibilityRow({
+  shown,
+  onChange,
+  name,
+  children,
+}: {
+  shown: boolean;
+  onChange: (shown: boolean) => void;
+  name: string;
+  children?: ReactNode;
+}) {
+  return (
+    <label className="flex min-w-0 cursor-pointer items-center gap-2.5 px-3 py-2 text-[13px]">
+      <input type="checkbox" className="accent-signal" checked={shown} onChange={(e) => onChange(e.target.checked)} />
+      <span className={cn("min-w-0 truncate", !shown && "text-muted-foreground line-through")}>{name}</span>
+      <span className="ml-auto flex shrink-0 items-center gap-2">{children}</span>
+    </label>
   );
 }
 

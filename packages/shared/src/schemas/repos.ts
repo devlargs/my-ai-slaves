@@ -24,6 +24,11 @@ export const Repo = z.object({
   committerEmail: z.email().nullable().default(null),
   /** Your own tags for telling repos apart (e.g. "personal", "company"). App only; never sent to a CLI. */
   labels: z.array(z.string().min(1).max(40)).default([]),
+  /**
+   * Hidden (Settings → Security): not shown anywhere in the app (its tasks, chats, history and usage
+   * neither), and its queued tasks wait until it is shown again.
+   */
+  hidden: z.boolean().default(false),
   createdAt: timestampNow(),
   updatedAt: timestampNow(),
 });

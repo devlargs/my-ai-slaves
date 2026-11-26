@@ -14,6 +14,7 @@ import type { AccountContext } from "../providers/types";
 import type { DataStores } from "../storage/data-stores";
 import { effectiveStatus } from "./account-router";
 import { badRequest, type Broadcaster, conflict, notFound } from "./common";
+import { reorderWithin } from "./visibility";
 
 export class AccountService {
   /** Last status-check result per account (email/plan stay in memory, never written to accounts.json). */
@@ -58,8 +59,16 @@ export class AccountService {
     return (await this.stores.accounts.read()).accounts;
   }
 
+  /** What the app shows: every account except the hidden ones (Settings → Security). */
   async list(): Promise<AccountView[]> {
-    return (await this.listRaw()).map((a) => this.toView(a));
+    return (await this.listRaw()).filter((a) => !a.hidden).map((a) => this.toView(a));
+  }
+
+  /** Hide or show an account. Its login is left alone; while hidden, every chain skips it. */
+  async setHidden(id: string, hidden: boolean): Promise<void> {
+    await this.patch(id, (a) => {
+      a.hidden = hidden;
+    });
   }
 
   async get(id: string): Promise<Account> {
@@ -119,6 +128,7 @@ export class AccountService {
       limitedUntil: null,
       lastLimitReason: null,
       mcpConfigPath: null,
+      hidden: false,
       createdAt: stamp,
       updatedAt: stamp,
     };
@@ -132,8 +142,10 @@ export class AccountService {
 
   async reorder(ids: string[]): Promise<void> {
     await this.stores.accounts.update((file) => {
-      const rank = new Map(ids.map((id, i) => [id, i]));
-      file.accounts.sort((a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9));
+      // Hidden accounts aren't on the page, so they aren't in `ids`: they keep their places.
+      const listed = new Set(ids);
+      const rest = file.accounts.filter((a) => !a.hidden && !listed.has(a.id)).map((a) => a.id);
+      file.accounts = reorderWithin(file.accounts, [...ids, ...rest], (a) => a.id, (a) => !a.hidden);
     });
     await this.publish();
   }

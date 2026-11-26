@@ -893,3 +893,63 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     expect((await fresh.diff("task_0042_old")).patch).toContain("unsaved.txt");
   });
 });
+
+describe("Hidden repos and subscriptions (Settings → Security)", () => {
+  it("a hidden subscription is skipped by the chain, left out of every list, and stays logged in", async () => {
+    const { queue, accounts, repos, repo, stores, received } = await setup();
+    const before = (await stores.accounts.read()).accounts.find((a) => a.id === "work_1-claude");
+    await accounts.setHidden("work_1-claude", true);
+
+    expect((await accounts.list()).map((a) => a.id)).toEqual(["work_2-cursor", "personal-claude"]);
+    expect((await repos.listViews())[0]?.accountChain).toEqual(["work_2-cursor"]);
+
+    const created = await queue.create({ repo: repo.id, message: "skip the hidden one" });
+    await waitFor(taskWith(queue, created.id, "needs-review"));
+    expect((await received()).map((r) => r.label)).toEqual(["work_2-cursor"]);
+
+    // Editing the chain on the page (which never saw the hidden account) keeps it in its place.
+    const saved = await repos.update(repo.id, { accountChain: ["personal-claude", "work_2-cursor"] });
+    expect(saved.accountChain).toEqual(["personal-claude", "work_2-cursor"]);
+    expect((await repos.get(repo.id)).accountChain).toEqual(["work_1-claude", "personal-claude", "work_2-cursor"]);
+    await expect(repos.update(repo.id, { accountChain: ["work_1-claude"] })).rejects.toThrow("Unknown accounts");
+    await expect(queue.create({ repo: repo.id, message: "x", accountOverride: "work_1-claude" })).rejects.toThrow("No account");
+
+    // Reordering on the Settings page leaves it in its slot too.
+    await accounts.reorder(["personal-claude", "work_2-cursor"]);
+    expect((await accounts.listRaw()).map((a) => a.id)).toEqual(["work_1-claude", "personal-claude", "work_2-cursor"]);
+
+    // Nothing about its login changed.
+    const after = (await stores.accounts.read()).accounts.find((a) => a.id === "work_1-claude");
+    expect(after).toMatchObject({ configDir: before?.configDir, status: before?.status, hidden: true });
+    expect(existsSync(accounts.configDirOf(after!) as string)).toBe(true);
+
+    await accounts.setHidden("work_1-claude", false);
+    expect((await accounts.list()).map((a) => a.id)).toEqual(["work_1-claude", "personal-claude", "work_2-cursor"]);
+  });
+
+  it("a hidden repo's tasks, history and usage aren't shown, and its queued tasks wait until it is shown again", async () => {
+    const { queue, repos, repo, stores, received } = await setup();
+    const done = await queue.create({ repo: repo.id, message: "first" });
+    await waitFor(taskWith(queue, done.id, "needs-review"));
+    await queue.markFinished(done.id);
+    expect((await queue.history()).map((h) => h.taskId)).toEqual([done.id]);
+
+    await repos.setHidden(repo.id, true);
+    expect(await repos.listViews()).toEqual([]);
+    expect(await queue.history()).toEqual([]);
+    expect((await queue.historyPage(0, 50)).total).toBe(0);
+
+    const waiting = await queue.create({ repo: repo.id, message: "second" });
+    await queue.tick();
+    expect(await queue.list()).toEqual([]);
+    const stored = async () => (await stores.queue.read()).tasks.find((t) => t.id === waiting.id);
+    expect((await stored())?.status).toBe("pending");
+    expect(await received()).toHaveLength(1);
+
+    await repos.setHidden(repo.id, false);
+    await queue.tick();
+    await waitFor(taskWith(queue, waiting.id, "needs-review"));
+    expect(await received()).toHaveLength(2);
+    expect((await queue.history()).map((h) => h.taskId)).toEqual([done.id]);
+  });
+});

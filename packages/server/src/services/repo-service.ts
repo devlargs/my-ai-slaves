@@ -16,6 +16,7 @@ import { assertHost, failureReason, runOn, scriptOn, shq } from "../remote/machi
 import type { DataStores } from "../storage/data-stores";
 import { badRequest, conflict, notFound, slugify } from "./common";
 import { RepoPromptList } from "./prompt-library";
+import { mergeChain } from "./visibility";
 
 const exists = (p: string) => access(p).then(() => true, () => false);
 
@@ -63,17 +64,39 @@ export class RepoService {
 
   /** Repos with their last known reachability; stale ones are re-checked in the background. */
   async listViews(): Promise<RepoView[]> {
-    const repos = await this.list();
+    // Hidden repos (Settings → Security) are left out, and so are hidden accounts in a chain.
+    const repos = (await this.list()).filter((r) => !r.hidden);
+    const hiddenAccounts = await this.hiddenAccounts();
     for (const repo of repos) {
       const known = this.availability.get(repo.id);
       const stale = !known?.checkedAt || this.now().getTime() - new Date(known.checkedAt).getTime() > AVAILABILITY_TTL_MS;
       if (stale) void this.checkAvailability(repo);
     }
-    return repos.map((r) => this.toView(r));
+    return repos.map((r) => this.toView(r, hiddenAccounts));
   }
 
-  toView(repo: Repo): RepoView {
-    return { ...repo, availability: this.availability.get(repo.id) ?? { state: "checking", message: null, checkedAt: null } };
+  private async hiddenAccounts(): Promise<Set<string>> {
+    return new Set((await this.stores.accounts.read()).accounts.filter((a) => a.hidden).map((a) => a.id));
+  }
+
+  /** The repo as the app shows it: hidden accounts aren't in its chain. */
+  async view(repo: Repo): Promise<RepoView> {
+    return this.toView(repo, await this.hiddenAccounts());
+  }
+
+  /** Hide or show a repo. While hidden, its queued tasks wait. */
+  async setHidden(id: string, hidden: boolean): Promise<void> {
+    await this.stores.repos.update((file) => {
+      const repo = file.repos.find((r) => r.id === id);
+      if (!repo) throw notFound(`No repo "${id}".`);
+      repo.hidden = hidden;
+      repo.updatedAt = formatLocalIso(this.now());
+    });
+  }
+
+  toView(repo: Repo, hiddenAccounts: ReadonlySet<string> = new Set()): RepoView {
+    const accountChain = hiddenAccounts.size > 0 ? repo.accountChain.filter((a) => !hiddenAccounts.has(a)) : repo.accountChain;
+    return { ...repo, accountChain, availability: this.availability.get(repo.id) ?? { state: "checking", message: null, checkedAt: null } };
   }
 
   availabilityOf(id: string): RepoAvailability | null {
@@ -142,6 +165,7 @@ export class RepoService {
       committerName: null,
       committerEmail: null,
       labels: [],
+      hidden: false,
       createdAt: stamp,
       updatedAt: stamp,
     };
@@ -150,7 +174,7 @@ export class RepoService {
     });
     await this.stores.knowledge(id).load(); // blank knowledge file
     this.availability.set(id, { state: "ok", message: null, checkedAt: stamp });
-    return this.toView(repo);
+    return this.view(repo);
   }
 
   private async resolveLocal(inputPath: string): Promise<{ top: string; name: string }> {
@@ -226,9 +250,11 @@ export class RepoService {
 
   async update(id: string, patch: UpdateRepoRequest): Promise<Repo> {
     const repo = await this.get(id);
+    const hiddenAccounts = await this.hiddenAccounts();
     if (patch.accountChain) {
       const accounts = (await this.stores.accounts.read()).accounts;
-      const unknown = patch.accountChain.filter((a) => !accounts.some((x) => x.id === a));
+      // A hidden account is unknown to the page; the ones already in the chain keep their place below.
+      const unknown = patch.accountChain.filter((a) => !accounts.some((x) => x.id === a && !x.hidden));
       if (unknown.length) throw badRequest(`Unknown accounts: ${unknown.join(", ")}`);
       const elsewhere = patch.accountChain.filter((a) => (accounts.find((x) => x.id === a)?.host ?? null) !== (repo.host ?? null));
       if (elsewhere.length) {
@@ -257,7 +283,7 @@ export class RepoService {
         updated.name = patch.name.trim() || (updated.host ? posix.basename(updated.path) : basename(updated.path)) || updated.id;
       }
       if (patch.defaultBranch !== undefined) updated.defaultBranch = patch.defaultBranch;
-      if (patch.accountChain !== undefined) updated.accountChain = [...new Set(patch.accountChain)];
+      if (patch.accountChain !== undefined) updated.accountChain = mergeChain(updated.accountChain, patch.accountChain, hiddenAccounts);
       if (patch.committerId !== undefined) {
         updated.committerId = patch.committerId || null;
         updated.committerName = null;
@@ -266,7 +292,8 @@ export class RepoService {
       if (patch.labels !== undefined) updated.labels = normalizeLabels(patch.labels);
       updated.updatedAt = formatLocalIso(this.now());
     });
-    return updated as Repo;
+    const saved = updated as Repo;
+    return hiddenAccounts.size > 0 ? { ...saved, accountChain: saved.accountChain.filter((a) => !hiddenAccounts.has(a)) } : saved;
   }
 
   /** Label colours (keyed by lowercased label). */

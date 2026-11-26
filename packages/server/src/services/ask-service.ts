@@ -20,6 +20,7 @@ import { pickAccount } from "./account-router";
 import { badRequest, type Broadcaster, conflict, notFound, shortTime, slugify } from "./common";
 import { type OutputBuffer, pushRawCapped } from "./queue-service";
 import type { RepoService } from "./repo-service";
+import { chatHidden, readHidden } from "./visibility";
 
 /** Activity entries of a chat without a repo are logged under this name. */
 export const ASK_ACTIVITY_REPO = "ask";
@@ -115,7 +116,9 @@ export class AskService {
   }
 
   async list(): Promise<AskChatView[]> {
-    const { chats } = await this.stores.ask.read();
+    const hidden = await readHidden(this.stores);
+    // Chats on a hidden repo or subscription (Settings → Security) are left out.
+    const chats = (await this.stores.ask.read()).chats.filter((c) => !chatHidden(c, hidden));
     return [...chats].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0)).map((c) => this.toView(c));
   }
 
@@ -177,7 +180,7 @@ export class AskService {
     if (!message.trim()) throw badRequest("The question is empty.");
     const repo = req.repo ? await this.deps.repos.get(req.repo) : null;
     const override = req.accountOverride || null;
-    if (override) await this.deps.accounts.get(override);
+    if (override && (await this.deps.accounts.get(override)).hidden) throw notFound(`No account "${override}".`);
     const firstLine = message.trim().split("\n")[0] ?? "";
     const title = firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine;
     const slug = slugify(firstLine.split(/\s+/).slice(0, 6).join(" ")) || "chat";
@@ -230,10 +233,11 @@ export class AskService {
 
   /** The accounts a chat may run on, in order, and the machine they must be on. */
   private async candidates(chat: AskChat, repo: Repo | null): Promise<{ ids: string[]; host: string | null }> {
-    const ids: string[] = chat.accountOverride ? [chat.accountOverride] : [];
-    if (repo) return { ids: [...ids, ...repo.accountChain], host: repo.host ?? null };
     const accounts = await this.deps.accounts.listRaw();
-    return { ids: [...ids, ...accounts.filter((a) => !a.host).map((a) => a.id)], host: null };
+    // Hidden accounts (Settings → Security) are skipped, as if they weren't in the chain.
+    const shown = (list: (string | null)[]) => list.filter((id): id is string => !!id && !accounts.some((a) => a.id === id && a.hidden));
+    if (repo) return { ids: shown([chat.accountOverride, ...repo.accountChain]), host: repo.host ?? null };
+    return { ids: shown([chat.accountOverride, ...accounts.filter((a) => !a.host).map((a) => a.id)]), host: null };
   }
 
   private async start(chat: AskChat, message: string, tried: Set<string>): Promise<void> {
@@ -405,7 +409,9 @@ export class AskService {
   }
 
   async update(id: string, patch: UpdateAskRequest): Promise<AskChatView> {
-    if (patch.accountOverride) await this.deps.accounts.get(patch.accountOverride);
+    if (patch.accountOverride && (await this.deps.accounts.get(patch.accountOverride)).hidden) {
+      throw notFound(`No account "${patch.accountOverride}".`);
+    }
     const chat = await this.updateChat(id, (c) => {
       if (patch.title !== undefined) c.title = patch.title;
       if (patch.accountOverride !== undefined) c.accountOverride = patch.accountOverride;

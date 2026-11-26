@@ -9,6 +9,14 @@ import { ws } from "./store";
 const apiCache = new Map<string, unknown>();
 
 /**
+ * Forget every remembered result (after hiding or showing a repo or subscription in Settings →
+ * Security): the next visit to a page loads it fresh instead of first showing what it showed before.
+ */
+export function clearApiCache(): void {
+  apiCache.clear();
+}
+
+/**
  * Fetch on mount (and when deps change); exposes reload and a local setter. With a `cacheKey`, the
  * last result is shown immediately on the next mount while a fresh copy loads (`loading` is then
  * only true while there's nothing to show yet or during a reload).

@@ -27,6 +27,11 @@ export const Account = z.object({
   lastLimitReason: z.string().nullable().default(null),
   /** Phase 2: MCP config handed to the CLI. Unused in the MVP. */
   mcpConfigPath: z.string().nullable().default(null),
+  /**
+   * Hidden (Settings → Security): not shown anywhere in the app and skipped by every account chain.
+   * Its login is left alone.
+   */
+  hidden: z.boolean().default(false),
   createdAt: timestampNow(),
   updatedAt: timestampNow(),
 });

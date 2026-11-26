@@ -14,6 +14,7 @@ const acct = (id: string, extra: Partial<Account> = {}): Account => ({
   limitedUntil: null,
   lastLimitReason: null,
   mcpConfigPath: null,
+  hidden: false,
   createdAt: "2026-11-18T17:00:00+08:00",
   updatedAt: "2026-11-18T17:00:00+08:00",
   ...extra,
