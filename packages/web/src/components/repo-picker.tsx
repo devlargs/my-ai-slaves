@@ -98,7 +98,7 @@ export function RepoPicker({
         <button
           type="button"
           aria-label="Repositories"
-          className="flex h-7 min-w-0 flex-1 cursor-pointer items-center justify-between gap-2 rounded-md border border-transparent px-2.5 text-xs font-medium text-ink transition-colors hover:bg-paper-2 focus-visible:border-signal/70 focus-visible:ring-3 focus-visible:ring-signal/15 focus-visible:outline-none data-[state=open]:border-signal/70"
+          className="flex h-7 max-w-full min-w-0 flex-auto cursor-pointer items-center justify-between gap-2 rounded-md border border-transparent px-2.5 text-xs font-medium text-ink transition-colors hover:bg-paper-2 focus-visible:border-signal/70 focus-visible:ring-3 focus-visible:ring-signal/15 focus-visible:outline-none data-[state=open]:border-signal/70"
         >
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate">

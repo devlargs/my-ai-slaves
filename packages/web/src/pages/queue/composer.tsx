@@ -209,7 +209,7 @@ export function Composer({
               aria-label="Account"
               value={account}
               onValueChange={setAccount}
-              className="h-7 w-auto min-w-0 flex-1 basis-36 border-transparent bg-transparent text-xs hover:bg-paper-2"
+              className="h-7 w-auto max-w-full min-w-0 flex-auto border-transparent bg-transparent text-xs hover:bg-paper-2"
               options={[
                 { value: CHAIN, label: "Repo's account chain" },
                 ...accounts.map((a) => ({ value: a.id, label: `${a.label} · ${a.status}` })),
@@ -217,7 +217,7 @@ export function Composer({
             />
             {/* One group, so model and effort stay together when the row wraps. */}
             <span
-              className="flex min-w-0 gap-1.5"
+              className="flex max-w-full min-w-0 gap-1.5"
               title={
                 cursorOnly
                   ? "Model and effort are Claude Code options. Cursor uses the model from Settings."
