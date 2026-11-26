@@ -106,7 +106,7 @@ export function ReposPage() {
   const replace = (repo: Repo) => setData((list) => list?.map((r) => (r.id === repo.id ? { ...r, ...repo } : r)));
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 py-8">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-5 lg:px-8 lg:py-8">
       <PageHeader
         title="Repositories"
         description={
@@ -212,8 +212,8 @@ function RegisterRepoCard({ onRegistered }: { onRegistered: (repo: RepoView) => 
   return (
     <Card>
       <CardContent className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <Label htmlFor="repo-path">Register a repository</Label>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <Label htmlFor="repo-path" className="whitespace-nowrap">Register a repository</Label>
           <div className="flex rounded-full border border-rule bg-paper-2 p-0.5" role="radiogroup" aria-label="Where the repo is">
             {(
               [
@@ -228,7 +228,7 @@ function RegisterRepoCard({ onRegistered }: { onRegistered: (repo: RepoView) => 
                 aria-checked={where === value}
                 onClick={() => setWhere(value)}
                 className={cn(
-                  "flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
+                  "flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-xs font-medium whitespace-nowrap transition-colors",
                   where === value ? "bg-surface text-ink shadow-[0_1px_2px_oklch(0%_0_0/0.08)]" : "text-muted-foreground hover:text-ink",
                 )}
               >
@@ -281,7 +281,7 @@ function RegisterRepoCard({ onRegistered }: { onRegistered: (repo: RepoView) => 
         )}
 
         <form
-          className="flex gap-2"
+          className="flex flex-wrap justify-end gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             void register(path);
@@ -292,7 +292,7 @@ function RegisterRepoCard({ onRegistered }: { onRegistered: (repo: RepoView) => 
             value={path}
             onChange={(e) => setPath(e.target.value)}
             placeholder={where === "remote" ? "/home/you/projects/my-repo" : "/Users/you/code/my-repo"}
-            className="font-mono text-xs"
+            className="w-auto min-w-48 flex-1 font-mono text-xs"
           />
           <Button
             type="button"
@@ -513,7 +513,7 @@ function RepoCard({
           aria-expanded={expanded}
           aria-controls={`repo-body-${repo.id}`}
           className={cn(
-            "-my-1 flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 text-left",
+            "-my-1 flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded-md py-1 text-left sm:flex-nowrap",
             unreachable && "opacity-55",
           )}
         >
@@ -521,7 +521,7 @@ function RepoCard({
             className={cn("size-4 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
           />
           <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
-          <CardTitle className="shrink-0">{repo.name}</CardTitle>
+          <CardTitle className="min-w-0 truncate sm:shrink-0">{repo.name}</CardTitle>
           {!unreachable && (
             <Tooltip content="Commit graph (all branches, read-only)">
               <span
@@ -554,7 +554,7 @@ function RepoCard({
               {repo.host}
             </Badge>
           )}
-          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={repo.path}>
+          <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground max-sm:basis-full" title={repo.path}>
             {repo.path}
           </span>
           {!expanded && (
@@ -610,7 +610,7 @@ function RepoCard({
             if (await attempt(api.deleteRepo(repo.id))) onDeleted();
           }}
         >
-          <Trash2Icon /> Remove
+          <Trash2Icon /> <span className="max-sm:sr-only">Remove</span>
         </ConfirmButton>
       </CardHeader>
       {/* Hidden, not unmounted: an unsaved repo prompt survives collapsing. */}
@@ -621,7 +621,7 @@ function RepoCard({
             Unable to load the repo at this time. Its settings are locked until it&apos;s reachable again.
           </p>
         )}
-        <fieldset disabled={unreachable} className={cn("grid min-w-0 gap-5 md:grid-cols-2", unreachable && "opacity-55")}>
+        <fieldset disabled={unreachable} className={cn("grid min-w-0 grid-cols-1 gap-5 lg:grid-cols-2", unreachable && "opacity-55")}>
         <div className="flex flex-col gap-4">
           <form
             className="flex flex-col gap-1.5"

@@ -73,18 +73,18 @@ const TimelineRow = memo(function TimelineRow({ entry }: { entry: ActivityEntry 
         type="button"
         disabled={!expandable}
         onClick={() => setOpen((o) => !o)}
-        className={cn("flex w-full items-start gap-2 text-left", expandable && "cursor-pointer")}
+        className={cn("flex w-full flex-wrap items-start gap-x-2 gap-y-1 text-left lg:flex-nowrap", expandable && "cursor-pointer")}
       >
-        <span className="num mt-0.5 w-24 shrink-0 font-mono text-[11px] text-muted-foreground">{formatTime(entry.at)}</span>
+        <span className="num mt-0.5 shrink-0 font-mono text-[11px] text-muted-foreground max-lg:whitespace-nowrap lg:w-24">{formatTime(entry.at)}</span>
         <Badge variant={eventVariant[entry.event] ?? "outline"} className="mt-px shrink-0">
           {entry.event}
         </Badge>
-        <span className="min-w-0 flex-1 wrap-break-word text-[13px] text-ink">
+        <span className="min-w-0 flex-1 wrap-break-word text-[13px] text-ink max-lg:order-last max-lg:basis-full">
           {entry.detail}
           {entry.account && <span className="ml-1.5 font-mono text-[11px] text-muted-foreground">@{entry.account}</span>}
         </span>
         {expandable && (
-          <ChevronRightIcon className={cn("mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform duration-150", open && "rotate-90")} />
+          <ChevronRightIcon className={cn("mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 max-lg:ml-auto", open && "rotate-90")} />
         )}
       </button>
       {open && prompt !== null && (

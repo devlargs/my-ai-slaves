@@ -1,9 +1,10 @@
 import type { TaskView } from "@my-ai-slaves/shared";
 import { InboxIcon, MousePointerClickIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { PanelHeader } from "@/components/page-header";
+import { BackBar, PanelHeader } from "@/components/page-header";
 import { ResizeHandle, useResizableWidth } from "@/components/resize-handle";
 import { useStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import { Composer } from "./queue/composer";
 import { QueueList } from "./queue/queue-list";
 import { TaskDetail } from "./queue/task-detail";
@@ -13,6 +14,9 @@ export function QueuePage() {
   const tasksLoaded = useStore((s) => s.tasksLoaded);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = tasks.find((t) => t.id === selectedId) ?? null;
+  // Narrow windows show one pane at a time: the task opens when it is picked, not when it is auto-selected.
+  const [detailOpen, setDetailOpen] = useState(false);
+  const showDetail = detailOpen && selected !== null;
   const previousTasks = useRef<TaskView[]>(tasks);
   // The draft loaded into the composer (queueing or saving it replaces it).
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
@@ -48,8 +52,11 @@ export function QueuePage() {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="relative flex shrink-0 flex-col border-r border-rule" style={{ width: listWidth.width }}>
-        <ResizeHandle {...listWidth} label="Resize the queue panel" />
+      <div
+        className={cn("relative flex shrink-0 flex-col border-rule max-lg:w-full! lg:border-r", showDetail && "max-lg:hidden")}
+        style={{ width: listWidth.width }}
+      >
+        <ResizeHandle {...listWidth} label="Resize the queue panel" className="max-lg:hidden" />
         <PanelHeader>
           <h2 className="title-display text-[15px]">Queue</h2>
           <span className="num rounded-full bg-paper-2 px-1.5 text-[11px] font-medium text-muted-foreground">
@@ -72,14 +79,19 @@ export function QueuePage() {
               tasks={tasks}
               selectedId={selectedId}
               editingDraftId={editingDraft?.id ?? null}
-              onSelect={setSelectedId}
+              onSelect={(id) => {
+                setSelectedId(id);
+                setDetailOpen(true);
+              }}
               onOpenDraft={setEditingDraftId}
             />
           )}
         </div>
         <Composer editingDraft={editingDraft} onEditingDraftChange={setEditingDraftId} />
       </div>
-      <div className="min-w-0 flex-1">
+      <div className={cn("flex min-w-0 flex-1 flex-col", !showDetail && "max-lg:hidden")}>
+        <BackBar label="Queue" onBack={() => setDetailOpen(false)} />
+        <div className="scroll-quiet min-h-0 flex-1 max-lg:overflow-y-auto">
         {selected ? (
           <TaskDetail key={selected.id} task={selected} />
         ) : (
@@ -88,6 +100,7 @@ export function QueuePage() {
             <p className="text-[13px] text-muted-foreground">Select a task to see its live output, diff and history.</p>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

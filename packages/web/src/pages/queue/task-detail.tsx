@@ -48,10 +48,12 @@ export function TaskDetail({ task }: { task: TaskView }) {
   }, [task.status]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-rule px-6 pt-4 pb-0">
-        <div className="flex items-start gap-3">
-          <h2 className="title-display min-w-0 flex-1 truncate text-lg leading-snug" title={task.title}>
+    // Narrow windows: the pane scrolls as one page (the queue page's wrapper), so the title block can
+    // scroll away; the tab area keeps a fixed share of the window and the reply box stays at the bottom.
+    <div className="flex min-h-full flex-col lg:h-full lg:min-h-0">
+      <div className="border-b border-rule px-4 lg:px-6 pt-4 pb-0">
+        <div className="flex flex-wrap items-start justify-end gap-x-3 gap-y-1.5">
+          <h2 className="title-display min-w-0 flex-1 basis-48 truncate text-lg leading-snug" title={task.title}>
             {task.title}
           </h2>
           <TaskStatusBadge status={task.status} className="mt-1 shrink-0" />
@@ -87,7 +89,7 @@ export function TaskDetail({ task }: { task: TaskView }) {
           </TabsList>
         </Tabs>
       </div>
-      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col px-6 py-4">
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col px-4 lg:px-6 py-4 max-lg:h-[70dvh] max-lg:flex-none">
         <TabsList className="hidden">
           <TabsTrigger value="live">
             <ActivityIcon /> Live
@@ -109,7 +111,7 @@ export function TaskDetail({ task }: { task: TaskView }) {
           <TaskHistory taskId={task.id} version={task.updatedAt} />
         </TabsContent>
       </Tabs>
-      <details className="group mx-6 mb-3 rounded-lg border border-rule bg-surface text-xs open:pb-3">
+      <details className="group mx-4 mb-3 lg:mx-6 rounded-lg border border-rule bg-surface text-xs open:pb-3">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-muted-foreground transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
           <span className="label-mono">Task message</span>
           {task.attachments.length > 0 && (
@@ -160,7 +162,7 @@ function ReplyBox({ taskId }: { taskId: string }) {
     }
   };
   return (
-    <div className="border-t border-rule bg-paper px-6 py-3">
+    <div className="border-t border-rule bg-paper px-4 lg:px-6 py-3 max-lg:sticky max-lg:bottom-0 max-lg:z-10">
       <DropZone attachments={files}>
         <div className="rounded-lg border border-rule-strong bg-surface transition-[border-color,box-shadow] duration-150 focus-within:border-signal/60 focus-within:ring-3 focus-within:ring-signal/10">
           {bound.ids.length > 0 && (
@@ -183,13 +185,13 @@ function ReplyBox({ taskId }: { taskId: string }) {
               <AttachmentTray attachments={files} />
             </div>
           )}
-          <div className="flex items-center gap-1 border-t border-rule px-1.5 py-1.5">
+          <div className="flex flex-wrap items-center gap-1 border-t border-rule px-1.5 py-1.5">
             <AttachButton attachments={files} />
             <PromptPicker
               sections={[librarySection(library, bound)]}
               footer="Sent before your reply. The session already has the base and repo prompts from its first run."
             />
-            <span className="min-w-0 truncate text-[11px] text-muted-foreground" title="The session already has the base and repo prompts from its first run.">
+            <span className="min-w-0 flex-1 basis-32 truncate text-[11px] text-muted-foreground" title="The session already has the base and repo prompts from its first run.">
               Continues the same session. Base and repo prompts aren&apos;t re-sent.
             </span>
             <Button size="sm" variant="signal" className="ml-auto" disabled={!canSend} onClick={() => void send()}>

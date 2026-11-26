@@ -212,20 +212,20 @@ export function Composer({
             onPaste={files.onPaste}
             onSubmit={() => void submit()}
             placeholder="Describe the task. Paste or drop screenshots and files."
-            className="max-h-72 min-h-24"
+            className="max-h-72 min-h-24 max-lg:max-h-40 max-lg:min-h-16"
           />
           {files.files.length > 0 && (
             <div className="px-2.5 pb-2">
               <AttachmentTray attachments={files} />
             </div>
           )}
-          <div className="flex items-center gap-1 border-t border-rule px-1.5 py-1.5">
+          <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5 border-t border-rule px-1.5 py-1.5">
             <AttachButton attachments={files} />
             <PromptPicker
               sections={sections}
               footer="Sent in order: global base prompt, the ticked repo prompts, the ticked saved prompts, then your message."
             />
-            <label className="ml-1 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground select-none">
+            <label className="ml-1 flex cursor-pointer items-center gap-2 text-xs whitespace-nowrap text-muted-foreground select-none">
               <Switch
                 checked={preview}
                 onCheckedChange={(on) => {
@@ -235,13 +235,14 @@ export function Composer({
               />
               Preview prompt
             </label>
-            <span className="ml-auto hidden text-[11px] text-muted-foreground sm:inline">
+                        <span className="ml-auto hidden text-[11px] whitespace-nowrap text-muted-foreground sm:inline">
               <kbd className="font-mono">↵</kbd> to queue · <kbd className="font-mono">⇧↵</kbd> new line
             </span>
+            {/* One group, so the two actions stay together when the row wraps (a narrow window or panel). */}
+            <span className="ml-auto flex items-center gap-1">
             <Button
               size="sm"
               variant="ghost"
-              className="ml-1.5"
               disabled={!canSend}
               title={editingDraft ? "Save the changes to this draft" : "Keep it in the queue as a draft: it never runs until you open it and queue it"}
               onClick={() => void submit(true)}
@@ -251,6 +252,7 @@ export function Composer({
             <Button size="sm" variant="signal" disabled={!canSend} onClick={() => void submit()}>
               <SendIcon /> {files.uploading ? "Uploading…" : "Queue"}
             </Button>
+            </span>
           </div>
         </div>
       </DropZone>

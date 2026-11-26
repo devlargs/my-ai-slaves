@@ -84,7 +84,7 @@ export function GraphHeader({
       className="flex shrink-0 items-center border-b border-rule bg-paper-2 text-[11px] text-muted-foreground label-mono"
       style={{ height: 26 }}
     >
-      <span className="relative shrink-0 truncate px-2" style={{ width: widths.ref }}>
+      <span className="relative shrink-0 truncate px-2 max-lg:max-w-24" style={{ width: widths.ref }}>
         Branch / tag
         <Resizer col="ref" width={widths.ref} onResize={onResize} />
       </span>
@@ -97,7 +97,7 @@ export function GraphHeader({
         <Resizer col="author" width={widths.author} onResize={onResize} />
         Author
       </span>
-      <span className="relative shrink-0 truncate px-2" style={{ width: widths.date }}>
+      <span className="relative shrink-0 truncate px-2 max-lg:hidden" style={{ width: widths.date }}>
         <Resizer col="date" width={widths.date} onResize={onResize} />
         Date
       </span>

@@ -1,4 +1,6 @@
+import { ArrowLeftIcon } from "lucide-react";
 import type * as React from "react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /** Every page starts with this: title, one line of context, actions on the right, hairline below. */
@@ -28,5 +30,19 @@ export function PageHeader({
 export function PanelHeader({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={cn("flex min-h-12 shrink-0 items-center gap-2 border-b border-rule px-4", className)}>{children}</div>
+  );
+}
+
+/**
+ * Narrow windows (below `lg`) show a two-pane page one pane at a time. This bar sits on top of the
+ * detail pane and goes back to the list; wide windows never show it.
+ */
+export function BackBar({ label, onBack, className }: { label: string; onBack: () => void; className?: string }) {
+  return (
+    <div className={cn("flex h-11 shrink-0 items-center border-b border-rule px-2 lg:hidden", className)}>
+      <Button size="sm" variant="ghost" className="h-8" onClick={onBack}>
+        <ArrowLeftIcon /> {label}
+      </Button>
+    </div>
   );
 }

@@ -125,8 +125,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
-    minWidth: 900,
-    minHeight: 600,
+    // Narrow enough to park beside an editor: below 1024px the page switches to its one-pane layout.
+    minWidth: 360,
+    minHeight: 480,
     title: "My AI Slaves",
     backgroundColor: "#fbf9f7",
     show: false,

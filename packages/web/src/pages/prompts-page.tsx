@@ -34,7 +34,7 @@ export function PromptsPage() {
   };
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 py-8">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-5 lg:px-8 lg:py-8">
       <PageHeader
         title="Prompts"
         description="Saved prompts you can bind to any task or reply with the Prompts button in the composer. They're sent as written, after the base prompts and before your message, in the order below, with any screenshots you attach to them."

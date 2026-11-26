@@ -25,6 +25,18 @@ modern-minimal: a calm developer tool. An instrument panel, not a marketing page
   marquee. Each runs only while on screen and the tab is visible, and reduced motion turns them all
   into still frames.
 
+## Narrow windows (below `lg`, 1024px)
+
+The same Workbench, one pane at a time. Checked at 320 / 375 / 414 / 768px, on macOS and Windows.
+
+- The sidebar becomes a drawer behind the menu button of a 48px top bar (mark, page name, running /
+  review counts, live dot). Picking a page, Escape or the scrim closes it.
+- Two-pane pages show the list first; picking an item opens the detail with a `BackBar`
+  ("← Queue", "← History", "← Chats"). Ask opens on the chat, its list is behind the bar.
+- The commit graph dialog swaps its three panes with Branches / Graph / Details tabs.
+- Single-column pages drop to 16px gutters; rows of actions wrap as a group, labels never wrap.
+- Nothing scrolls sideways except wide data that says so (the statistics table, diffs, the graph toolbar).
+
 ## Theme: Coral (light + dark: follows the OS, or the System / Light / Dark switch in the sidebar footer)
 
 | token | light | dark | use |

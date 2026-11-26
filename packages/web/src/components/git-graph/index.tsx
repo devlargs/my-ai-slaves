@@ -41,6 +41,15 @@ import {
 const WIP_SECTIONS: WipSection[] = ["conflicted", "staged", "unstaged"];
 const WIP_LABEL: Record<WipSection, string> = { conflicted: "Conflicted", unstaged: "Unstaged", staged: "Staged" };
 
+type Pane = "branches" | "graph" | "details";
+const PANES: [Pane, string][] = [
+  ["branches", "Branches"],
+  ["graph", "Graph"],
+  ["details", "Details"],
+];
+/** A pane's wrapper: invisible in a wide window (`contents`); in a narrow one it fills the dialog, and so does the pane. */
+const PANE = "max-lg:flex max-lg:min-h-0 max-lg:flex-1 max-lg:[&>*]:w-full! max-lg:[&>*]:flex-1 lg:contents";
+
 /**
  * GitKraken-style view of a repo: branches, the commit graph, and each commit's files and diffs. The
  * toolbar (Undo / Redo / Pull / Branch) is the only thing here that changes the repo, on a click.
@@ -63,6 +72,9 @@ export function GitGraphDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // Narrow windows (below `lg`) show one of the three panes at a time, picked with the tabs under the toolbar.
+  const [pane, setPane] = useState<Pane>("graph");
+  const paneClass = (p: Pane) => cn(PANE, pane !== p && "max-lg:hidden");
   const [detail, setDetail] = useState<CommitDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [openFile, setOpenFile] = useState<string | null>(null);
@@ -417,7 +429,7 @@ export function GitGraphDialog({
         }}
       >
         {/* Three columns: the toolbar sits dead centre whatever the sides hold. */}
-        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 pr-8">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pr-8 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
           <div className="flex min-w-0 items-center gap-2">
             <DialogTitle className="shrink-0">{repoName}</DialogTitle>
             {graph?.head && (
@@ -426,7 +438,7 @@ export function GitGraphDialog({
                 <span className="truncate">{graph.head.length === 40 ? graph.head.slice(0, 10) : graph.head}</span>
               </Badge>
             )}
-            <DialogDescription className="shrink-0 text-xs whitespace-nowrap">
+            <DialogDescription className="shrink-0 text-xs whitespace-nowrap max-lg:sr-only">
               {graph ? `${graph.commits.length}${graph.more ? "+" : ""} commits · all branches` : "Commit graph"}
             </DialogDescription>
             {acting === "ref" && (
@@ -435,7 +447,7 @@ export function GitGraphDialog({
               </span>
             )}
           </div>
-          <div>
+          <div data-hscroll className="scroll-quiet max-lg:col-span-2 max-lg:row-start-2 max-lg:-mr-8 max-lg:overflow-x-auto">
             <GitToolbar
               history={graph?.history ?? null}
               hasChanges={!!graph?.wip}
@@ -452,7 +464,7 @@ export function GitGraphDialog({
           <Button
             size="sm"
             variant="ghost"
-            className="justify-self-end"
+            className="justify-self-end max-lg:col-start-2 max-lg:row-start-1"
             disabled={loading}
             onClick={() => {
               details.current.clear();
@@ -472,20 +484,46 @@ export function GitGraphDialog({
           <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">No commits yet.</p>
         )}
         {graph && rows.length > 0 && (
-          <div className="flex min-h-0 flex-1 gap-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+            <div role="tablist" aria-label="Pane" className="flex shrink-0 rounded-full border border-rule bg-paper-2 p-0.5 lg:hidden">
+              {PANES.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={pane === value}
+                  onClick={() => setPane(value)}
+                  className={cn(
+                    "h-7 flex-1 cursor-pointer rounded-full text-xs font-medium whitespace-nowrap transition-colors",
+                    pane === value ? "bg-surface text-ink shadow-[0_1px_2px_oklch(0%_0_0/0.08)]" : "text-muted-foreground hover:text-ink",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className={paneClass("branches")}>
             <BranchSidebar
               graph={graph}
               loaded={loaded}
               selected={selected}
               view={view}
-              onPick={jump}
+              onPick={(hash) => {
+                jump(hash);
+                setPane("graph");
+              }}
               onMenu={openMenu}
               onCheckout={(ref) => void checkout(ref)}
-              onPickStash={pickStash}
+              onPickStash={(stash) => {
+                pickStash(stash);
+                setPane("details");
+              }}
               onStashMenu={openStashMenu}
               onShowAll={() => setView({ ...view, hidden: [], solo: [] })}
               onShowStashes={() => setView({ ...view, hiddenStashes: [] })}
             />
+            </div>
+            <div className={paneClass("graph")}>
             {compare && compareFile ? (
               <CommitFileView
                 files={compare.files}
@@ -534,6 +572,7 @@ export function GitGraphDialog({
                           onClick={() => {
                             setCompare(null);
                             setSelected(isSelected ? null : c.hash);
+                            if (!isSelected) setPane("details");
                           }}
                           onContextMenu={isWip ? undefined : (e) => openMenu(e, { commit: c.hash, local: null, remotes: [] })}
                           className={cn(
@@ -544,7 +583,7 @@ export function GitGraphDialog({
                           )}
                           style={{ top: i * ROW, height: ROW }}
                         >
-                          <span className="flex shrink-0 items-center overflow-hidden pl-2" style={{ width: cols.ref }}>
+                          <span className="flex shrink-0 items-center overflow-hidden pl-2 max-lg:max-w-24" style={{ width: cols.ref }}>
                             <RefCell
                               groups={groups}
                               color={row.color}
@@ -607,7 +646,7 @@ export function GitGraphDialog({
                             {c.author}
                           </span>
                           <span
-                            className="shrink-0 truncate px-2 text-muted-foreground"
+                            className="shrink-0 truncate px-2 text-muted-foreground max-lg:hidden"
                             style={{ width: cols.date }}
                             title={isWip ? undefined : new Date(c.date).toLocaleString()}
                           >
@@ -647,11 +686,21 @@ export function GitGraphDialog({
                 </div>
               </div>
             )}
+            </div>
+            <div className={paneClass("details")}>
+            {!current && !compare && (
+              <p className="flex items-center justify-center p-6 text-center text-[13px] text-muted-foreground lg:hidden">
+                Pick a commit in the graph to see what it changed.
+              </p>
+            )}
             {compare && (
               <ComparePanel
                 result={compare}
                 openFile={compareFile}
-                onOpenFile={setCompareFile}
+                onOpenFile={(path) => {
+                  setCompareFile(path);
+                  setPane("graph");
+                }}
                 onClose={() => {
                   setCompare(null);
                   setCompareFile(null);
@@ -666,7 +715,10 @@ export function GitGraphDialog({
                 error={wipActionError ?? wipError}
                 busy={wipBusy}
                 openFile={wipFile}
-                onOpenFile={(section, path) => setWipFile({ section, path })}
+                onOpenFile={(section, path) => {
+                  setWipFile({ section, path });
+                  setPane("graph");
+                }}
                 onStage={(files) => void stageFiles(true, files)}
                 onUnstage={(files) => void stageFiles(false, files)}
                 onCommit={commitStaged}
@@ -680,11 +732,15 @@ export function GitGraphDialog({
                 detail={detail}
                 error={detailError}
                 openFile={openFile}
-                onOpenFile={setOpenFile}
+                onOpenFile={(path) => {
+                  setOpenFile(path);
+                  setPane("graph");
+                }}
                 onJump={jump}
                 avatars={avatars}
               />
             )}
+            </div>
           </div>
         )}
         {graph && (

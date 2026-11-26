@@ -1,7 +1,7 @@
 import type { HistoryPage as HistoryPageData } from "@my-ai-slaves/shared";
 import { GitBranchIcon, RefreshCwIcon, RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PanelHeader } from "@/components/page-header";
+import { BackBar, PanelHeader } from "@/components/page-header";
 import { TaskStatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { api, attempt } from "@/lib/api";
@@ -67,7 +67,7 @@ export function HistoryPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="flex w-110 shrink-0 flex-col border-r border-rule">
+      <div className={cn("flex w-full shrink-0 flex-col border-rule lg:w-110 lg:border-r", item && "max-lg:hidden")}>
         <PanelHeader>
           <h2 className="title-display text-[15px]">History</h2>
           <span className="num rounded-full bg-paper-2 px-1.5 text-[11px] font-medium text-muted-foreground">
@@ -122,12 +122,13 @@ export function HistoryPage() {
           )}
         </div>
       </div>
-      <div className="min-w-0 flex-1 overflow-auto">
+      <div className={cn("min-w-0 flex-1 overflow-auto", !item && "max-lg:hidden")}>
+        <BackBar label="History" onBack={() => setSelected(null)} className="sticky top-0 z-10 bg-paper" />
         {item ? (
-          <div className="flex flex-col gap-4 px-6 py-5">
-            <div className="flex items-start gap-3 border-b border-rule pb-4">
-              <div className="min-w-0 flex-1">
-                <h2 className="title-display text-lg leading-snug">{item.title}</h2>
+          <div className="flex flex-col gap-4 px-4 py-4 lg:px-6 lg:py-5">
+            <div className="flex flex-wrap items-start justify-end gap-3 border-b border-rule pb-4">
+              <div className="min-w-0 flex-1 basis-56">
+                <h2 className="title-display text-lg leading-snug wrap-anywhere">{item.title}</h2>
                 <div className="mt-1 font-mono text-[11px] text-muted-foreground">
                   {item.taskId} · queued {formatTime(item.queuedAt)} · ended {formatTime(item.endedAt)}
                 </div>

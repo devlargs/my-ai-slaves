@@ -160,8 +160,8 @@ export function DiffPanel({ task, onDone }: { task: TaskView; onDone: () => void
       ) : files.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">No changes in the checkout since the task started.</p>
       ) : (
-        <div className="flex min-h-0 flex-1 gap-3">
-          <ul className="scroll-quiet w-56 shrink-0 overflow-auto rounded-lg border border-rule bg-surface p-1.5 text-xs">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+          <ul className="scroll-quiet max-h-28 shrink-0 overflow-auto lg:max-h-none lg:w-56 rounded-lg border border-rule bg-surface p-1.5 text-xs">
             <li>
               <button
                 type="button"

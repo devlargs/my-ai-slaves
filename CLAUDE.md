@@ -169,6 +169,10 @@ desktop app also uses 3005 and refuses to start if it's taken).
   `scripts/postinstall.mjs` does); pass `windowsHide: true` to child processes; remember Windows has no
   SIGTERM to catch (the desktop app sends a `shutdown` IPC message instead). Remote/SSH and node-pty
   logins are the macOS-tested paths; check Windows behaviour when touching them.
+- **Narrow windows:** every page must work from 320px wide (design.md, "Narrow windows"). Below `lg`
+  (1024px) the sidebar is a drawer behind the top bar's menu button, two-pane pages (Queue, History, Ask)
+  show one pane at a time with a `BackBar`, and the commit graph swaps its panes with tabs. Use the
+  `max-lg:` / `lg:` variants for this; a row of actions wraps as a group and its labels never wrap.
 - **Performance:** the app must cost nothing while idle and next to nothing in the background. No
   looping animation unless a task is running, and those stop while the window isn't the active one
   (`lib/window-active.ts`, `.window-inactive` in `index.css`); live output is applied 10×/s in the active

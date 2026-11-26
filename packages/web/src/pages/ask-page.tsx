@@ -3,7 +3,7 @@ import { MessageCircleQuestionIcon, PlusIcon, SendIcon, SquareIcon, Trash2Icon }
 import { useEffect, useRef, useState } from "react";
 import { ConfirmButton } from "@/components/confirm-dialog";
 import { LiveOutput, type UserLabels } from "@/components/live-output";
-import { PanelHeader } from "@/components/page-header";
+import { BackBar, PanelHeader } from "@/components/page-header";
 import { ResizeHandle, useResizableWidth } from "@/components/resize-handle";
 import { LiveDot } from "@/components/status";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,12 @@ export function AskPage() {
   // null = a new chat.
   const [selectedId, setSelectedId] = useState<string | null>(() => storageGet(SELECTED_KEY) || null);
   const selected = chats.find((c) => c.id === selectedId) ?? null;
+  // Narrow windows show one pane at a time: the chat (or a new one) first, the list behind "Chats".
+  const [listOpen, setListOpen] = useState(false);
+  const open = (id: string | null) => {
+    setSelectedId(id);
+    setListOpen(false);
+  };
 
   useEffect(() => {
     void attempt(api.getChats()).then((list) => list && setChats(list));
@@ -50,12 +56,15 @@ export function AskPage() {
 
   return (
     <div className="flex h-full min-h-0">
-      <div className="relative flex shrink-0 flex-col border-r border-rule" style={{ width: listWidth.width }}>
-        <ResizeHandle {...listWidth} label="Resize the chats panel" />
+      <div
+        className={cn("relative flex shrink-0 flex-col border-rule max-lg:w-full! lg:border-r", !listOpen && "max-lg:hidden")}
+        style={{ width: listWidth.width }}
+      >
+        <ResizeHandle {...listWidth} label="Resize the chats panel" className="max-lg:hidden" />
         <PanelHeader>
           <h2 className="title-display text-[15px]">Ask</h2>
           <span className="num rounded-full bg-paper-2 px-1.5 text-[11px] font-medium text-muted-foreground">{chats.length}</span>
-          <Button size="sm" variant="ghost" className="ml-auto text-muted-foreground" onClick={() => setSelectedId(null)}>
+          <Button size="sm" variant="ghost" className="ml-auto text-muted-foreground" onClick={() => open(null)}>
             <PlusIcon /> New chat
           </Button>
         </PanelHeader>
@@ -64,21 +73,24 @@ export function AskPage() {
             <p className="px-1 text-[13px] text-muted-foreground">Loading…</p>
           ) : chats.length === 0 ? (
             <p className="px-1 pt-1 text-[13px] leading-relaxed text-muted-foreground">
-              No chats yet. Ask anything on the right; no repo needed.
+              No chats yet. Start a new chat and ask anything; no repo needed.
             </p>
           ) : (
             <ul className="flex flex-col gap-1">
               {chats.map((chat) => (
                 <li key={chat.id}>
-                  <ChatRow chat={chat} active={chat.id === selectedId} onSelect={() => setSelectedId(chat.id)} />
+                  <ChatRow chat={chat} active={chat.id === selectedId} onSelect={() => open(chat.id)} />
                 </li>
               ))}
             </ul>
           )}
         </div>
       </div>
-      <div className="min-w-0 flex-1">
-        {selected ? <ChatView key={selected.id} chat={selected} /> : <NewChat onCreated={setSelectedId} />}
+      <div className={cn("flex min-w-0 flex-1 flex-col", listOpen && "max-lg:hidden")}>
+        <BackBar label={`Chats${chats.length > 0 ? ` (${chats.length})` : ""}`} onBack={() => setListOpen(true)} />
+        <div className="min-h-0 flex-1">
+          {selected ? <ChatView key={selected.id} chat={selected} /> : <NewChat onCreated={setSelectedId} />}
+        </div>
       </div>
     </div>
   );
@@ -186,7 +198,7 @@ function ChatView({ chat }: { chat: AskChatView }) {
   const running = chat.status === "running";
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="border-b border-rule px-6 py-3">
+      <div className="border-b border-rule px-4 lg:px-6 py-3">
         <div className="flex items-center gap-3">
           <h2 className="title-display min-w-0 flex-1 truncate text-lg leading-snug" title={chat.title}>
             {chat.title}
@@ -215,7 +227,7 @@ function ChatView({ chat }: { chat: AskChatView }) {
           <Meta label="mode" value="read-only" />
         </dl>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col px-6 py-4">
+      <div className="flex min-h-0 flex-1 flex-col px-4 lg:px-6 py-4">
         <LiveOutput taskId={chat.id} labels={LABELS} emptyText="No messages yet." />
       </div>
       <AskBox
@@ -259,7 +271,7 @@ function AskBox({
     setHasText(false);
   };
   return (
-    <div className="border-t border-rule bg-paper px-6 py-3">
+    <div className="border-t border-rule bg-paper px-4 lg:px-6 py-3">
       <div className="rounded-lg border border-rule-strong bg-surface transition-[border-color,box-shadow] duration-150 focus-within:border-signal/60 focus-within:ring-3 focus-within:ring-signal/10">
         <MessageInput
           inputRef={input}
@@ -271,9 +283,9 @@ function AskBox({
           placeholder={placeholder}
           className="max-h-56 min-h-16"
         />
-        <div className="flex items-center gap-1 border-t border-rule px-1.5 py-1.5">
+        <div className="flex flex-wrap items-center gap-1 border-t border-rule px-1.5 py-1.5">
           {toolbar}
-          <span className="min-w-0 truncate px-1 text-[11px] text-muted-foreground">Read-only · only your message is sent</span>
+          <span className="min-w-0 flex-1 basis-32 truncate px-1 text-[11px] text-muted-foreground">Read-only · only your message is sent</span>
           <Button size="sm" variant="signal" className="ml-auto shrink-0" disabled={!canSend} onClick={() => void submit()}>
             <SendIcon /> Ask
           </Button>

@@ -46,7 +46,7 @@ import { cn } from "@/lib/utils";
 
 export function SettingsPage() {
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 py-8">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-5 lg:px-8 lg:py-8">
       <PageHeader
         title="Settings"
         description="Log in your Claude and Cursor accounts, and set what every task starts with."
@@ -308,7 +308,7 @@ function AccountsCard() {
               aria-invalid={label !== "" && !labelValid}
             />
           </div>
-          <div className="flex w-44 flex-col gap-1">
+          <div className="flex min-w-36 flex-1 flex-col gap-1 sm:w-44 sm:flex-none">
             <Label>Runs on</Label>
             <Select
               aria-label="Runs on"
@@ -323,7 +323,7 @@ function AccountsCard() {
               ]}
             />
           </div>
-          <div className="flex w-44 flex-col gap-1">
+          <div className="flex min-w-36 flex-1 flex-col gap-1 sm:w-44 sm:flex-none">
             <Label>Provider</Label>
             <Select
               value={provider}
@@ -378,9 +378,9 @@ function AccountRow({
 }) {
   const [checking, setChecking] = useState(false);
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-rule bg-surface px-2.5 py-2 transition-colors hover:border-rule-strong">
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-rule bg-surface px-2.5 py-2 transition-colors hover:border-rule-strong">
       {handle}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-40">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium">{account.label}</span>
           <ProviderLabel provider={account.provider} />
@@ -404,6 +404,8 @@ function AccountRow({
           </div>
         )}
       </div>
+      {/* One group: in a narrow window the actions move below the account together. */}
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
       <Button size="sm" variant={account.status === "logged-out" || account.status === "unknown" ? "default" : "outline"} onClick={onLogin}>
         <LogInIcon /> {account.status === "logged-out" || account.status === "unknown" ? "Log in" : "Log in again"}
       </Button>
@@ -469,6 +471,7 @@ function AccountRow({
       >
         <Trash2Icon />
       </ConfirmButton>
+      </div>
     </div>
   );
 }
@@ -685,8 +688,8 @@ function CommitterRow({
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-rule bg-surface px-2.5 py-2 transition-colors hover:border-rule-strong">
-      <div className="min-w-0 flex-1">
+    <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg border border-rule bg-surface px-2.5 py-2 transition-colors hover:border-rule-strong">
+      <div className="min-w-0 flex-1 basis-40">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium">{committer.name}</span>
           {committer.label && (

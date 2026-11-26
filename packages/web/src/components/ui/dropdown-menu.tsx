@@ -8,7 +8,7 @@ export const DropdownMenuTrigger = MenuPrimitive.Trigger;
 export const DropdownMenuSub = MenuPrimitive.Sub;
 
 const panel =
-  "z-50 min-w-48 overflow-y-auto rounded-lg border border-rule bg-popover p-1 text-popover-foreground shadow-float outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0";
+  "z-50 min-w-48 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-rule bg-popover p-1 text-popover-foreground shadow-float outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0";
 const row =
   "relative flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[13px] text-ink-2 outline-none select-none data-[highlighted]:bg-paper-2 data-[highlighted]:text-ink data-[disabled]:cursor-default data-[disabled]:opacity-40 [&_svg]:size-3.5 [&_svg]:shrink-0";
 

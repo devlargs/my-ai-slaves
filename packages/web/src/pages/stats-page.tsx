@@ -107,7 +107,7 @@ export function StatsPage() {
   }, [records, accounts]);
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-8 py-8">
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-5 lg:px-8 lg:py-8">
       <PageHeader
         title="Statistics"
         description="Tokens your tasks used, per subscription and overall, as the CLIs reported them for each run."
@@ -154,8 +154,8 @@ export function StatsPage() {
         {perAccount.length === 0 ? (
           <CardContent className="text-[13px] text-muted-foreground">No accounts yet. Add one on the Settings page.</CardContent>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+          <div data-hscroll className="scroll-quiet overflow-x-auto">
+            <table className="w-full text-[13px] whitespace-nowrap">
               <thead>
                 <tr className="border-b border-rule text-left text-muted-foreground">
                   <th className="px-4 py-2 font-medium">Account</th>

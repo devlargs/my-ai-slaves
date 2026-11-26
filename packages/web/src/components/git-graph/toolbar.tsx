@@ -51,7 +51,7 @@ function ToolButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex min-w-14 cursor-pointer flex-col items-center gap-0.5 rounded-md px-2 py-1 text-[11px] text-ink-2 hover:bg-paper-2 hover:text-ink",
+        "flex min-w-11 cursor-pointer flex-col items-center gap-0.5 rounded-md px-1.5 py-1 lg:min-w-14 lg:px-2 text-[11px] text-ink-2 hover:bg-paper-2 hover:text-ink",
         "disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-2 [&_svg]:size-4",
         className,
       )}

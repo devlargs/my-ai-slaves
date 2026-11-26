@@ -6,6 +6,7 @@ import {
   LibraryBigIcon,
   ListOrderedIcon,
   type LucideIcon,
+  MenuIcon,
   MessageCircleQuestionIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -73,9 +74,9 @@ export function App() {
 
   return (
     <TooltipProvider delayDuration={250}>
-    <div className="flex h-full">
+    <div className="flex h-full flex-col lg:flex-row">
       <Sidebar route={route} />
-      <main className="scroll-quiet min-w-0 flex-1 overflow-auto">
+      <main className="scroll-quiet min-h-0 min-w-0 flex-1 overflow-auto">
         {page === "queue" && <QueuePage />}
         {page === "ask" && <AskPage />}
         {page === "repos" && <ReposPage />}
@@ -97,13 +98,71 @@ function Sidebar({ route }: { route: Route }) {
 
   const navWidth = useResizableWidth({ key: "slaves.sidebarWidth", initial: 224, min: 180, max: 400, reserve: 900 });
 
+  // Narrow windows (below `lg`): the sidebar is a drawer behind the menu button of a slim top bar.
+  const [open, setOpen] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: picking a page closes the drawer
+  useEffect(() => setOpen(false), [route]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // Widened past the breakpoint while open: the sidebar is back in place, so nothing is left to close.
+    const wide = window.matchMedia("(min-width: 64rem)");
+    const onWide = () => wide.matches && setOpen(false);
+    window.addEventListener("keydown", onKey);
+    wide.addEventListener("change", onWide);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      wide.removeEventListener("change", onWide);
+    };
+  }, [open]);
+  const current = NAV.find((n) => n.route === route);
+
   return (
+    <>
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-rule bg-paper-2 pr-3 pl-1.5 lg:hidden">
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-9"
+        aria-label="Open the menu"
+        aria-expanded={open}
+        aria-controls="main-nav"
+        onClick={() => setOpen(true)}
+      >
+        <MenuIcon />
+      </Button>
+      <Mark />
+      <span className="title-display min-w-0 truncate text-[15px]">{current?.label}</span>
+      <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        <QueueCounts running={running} review={review} />
+        <span
+          role="status"
+          aria-label={connected ? "Live" : "Reconnecting"}
+          title={connected ? "Live" : "Reconnecting…"}
+          className={cn("size-1.5 rounded-full", connected ? "bg-success" : "bg-danger")}
+        />
+      </span>
+    </header>
+    {open && (
+      <button
+        type="button"
+        aria-label="Close the menu"
+        tabIndex={-1}
+        className="fixed inset-0 z-40 cursor-default bg-(--color-scrim) lg:hidden"
+        onClick={() => setOpen(false)}
+      />
+    )}
     <nav
+      id="main-nav"
       aria-label="Main"
-      className="relative flex shrink-0 flex-col border-r border-rule bg-paper-2"
+      className={cn(
+        "relative flex shrink-0 flex-col border-r border-rule bg-paper-2",
+        "max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-40 max-lg:w-64! max-lg:max-w-[85%] max-lg:overflow-y-auto max-lg:shadow-float",
+        open ? "max-lg:animate-in max-lg:slide-in-from-left max-lg:duration-150" : "max-lg:hidden",
+      )}
       style={{ width: navWidth.width }}
     >
-      <ResizeHandle {...navWidth} label="Resize the sidebar" />
+      <ResizeHandle {...navWidth} label="Resize the sidebar" className="max-lg:hidden" />
       <div className="flex flex-col gap-1 px-4 pt-4 pb-5">
         <div className="flex items-center gap-2">
           <Mark />
@@ -132,7 +191,7 @@ function Sidebar({ route }: { route: Route }) {
               href={`#/${r}`}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex h-8 items-center gap-2.5 rounded-md border px-2.5 text-[13px] transition-colors duration-150",
+                "flex h-8 items-center gap-2.5 rounded-md border px-2.5 text-[13px] whitespace-nowrap transition-colors duration-150 max-lg:h-10",
                 "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-(--color-focus)",
                 active
                   ? "border-rule bg-surface font-medium text-ink"
@@ -141,26 +200,7 @@ function Sidebar({ route }: { route: Route }) {
             >
               <Icon className={cn("size-4", active ? "text-ink" : "text-muted-foreground")} />
               {label}
-              {r === "queue" && (running > 0 || review > 0) && (
-                <span className="ml-auto flex items-center gap-1">
-                  {running > 0 && (
-                    <span
-                      title={`${running} running`}
-                      className="num inline-flex h-4.5 items-center gap-1 rounded-full bg-signal-soft px-1.5 text-[11px] font-medium text-signal-ink"
-                    >
-                      <LiveDot /> {running}
-                    </span>
-                  )}
-                  {review > 0 && (
-                    <span
-                      title={`${review} waiting for review`}
-                      className="num inline-flex h-4.5 items-center rounded-full bg-warning-soft px-1.5 text-[11px] font-medium text-warning-ink"
-                    >
-                      {review}
-                    </span>
-                  )}
-                </span>
-              )}
+              {r === "queue" && <QueueCounts running={running} review={review} className="ml-auto" />}
             </a>
           );
         })}
@@ -172,6 +212,32 @@ function Sidebar({ route }: { route: Route }) {
         <ThemeToggle />
       </div>
     </nav>
+    </>
+  );
+}
+
+/** How many tasks are running (coral, live dot) and how many wait for review. Nothing when both are 0. */
+function QueueCounts({ running, review, className }: { running: number; review: number; className?: string }) {
+  if (running === 0 && review === 0) return null;
+  return (
+    <span className={cn("flex items-center gap-1", className)}>
+      {running > 0 && (
+        <span
+          title={`${running} running`}
+          className="num inline-flex h-4.5 items-center gap-1 rounded-full bg-signal-soft px-1.5 text-[11px] font-medium text-signal-ink"
+        >
+          <LiveDot /> {running}
+        </span>
+      )}
+      {review > 0 && (
+        <span
+          title={`${review} waiting for review`}
+          className="num inline-flex h-4.5 items-center rounded-full bg-warning-soft px-1.5 text-[11px] font-medium text-warning-ink"
+        >
+          {review}
+        </span>
+      )}
+    </span>
   );
 }
 

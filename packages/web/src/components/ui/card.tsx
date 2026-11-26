@@ -7,7 +7,7 @@ export function Card({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 export function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("flex min-h-12 items-center justify-between gap-3 border-b border-rule px-4 py-2.5", className)} {...props} />;
+  return <div className={cn("flex min-h-12 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-rule px-4 py-2.5", className)} {...props} />;
 }
 
 export function CardTitle({ className, ...props }: React.ComponentProps<"h3">) {
