@@ -422,6 +422,8 @@ export class QueueService {
         promptIds,
         repoPromptIds,
         accountOverride: override,
+        model: req.model ?? null,
+        effort: req.effort ?? null,
         currentAccount: null,
         checkout: null,
         branch: null,
@@ -457,7 +459,7 @@ export class QueueService {
       account: override,
       event: "queued",
       detail: `Queued: ${created.title}`,
-      data: { title: created.title, message, accountOverride: override, attachments, promptIds, repoPromptIds, extraRepos },
+      data: { title: created.title, message, accountOverride: override, model: created.model, effort: created.effort, attachments, promptIds, repoPromptIds, extraRepos },
     });
     await this.publish();
     void this.tick();
@@ -941,6 +943,8 @@ export class QueueService {
           resume,
           addDirs: plan.addDirs,
           gitIdentity: identityOf(repo, settings),
+          model: task.model,
+          effort: task.effort,
         },
         settings,
       );

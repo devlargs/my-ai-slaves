@@ -4,7 +4,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { Attachment } from "@my-ai-slaves/shared";
+import { type Attachment, CreateTaskRequest } from "@my-ai-slaves/shared";
 import { createAdapters } from "../src/providers";
 import { AccountService } from "../src/services/account-service";
 import { RepoGit } from "../src/services/repo-git";
@@ -324,6 +324,8 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
         extraRepos: [],
         checkout: null,
         accountOverride: null,
+        model: null,
+        effort: null,
         currentAccount: null,
         branch: null,
         session: null,
@@ -390,6 +392,28 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
     const [call] = await received();
     const i = call!.args.indexOf("--disallowedTools");
     expect(call!.args.slice(i + 1, i + 5)).toEqual(["EnterWorktree", "ExitWorktree", "Bash(git worktree *)", "Agent(isolation:worktree)"]);
+  });
+
+  it("a task's model and effort reach Claude as --model / --effort; without them neither flag is sent", async () => {
+    const { queue, repo, received } = await setup();
+    const picked = await queue.create({ repo: repo.id, message: "think hard", model: "opus", effort: "xhigh" });
+    await waitFor(taskWith(queue, picked.id, "needs-review"));
+    const args = (await received()).at(-1)!.args;
+    expect(args.slice(args.indexOf("--model"), args.indexOf("--model") + 2)).toEqual(["--model", "opus"]);
+    expect(args.slice(args.indexOf("--effort"), args.indexOf("--effort") + 2)).toEqual(["--effort", "xhigh"]);
+    await queue.markFinished(picked.id);
+
+    const plain = await queue.create({ repo: repo.id, message: "as usual" });
+    await waitFor(taskWith(queue, plain.id, "needs-review"));
+    const plainArgs = (await received()).at(-1)!.args;
+    expect(plainArgs).not.toContain("--model");
+    expect(plainArgs).not.toContain("--effort");
+  });
+
+  it("refuses a model that could be read as a flag", () => {
+    expect(CreateTaskRequest.safeParse({ repo: "r", message: "x", model: "--dangerously-skip-permissions" }).success).toBe(false);
+    expect(CreateTaskRequest.safeParse({ repo: "r", message: "x", model: "claude-opus-4-8[1m]", effort: "max" }).success).toBe(true);
+    expect(CreateTaskRequest.safeParse({ repo: "r", message: "x", effort: "extreme" }).success).toBe(false);
   });
 
   it("falls back to the next account on a usage limit; Cursor gets the same full prompt", async () => {
@@ -870,6 +894,8 @@ describe("QueueService: runs in the repo as it is (no branches, no worktrees)", 
         extraRepos: [],
         checkout: null,
         accountOverride: null,
+        model: null,
+        effort: null,
         currentAccount: "work_1-claude",
         branch: null,
         worktree: { path: wtPath, branch: "ai/task_0042_old", baseBranch: "main", baseCommit: base },

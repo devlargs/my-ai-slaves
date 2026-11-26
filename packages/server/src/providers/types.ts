@@ -60,6 +60,10 @@ export interface RunInput extends AccountContext {
    * its edit tools; Cursor: `--mode ask`), whatever the provider's permission setting.
    */
   readOnly?: boolean;
+  /** The task's own model, instead of the Settings one (Claude Code only). */
+  model?: string | null;
+  /** The task's effort level (Claude Code's `--effort`). */
+  effort?: string | null;
 }
 
 export interface GitIdentity {

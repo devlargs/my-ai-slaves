@@ -5,6 +5,11 @@ import { storageGet } from "@/lib/utils";
 export const CHAIN = "__chain__";
 export const REPO_KEY = "slaves.lastRepo";
 export const EXTRA_REPOS_KEY = "slaves.lastExtraRepos";
+/** The composer's last picked model and effort (Claude Code), kept for the next task. */
+export const MODEL_KEY = "slaves.lastModel";
+export const EFFORT_KEY = "slaves.lastEffort";
+/** Select value for "no pick": the Settings model / the CLI's own effort. */
+export const DEFAULT_PICK = "__default__";
 /** Unsent text of a message box, kept so it survives switching pages (and restarts). */
 export const draftKey = (box: string) => `slaves.draft.${box}`;
 export const COMPOSER_DRAFT = "composer";

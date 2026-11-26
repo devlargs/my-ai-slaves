@@ -3,6 +3,15 @@ import { Attachment } from "./attachment";
 import { ProviderId, Timestamp, timestampNow } from "./common";
 
 /** `draft`: saved from the composer to finish later; never runs (clicking it loads it back into the composer). */
+/** A model name as a CLI takes it; never starts with "-", so it can't be read as a flag. */
+export const TaskModel = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:@/[\]=,-]{0,99}$/);
+/** Claude Code's `--effort` levels. */
+export const TASK_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export const TaskEffort = z.enum(TASK_EFFORTS);
+export type TaskEffort = z.infer<typeof TaskEffort>;
+/** Claude Code's model aliases (each means the latest model of that name). */
+export const CLAUDE_MODEL_ALIASES = ["fable", "opus", "sonnet", "haiku"] as const;
+
 export const QueuedTaskStatus = z.enum(["draft", "pending", "running", "needs-review", "interrupted"]);
 export type QueuedTaskStatus = z.infer<typeof QueuedTaskStatus>;
 
@@ -82,6 +91,10 @@ export const Task = z.object({
    */
   repoPromptIds: z.array(z.string()).nullable().default(null),
   accountOverride: z.string().nullable().default(null),
+  /** Model picked for this task (Claude Code's `--model`: an alias or a full name). null = the Settings one. */
+  model: TaskModel.nullable().default(null),
+  /** Effort picked for this task (Claude Code's `--effort`). null = the CLI's own. */
+  effort: TaskEffort.nullable().default(null),
   currentAccount: z.string().nullable().default(null),
   /** Where the checkout was when the task's first run started. */
   checkout: TaskCheckout.nullable().default(null),

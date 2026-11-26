@@ -42,7 +42,7 @@ async function findTranscript(configDir: string, sessionId: string): Promise<str
 export class ClaudeCodeAdapter implements ProviderAdapter {
   readonly provider = "claude-code" as const;
 
-  buildArgs(input: Pick<RunInput, "resume" | "addDirs" | "readOnly">, settings: SettingsFile, resumeTarget: string | null): string[] {
+  buildArgs(input: Pick<RunInput, "resume" | "addDirs" | "readOnly" | "model" | "effort">, settings: SettingsFile, resumeTarget: string | null): string[] {
     const s = settings.providers["claude-code"];
     const args = [
       "-p",
@@ -65,7 +65,10 @@ export class ClaudeCodeAdapter implements ProviderAdapter {
     args.push("--disallowedTools", "EnterWorktree", "ExitWorktree", "Bash(git worktree *)", "Agent(isolation:worktree)");
     // Ask mode: a bare tool name removes the tool altogether (deny rules hold in every mode).
     if (input.readOnly) args.push("Edit", "Write", "NotebookEdit");
-    if (s.model) args.push("--model", s.model);
+    const model = input.model || s.model;
+    if (model) args.push("--model", model);
+    // Documented levels: low, medium, high, xhigh, max.
+    if (input.effort) args.push("--effort", input.effort);
     if (resumeTarget) args.push("--resume", resumeTarget);
     for (const dir of input.addDirs ?? []) args.push("--add-dir", dir);
     return args;

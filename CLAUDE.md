@@ -136,6 +136,9 @@ desktop app also uses 3005 and refuses to start if it's taken).
   task runs there. Its Hide / Solo / Pin to Left (and a stash's Hide) only change the view (localStorage); its "Create
   worktree" and "Explain Branch Changes" items are left out on purpose.
   Undo/Redo read HEAD's reflog (their own commands are tagged `my-ai-slaves` via GIT_REFLOG_ACTION).
+- **Model and effort per task:** the composer's Model and Effort pickers (beside the account picker) are stored on
+  the task (`model`, `effort`) and sent to Claude Code as `--model` / `--effort` on every run of it (replies too);
+  no pick = the Settings model and the CLI's own effort. Cursor ignores both and keeps its Settings model.
 - **Cross-repo tasks:** a task can tick several repos (`extraRepos`, same machine as the main `repo`).
   The CLI runs in the main repo and gets the others via `--add-dir` + the "Other repositories:" list.
   Their ticked repo prompts (sent after the main repo's) say how to handle changes in them. A repo is in

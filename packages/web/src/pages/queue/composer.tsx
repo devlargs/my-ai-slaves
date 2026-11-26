@@ -1,4 +1,4 @@
-import type { PromptPreviewResponse, RepoView, TaskView } from "@my-ai-slaves/shared";
+import { CLAUDE_MODEL_ALIASES, type PromptPreviewResponse, type RepoView, TASK_EFFORTS, type TaskEffort, type TaskView } from "@my-ai-slaves/shared";
 import { AlertTriangleIcon, CheckIcon, FilePenLineIcon, SaveIcon, SendIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AttachButton, AttachmentTray, DropZone, useAttachments } from "@/components/attachments";
@@ -23,6 +23,9 @@ import { clearPastes } from "@/lib/pasted-text";
 import { cn, storageGet, storageRemove, storageSet } from "@/lib/utils";
 import {
   CHAIN,
+  DEFAULT_PICK,
+  EFFORT_KEY,
+  MODEL_KEY,
   REPO_KEY,
   EXTRA_REPOS_KEY,
   draftKey,
@@ -32,6 +35,13 @@ import {
   storedExtras,
 } from "./drafts";
 import { MessageInput } from "./message-input";
+
+const EFFORT_LABELS: Record<TaskEffort, string> = { low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const storedEffort = () => {
+  const saved = storageGet(EFFORT_KEY);
+  return TASK_EFFORTS.some((e) => e === saved) ? (saved as TaskEffort) : DEFAULT_PICK;
+};
 
 export function Composer({
   editingDraft,
@@ -55,6 +65,19 @@ export function Composer({
     storageSet(EXTRA_REPOS_KEY, JSON.stringify(next));
   };
   const [account, setAccount] = useState<string>(CHAIN);
+  // Claude Code's --model / --effort for this task; the pick is remembered for the next one.
+  const [model, setModel] = useState<string>(() => storageGet(MODEL_KEY) || DEFAULT_PICK);
+  const [effort, setEffort] = useState<string>(storedEffort);
+  const pickModel = (value: string) => {
+    setModel(value);
+    if (value === DEFAULT_PICK) storageRemove(MODEL_KEY);
+    else storageSet(MODEL_KEY, value);
+  };
+  const pickEffort = (value: string) => {
+    setEffort(value);
+    if (value === DEFAULT_PICK) storageRemove(EFFORT_KEY);
+    else storageSet(EFFORT_KEY, value);
+  };
   const input = useRef<HTMLTextAreaElement>(null);
   const [hasText, setHasText] = useState(() => Boolean(storageGet(draftKey(COMPOSER_DRAFT))?.trim()));
   const [previewText, setPreviewText] = useState("");
@@ -88,6 +111,14 @@ export function Composer({
 
   const currentRepo = repos?.find((r) => r.id === repo);
   const downRepo = repos?.find((r) => (r.id === repo || extras.includes(r.id)) && r.availability.state === "unreachable");
+  // Model and effort are Claude Code flags: nothing to pick when the task is sent to a Cursor account.
+  const cursorOnly = accounts.find((a) => a.id === account)?.provider === "cursor-agent";
+  const modelOptions = [
+    { value: DEFAULT_PICK, label: "Default model" },
+    ...CLAUDE_MODEL_ALIASES.map((m) => ({ value: m as string, label: capitalize(m) })),
+    // A model the list doesn't have (a draft queued through the API with a full model name).
+    ...(model !== DEFAULT_PICK && !CLAUDE_MODEL_ALIASES.some((m) => m === model) ? [{ value: model, label: model }] : []),
+  ];
   const chainEmpty = currentRepo && currentRepo.accountChain.length === 0 && account === CHAIN;
   // A pasted image (or any attached file) on its own is a valid task.
   const hasContent = hasText || files.files.length > 0;
@@ -114,6 +145,8 @@ export function Composer({
     const t = editingDraft;
     selectRepos({ main: t.repo, extras: t.extraRepos.map((x) => x.repo) });
     setAccount(t.accountOverride && accounts.some((a) => a.id === t.accountOverride) ? t.accountOverride : CHAIN);
+    setModel(t.model ?? DEFAULT_PICK);
+    setEffort(t.effort ?? DEFAULT_PICK);
     setMessage(t.message);
     files.reset(t.attachments);
     bound.setIds(t.promptIds);
@@ -133,6 +166,8 @@ export function Composer({
         repo,
         message,
         accountOverride: account === CHAIN ? null : account,
+        model: cursorOnly || model === DEFAULT_PICK ? null : model,
+        effort: cursorOnly || effort === DEFAULT_PICK ? null : (effort as TaskEffort),
         attachmentIds: files.ids,
         promptIds: bound.ids,
         repoPromptIds: repoSets.tickedFor(repo),
@@ -168,18 +203,47 @@ export function Composer({
     <div className="flex flex-col gap-2 border-t border-rule bg-paper p-3">
       <DropZone attachments={files}>
         <div className="rounded-lg border border-rule-strong bg-surface transition-[border-color,box-shadow] duration-150 focus-within:border-signal/60 focus-within:ring-3 focus-within:ring-signal/10">
-          <div className="flex gap-1.5 border-b border-rule px-2 py-1.5">
+          <div className="flex flex-wrap gap-1.5 border-b border-rule px-2 py-1.5">
             <RepoPicker repos={repos ?? []} value={{ main: repo, extras }} onChange={selectRepos} />
             <Select
               aria-label="Account"
               value={account}
               onValueChange={setAccount}
-              className="h-7 w-auto min-w-0 flex-1 border-transparent bg-transparent text-xs hover:bg-paper-2"
+              className="h-7 w-auto min-w-0 flex-1 basis-36 border-transparent bg-transparent text-xs hover:bg-paper-2"
               options={[
                 { value: CHAIN, label: "Repo's account chain" },
                 ...accounts.map((a) => ({ value: a.id, label: `${a.label} · ${a.status}` })),
               ]}
             />
+            {/* One group, so model and effort stay together when the row wraps. */}
+            <span
+              className="flex min-w-0 gap-1.5"
+              title={
+                cursorOnly
+                  ? "Model and effort are Claude Code options. Cursor uses the model from Settings."
+                  : "Model and effort for this task's Claude Code runs. Cursor accounts use the model from Settings."
+              }
+            >
+              <Select
+                aria-label="Model"
+                value={cursorOnly ? DEFAULT_PICK : model}
+                onValueChange={pickModel}
+                disabled={cursorOnly}
+                className="h-7 w-auto min-w-0 border-transparent bg-transparent text-xs whitespace-nowrap hover:bg-paper-2"
+                options={modelOptions}
+              />
+              <Select
+                aria-label="Effort"
+                value={cursorOnly ? DEFAULT_PICK : effort}
+                onValueChange={pickEffort}
+                disabled={cursorOnly}
+                className="h-7 w-auto min-w-0 border-transparent bg-transparent text-xs whitespace-nowrap hover:bg-paper-2"
+                options={[
+                  { value: DEFAULT_PICK, label: "Default effort" },
+                  ...TASK_EFFORTS.map((e) => ({ value: e as string, label: EFFORT_LABELS[e] })),
+                ]}
+              />
+            </span>
           </div>
           {editingDraft && (
             <div className="flex items-center gap-1.5 border-b border-rule px-2.5 py-1 text-[11px] text-muted-foreground">

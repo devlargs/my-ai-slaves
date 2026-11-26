@@ -4,6 +4,7 @@
  */
 import { z } from "zod";
 import { ProviderId } from "./common";
+import { TaskEffort, TaskModel } from "./queue";
 import { LabelColor } from "./repos";
 
 const PromptIds = z.array(z.string());
@@ -210,6 +211,9 @@ export type PromptPreviewRequest = z.infer<typeof PromptPreviewRequest>;
 /** POST /api/tasks */
 export const CreateTaskRequest = PromptPreviewRequest.extend({
   accountOverride: z.string().nullable().optional(),
+  /** Claude Code only: the model and effort for this task's runs (left out = Settings / the CLI's own). */
+  model: TaskModel.nullable().optional(),
+  effort: TaskEffort.nullable().optional(),
   /** Save it as a draft: it sits in the queue and never runs until it's loaded back and queued. */
   draft: z.boolean().optional(),
   /** The draft this replaces (it was loaded into the composer): removed in the same step. */

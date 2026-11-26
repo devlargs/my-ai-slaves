@@ -65,6 +65,8 @@ export function TaskDetail({ task }: { task: TaskView }) {
           {task.extraRepos.length > 0 && <Meta label="also" value={task.extraRepos.map((x) => repoName(x.repo)).join(", ")} />}
           {task.currentAccount && <Meta label="account" value={task.currentAccount} />}
           {task.accountOverride && <Meta label="override" value={task.accountOverride} />}
+          {task.model && <Meta label="model" value={task.model} />}
+          {task.effort && <Meta label="effort" value={task.effort} />}
           {task.checkout && <Meta label="started on" value={`${task.checkout.ref}@${task.checkout.commit.slice(0, 7)}`} />}
           {!task.checkout && task.branch && <Meta label="old branch" value={task.branch.name} />}
           <Meta label="id" value={task.id} />
