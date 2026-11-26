@@ -234,6 +234,8 @@ export function GitGraphDialog({
   // The checked-out commit's row: where a new branch starts.
   const headRow = Math.max(0, rows.findIndex((r) => r.commit.refs.some((ref) => ref === "HEAD" || ref.startsWith("HEAD -> "))));
 
+  const currentBranch = graph?.local.find((b) => b.current) ?? null;
+
   const act = async (action: GitAction, name?: string) => {
     if (action === "branch" && name === undefined) {
       startNaming(null);
@@ -246,7 +248,9 @@ export function GitGraphDialog({
       if (action === "undo") await api.gitUndo(repoId);
       else if (action === "redo") await api.gitRedo(repoId);
       else if (action === "pull") await api.gitPull(repoId, pullMode);
-      else if (action === "stash") await api.gitRefAction(repoId, { op: "stash-save" });
+      else if (action === "push") {
+        if (currentBranch) await api.gitRefAction(repoId, { op: "push", branch: currentBranch.name });
+      } else if (action === "stash") await api.gitRefAction(repoId, { op: "stash-save" });
       else if (action === "pop") {
         const top = graph?.stashes[0];
         if (top) await api.gitRefAction(repoId, { op: "stash-apply", index: top.index, stash: top.hash, pop: true });
@@ -457,6 +461,7 @@ export function GitGraphDialog({
           <div data-hscroll className="scroll-quiet max-lg:col-span-2 max-lg:row-start-2 max-lg:-mr-8 max-lg:overflow-x-auto">
             <GitToolbar
               history={graph?.history ?? null}
+              current={currentBranch}
               hasChanges={!!graph?.wip}
               topStash={graph?.stashes[0]}
               acting={acting}

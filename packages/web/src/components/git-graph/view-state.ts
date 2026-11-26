@@ -171,6 +171,7 @@ export function workingLabel(action: { op: string; ref?: string; branch?: string
       undo: "Undoing",
       redo: "Redoing",
       pull: "Pulling",
+      push: "Pushing",
       stash: "Stashing changes",
       pop: "Popping stash",
       branch: "Creating branch",

@@ -8,7 +8,7 @@ import { CommandError } from "./git";
 import { parseRebasePlan, parseStashList, rebasePlanArgs, STASH_FORMAT } from "./repo-git";
 
 /**
- * The graph toolbar (Undo, Redo, Pull, Branch), the WIP panel (stage, unstage, commit), the right-click
+ * The graph toolbar (Undo, Redo, Pull, Push, Branch), the WIP panel (stage, unstage, commit), the right-click
  * menus, the toolbar's Stash / Pop and the Stashes group (apply, pop, delete, edit message). These are
  * the only places the app changes a repo, and only when you click them (tasks never do). Undo/Redo work like GitKraken's:
  *

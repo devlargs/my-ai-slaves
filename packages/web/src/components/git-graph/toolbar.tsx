@@ -1,8 +1,9 @@
-import type { GitHistory, PullMode, StashEntry } from "@my-ai-slaves/shared";
+import type { GitHistory, LocalBranch, PullMode, StashEntry } from "@my-ai-slaves/shared";
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
   ArrowDownToLineIcon,
+  ArrowUpFromLineIcon,
   ChevronDownIcon,
   GitBranchPlusIcon,
   Loader2Icon,
@@ -25,7 +26,7 @@ export const storedPullMode = (): PullMode => {
   return v && v in PULL_LABELS ? (v as PullMode) : "pull-ff";
 };
 
-export type GitAction = "undo" | "redo" | "pull" | "branch" | "stash" | "pop" | "ref";
+export type GitAction = "undo" | "redo" | "pull" | "push" | "branch" | "stash" | "pop" | "ref";
 
 function ToolButton({
   icon,
@@ -62,9 +63,10 @@ function ToolButton({
   );
 }
 
-/** Undo, Redo, Pull (with its default mode), Branch, Stash and Pop, like GitKraken's toolbar. */
+/** Undo, Redo, Pull (with its default mode), Push, Branch, Stash and Pop, like GitKraken's toolbar. */
 export function GitToolbar({
   history,
+  current,
   hasChanges,
   topStash,
   acting,
@@ -73,6 +75,8 @@ export function GitToolbar({
   onAction,
 }: {
   history: GitHistory | null;
+  /** The checked-out branch, what Push sends; null on a detached HEAD. */
+  current: LocalBranch | null;
   /** The checkout has uncommitted changes (something to stash). */
   hasChanges: boolean;
   /** stash@{0}, what Pop brings back. */
@@ -161,6 +165,20 @@ export function GitToolbar({
           </PopoverContent>
         </Popover>
       </div>
+      <ToolButton
+        icon={<ArrowUpFromLineIcon />}
+        label="Push"
+        title={
+          !current
+            ? "No branch is checked out, nothing to push"
+            : current.upstream
+              ? `Push ${current.name} to ${current.upstream}`
+              : `Push ${current.name} and set its upstream`
+        }
+        busy={acting === "push"}
+        disabled={off || !current}
+        onClick={() => onAction("push")}
+      />
       <ToolButton
         icon={<GitBranchPlusIcon />}
         label="Branch"
