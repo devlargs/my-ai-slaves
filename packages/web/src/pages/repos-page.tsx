@@ -607,7 +607,9 @@ function RepoCard({
           description="Unregisters the repository and deletes its prompts from .data/knowledge. Your repository on disk is not touched."
           confirmLabel="Remove"
           onConfirm={async () => {
-            if (await attempt(api.deleteRepo(repo.id))) onDeleted();
+            // Not attempt(): a refusal (tasks still in the queue) is thrown so the dialog shows it.
+            await api.deleteRepo(repo.id);
+            onDeleted();
           }}
         >
           <Trash2Icon /> <span className="max-sm:sr-only">Remove</span>

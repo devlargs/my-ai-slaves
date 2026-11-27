@@ -347,7 +347,12 @@ export class RepoService {
   async assertRemovable(id: string): Promise<void> {
     await this.get(id);
     const tasks = (await this.stores.queue.read()).tasks.filter((t) => t.repo === id || t.extraRepos.some((x) => x.repo === id));
-    if (tasks.length) throw conflict(`"${id}" still has ${tasks.length} task(s) in the queue. Finish or discard them first.`);
+    if (tasks.length) {
+      const names = tasks.map((t) => `"${t.title}" (${t.status})`).join(", ");
+      throw conflict(
+        `"${id}" still has ${tasks.length} task(s) in the queue: ${names}. Mark them finished or discard them on the Queue page first.`,
+      );
+    }
   }
 
   async remove(id: string): Promise<void> {
