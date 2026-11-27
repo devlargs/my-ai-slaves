@@ -113,7 +113,7 @@ export function TaskDetail({ task }: { task: TaskView }) {
           <TaskHistory taskId={task.id} version={task.updatedAt} />
         </TabsContent>
       </Tabs>
-      <details className="group mx-4 mb-3 lg:mx-6 rounded-lg border border-rule bg-surface text-xs open:pb-3">
+      <details open className="group mx-4 mb-3 lg:mx-6 rounded-lg border border-rule bg-surface text-xs open:pb-3">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-muted-foreground transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
           <span className="label-mono">Task message</span>
           {task.attachments.length > 0 && (

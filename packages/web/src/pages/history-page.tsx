@@ -143,7 +143,7 @@ export function HistoryPage() {
                 <RotateCcwIcon /> Queue again
               </Button>
             </div>
-            <details className="group rounded-lg border border-rule bg-surface text-xs open:pb-3">
+            <details open className="group rounded-lg border border-rule bg-surface text-xs open:pb-3">
               <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-muted-foreground transition-colors hover:text-ink [&::-webkit-details-marker]:hidden">
                 <span className="label-mono">Task message</span>
                 <span className="ml-auto text-[11px] group-open:hidden">Show</span>
